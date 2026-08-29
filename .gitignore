@@ -1,0 +1,15 @@
+.DS_Store
+.env
+.opencdx-codesign-identity
+*.db
+*.db-shm
+*.db-wal
+*.profraw
+bin/
+dist/
+docker/secrets/*
+!docker/secrets/.gitkeep
+mac/RouterMenu/.build/
+mac/RouterMenu/*.xcodeproj/xcuserdata/
+mac/RouterMenu/*.xcworkspace/xcuserdata/
+OpenCDX.zip

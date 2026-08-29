@@ -1,0 +1,14 @@
+model_provider = "router"
+model_catalog_json = "__CATALOG__"
+
+[model_providers.router]
+name = "OpenCDX Signed-Out Proof"
+base_url = "__BASE_URL__"
+wire_api = "responses"
+supports_websockets = false
+
+[model_providers.router.auth]
+command = "/bin/echo"
+args = ["signed-out-command-token"]
+timeout_ms = 5000
+refresh_interval_ms = 300000

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0e1217">
+  <title>Sign in · OpenCDX Router</title>
+  <link rel="stylesheet" href="/assets/dashboard.css">
+</head>
+<body class="login-page">
+  <main class="login-shell">
+    <div class="brand login-brand">
+      <span class="brand-mark" aria-hidden="true"><img src="/assets/opencdx-router-logo.png" alt=""></span>
+      <span>OpenCDX Router</span>
+    </div>
+    <section class="login-card">
+      <h1 class="login-title">Administrator sign in</h1>
+      <p class="login-dek">Enter the administrator token stored with the deployment secrets.</p>
+      {{if .Error}}<p class="login-error" role="alert">{{.Error}}</p>{{end}}
+      <form method="post" action="/admin/login">
+        <div class="field">
+          <label for="token">Administrator token</label>
+          <input class="field-input" id="token" name="token" type="password" autocomplete="current-password" autofocus required>
+        </div>
+        <button class="btn btn-primary login-submit" type="submit">Sign in</button>
+      </form>
+    </section>
+  </main>
+  <script src="/assets/dashboard.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0e1217">
+  <title>OpenCDX Router</title>
+  <link rel="stylesheet" href="/assets/dashboard.css">
+  <style>[hidden]{display:none!important}</style>
+</head>
+<body data-page="home">
+<div class="app">
+  <header class="topbar">
+    <div class="topbar-brand">
+      <button class="icon-btn menu-btn" type="button" data-menu-toggle aria-label="Open navigation">
+        <span class="material-symbols-outlined" aria-hidden="true">menu</span>
+      </button>
+      <button class="brand" type="button" data-tab-shortcut="home" aria-label="Open Telemetry">
+        <span class="brand-mark" aria-hidden="true"><img src="/assets/opencdx-router-logo.png" alt=""></span>
+        <span>OpenCDX Router</span>
+      </button>
+    </div>
+  </header>
+
+  <nav class="sidebar" aria-label="Primary navigation">
+    <div class="nav-tabs" role="tablist" aria-orientation="vertical">
+      <div class="nav-group">
+      <div class="nav-label">Observe</div>
+      <button class="tab" id="home-tab" type="button" role="tab" aria-controls="home" aria-selected="true" data-tab="home">
+        <span class="material-symbols-outlined nav-icon" aria-hidden="true">bar_chart</span>
+        <span>Telemetry</span>
+      </button>
+      </div>
+      <div class="nav-group">
+      <div class="nav-label">Route</div>
+      <button class="tab" id="accounts-tab" type="button" role="tab" aria-controls="accounts" aria-selected="false" tabindex="-1" data-tab="accounts">
+        <span class="material-symbols-outlined nav-icon" aria-hidden="true">person</span>
+        <span>OpenAI accounts</span>
+      </button>
+      <button class="tab" id="providers-tab" type="button" role="tab" aria-controls="providers" aria-selected="false" tabindex="-1" data-tab="providers">
+        <span class="material-symbols-outlined nav-icon" aria-hidden="true">power</span>
+        <span>Providers</span>
+      </button>
+      </div>
+      <div class="nav-group">
+      <div class="nav-label">Control</div>
+      <button class="tab" id="devices-tab" type="button" role="tab" aria-controls="devices" aria-selected="false" tabindex="-1" data-tab="devices">
+        <span class="material-symbols-outlined nav-icon" aria-hidden="true">desktop_windows</span>
+        <span>Devices</span>
+      </button>
+      <button class="tab" id="catalog-tab" type="button" role="tab" aria-controls="catalog" aria-selected="false" tabindex="-1" data-tab="catalog">
+        <span class="material-symbols-outlined nav-icon" aria-hidden="true">tune</span>
+        <span>Catalog</span>
+      </button>
+      </div>
+    </div>
+    <div class="rail-foot">
+      <div class="rail-actions" aria-label="Session controls">
+        <button class="icon-btn" type="button" data-theme-toggle aria-label="Use light theme" data-tooltip="Use light theme">
+          <span class="material-symbols-outlined theme-icon theme-icon-sun" aria-hidden="true">light_mode</span>
+          <span class="material-symbols-outlined theme-icon theme-icon-moon" aria-hidden="true">dark_mode</span>
+        </button>
+        <form class="inline" method="post" action="/admin/logout">
+          <input type="hidden" name="csrf" value="{{.CSRF}}">
+          <button class="icon-btn" type="submit" aria-label="Sign out" data-tooltip="Sign out">
+            <span class="material-symbols-outlined" aria-hidden="true">logout</span>
+          </button>
+        </form>
+      </div>
+    </div>
+  </nav>
+  <div class="mobile-backdrop" data-mobile-backdrop></div>
+
+  <main class="workspace" id="content">
+    <div class="workspace-inner">
+      {{if .Message}}<div class="flash {{if .MessageError}}error{{end}}" role="status" data-flash><span>{{.Message}}</span><button class="flash-dismiss" type="button" data-flash-dismiss aria-label="Dismiss notification" title="Dismiss">&times;</button></div>{{end}}
+
+      <div id="home" role="tabpanel" aria-labelledby="home-tab" data-tab-panel="home" data-telemetry>
+        <section class="page-head">
+          <div>
+            <h1 class="page-title">Telemetry</h1>
+            <p class="page-dek">Routed work and token volume across connected accounts.</p>
+          </div>
+          <div class="page-actions"><button class="btn btn-secondary" type="button" data-export-telemetry disabled>Export CSV</button></div>
+        </section>
+
+        <section class="telemetry-controls">
+          <div class="toolbar">
+            <div class="segmented" role="group" aria-label="Usage range">
+              <button class="segment" type="button" data-range-preset="today">24h</button>
+              <button class="segment" type="button" data-range-preset="week">7d</button>
+              <button class="segment" type="button" data-range-preset="thirty">30d</button>
+              <button class="segment" type="button" data-range-preset="year">1y</button>
+              <button class="segment active" type="button" data-range-preset="all">All</button>
+              <button class="segment" type="button" data-range-preset="custom" aria-haspopup="dialog" aria-controls="custom-date-range" aria-expanded="false">Custom</button>
+            </div>
+            <select class="sr-only" data-telemetry-range aria-label="Telemetry time range">
+              <option value="today">Today</option>
+              <option value="week">Last 7 days</option>
+              <option value="thirty">Last 30 days</option>
+              <option value="month">This month</option>
+              <option value="year">This year</option>
+              <option value="all" selected>All time</option>
+              <option value="custom">Custom range</option>
+            </select>
+            <div class="toolbar-group">
+              <label class="muted" for="breakdown">Break down by</label>
+              <select class="select" id="breakdown" data-breakdown-mode>
+                <option value="tokens">Tokens</option>
+                <option value="requests">Requests</option>
+              </select>
+            </div>
+          </div>
+          <div class="date-popover" id="custom-date-range" data-custom-range role="dialog" aria-modal="false" aria-labelledby="custom-date-range-title" hidden>
+            <div class="date-popover-head">
+              <strong id="custom-date-range-title">Custom range</strong>
+              <button class="date-popover-close" type="button" data-close-custom-range aria-label="Close custom date range" title="Close">&times;</button>
+            </div>
+            <div class="date-popover-fields">
+              <label><span>From</span><input class="date-input" type="date" data-range-start></label>
+              <label><span>To</span><input class="date-input" type="date" data-range-end></label>
+            </div>
+            <p class="range-error" data-range-error hidden></p>
+            <div class="date-popover-actions">
+              <button class="btn btn-ghost" type="button" data-close-custom-range>Cancel</button>
+              <button class="btn btn-primary" type="button" data-apply-range>Apply range</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="metric-strip telemetry-metric-strip">
+          <div class="metric" title="Individual upstream model inference calls, including tool loops and subagents."><div class="metric-label">Routed requests</div><div class="metric-value num" data-metric="requests">—</div><div class="metric-note">Across all accounts</div></div>
+          <div class="metric" title="Input tokens processed, including cached context, plus output tokens."><div class="metric-label">Total tokens</div><div class="metric-value num" data-metric="tokens">—</div><div class="metric-note">Input + output</div></div>
+          <div class="metric"><div class="metric-label">Models used</div><div class="metric-value num" data-metric="models">—</div><div class="metric-note">In selected range</div></div>
+        </section>
+
+        <div class="telemetry-layout">
+          <section class="section">
+            <div class="section-head"><div><h2 class="section-title" data-chart-title>Model usage by tokens</h2><p class="section-meta" data-chart-meta>Loading selected range…</p></div></div>
+            <div class="chart-stack">
+              <div class="chart-scroll"><div class="chart-shell" data-usage-chart="tokens"><div class="telemetry-loading">Loading token usage…</div></div></div>
+              <div class="activity-calendar">
+                <div class="activity-head"><div><h3>Routing activity</h3><p>Last 12 months · daily routed requests</p></div></div>
+                <div data-heatmap><div class="telemetry-loading">Loading activity…</div></div>
+              </div>
+            </div>
+          </section>
+          <section class="section model-breakdown-section">
+            <div class="section-head"><div><h2 class="section-title">Model breakdown</h2><p class="section-meta" data-breakdown-total>Selected range</p></div></div>
+            <ol class="breakdown" data-model-breakdown><li class="breakdown-empty">Loading models…</li></ol>
+          </section>
+        </div>
+      </div>
+
+      <div id="accounts" role="tabpanel" aria-labelledby="accounts-tab" data-tab-panel="accounts" hidden>
+        <section class="page-head">
+          <div><h1 class="page-title">OpenAI accounts</h1><p class="page-dek">Route work across account quotas and manage credentials without exposing them.</p></div>
+          <div class="page-actions"><a class="btn btn-secondary" href="opencdx://oauth/openai/start">Connect account</a></div>
+        </section>
+
+        <section class="metric-strip">
+          <div class="metric"><div class="metric-label">Connected</div><div class="metric-value num">{{number (len .Accounts)}}</div><div class="metric-note">{{number .ReadyAccountCount}} ready to route</div></div>
+          <div class="metric"><div class="metric-label">Primary route</div><div class="metric-value metric-value-display">{{if .PrimaryAccountPlan}}{{.PrimaryAccountPlan}}{{else}}—{{end}}</div><div class="metric-note">{{if .PrimaryAccountEmail}}{{.PrimaryAccountEmail}}{{else}}No primary account{{end}}</div></div>
+          <div class="metric"><div class="metric-label">Nearest reset</div><div class="metric-value num">{{if .NearestResetDate}}{{.NearestResetDate}}{{else}}—{{end}}</div><div class="metric-note">{{if .NearestResetTime}}{{.NearestResetTime}} local time{{else}}No reset reported{{end}}</div></div>
+          <div class="metric"><div class="metric-label">Credential health</div><div class="metric-value"><span class="state {{if .AccountsHealthy}}good{{else}}warn{{end}}">{{if .AccountsHealthy}}Ready{{else}}Needs attention{{end}}</span></div><div class="metric-note">Current account state</div></div>
+        </section>
+
+        <section class="section">
+          <div class="account-list" data-account-list role="list">
+            {{range .Accounts}}
+            <article class="account-row" data-account-id="{{.ID}}" data-account-primary="{{if .Primary}}true{{else}}false{{end}}" role="listitem">
+              <div class="account-order-controls">
+                <button class="drag-handle" type="button" data-account-drag aria-label="Reorder {{.MaskedEmail}}" data-tooltip="Drag to change routing priority" aria-keyshortcuts="ArrowUp ArrowDown"><span class="material-symbols-outlined" aria-hidden="true">drag_indicator</span></button>
+                {{if .Primary}}
+                <span class="icon-btn account-primary-star is-primary" role="img" aria-label="Primary account" data-tooltip="Primary account"><span class="material-symbols-outlined material-symbols-filled" aria-hidden="true">star</span></span>
+                {{else}}
+                <form class="inline" method="post" action="/admin/accounts/{{.ID}}/primary"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="accounts"><button class="icon-btn account-primary-star" type="submit" aria-label="Make {{.MaskedEmail}} primary" data-tooltip="Make primary" aria-pressed="false"><span class="material-symbols-outlined" aria-hidden="true">star</span></button></form>
+                {{end}}
+              </div>
+              <div class="account-summary">
+                <div class="account-identity"><div class="account-name">{{.MaskedEmail}}</div><div class="account-sub">{{if .Primary}}Primary{{else}}Fallback{{end}} · {{.Plan}} plan{{if gt .ResetCredits 0}} · {{number .ResetCredits}} reset credits{{end}}</div></div>
+                <div class="account-reset"><div class="state {{if .Paused}}warn{{else if eq .Status "ready"}}good{{else}}bad{{end}}">{{if .Paused}}Paused{{else}}{{.Status}}{{end}}</div>{{range .Quotas}}{{if eq .Name "Codex"}}<div class="account-sub">{{if .Reset}}Codex resets {{.Reset}}{{else}}Reset time unavailable{{end}}</div>{{end}}{{end}}</div>
+                <div class="detail-actions">
+                  <form class="inline" method="post" action="/admin/accounts/{{.ID}}/{{if .Paused}}resume{{else}}pause{{end}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="accounts"><button class="icon-btn btn-secondary" type="submit" aria-label="{{if .Paused}}Resume routing{{else}}Pause routing{{end}}" title="{{if .Paused}}Resume routing{{else}}Pause routing{{end}}"><span class="material-symbols-outlined" aria-hidden="true">{{if .Paused}}play_arrow{{else}}pause{{end}}</span></button></form>
+                  <form class="inline" method="post" action="/admin/accounts/{{.ID}}/delete" data-confirm="Remove credentials for {{.MaskedEmail}}? This account will no longer be available for routing."><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="accounts"><button class="icon-btn btn-danger" type="submit" aria-label="Delete account {{.MaskedEmail}}" title="Delete account"><span class="material-symbols-outlined" aria-hidden="true">delete</span></button></form>
+                </div>
+              </div>
+              <div class="account-body">
+                <div class="account-quotas">
+                  {{range .Quotas}}<div class="quota-item" title="{{if .Reset}}{{.Name}} resets {{.Reset}}{{end}}"><div class="quota-head"><span>{{.Name}}</span><span class="quota-value">{{printf "%.0f" .Remaining}}%</span></div><div class="quota-track" role="progressbar" aria-label="{{.Name}} allowance remaining" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{printf "%.0f" .Remaining}}"><span style="width:{{printf "%.2f" .Remaining}}%"></span></div></div>{{else}}<span class="muted">No quota windows reported.</span>{{end}}
+                </div>
+                <div class="model-list" data-model-list>{{range .VisibleModels}}<code>{{.}}</code>{{end}}{{range .MoreModels}}<code data-extra-model hidden>{{.}}</code>{{end}}{{if .MoreModels}}<button class="btn btn-ghost btn-small" type="button" data-show-models>+{{number (len .MoreModels)}} more</button>{{end}}{{if not .VisibleModels}}<span class="muted">No entitled models reported.</span>{{end}}</div>
+                {{if .LastError}}<p class="account-error">{{.LastError}}</p>{{end}}
+              </div>
+            </article>
+            {{else}}<p class="empty">No account has completed router-owned browser login yet.</p>{{end}}
+          </div>
+          <form method="post" action="/admin/accounts/reorder" data-account-order-form hidden><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="return_tab" value="accounts"><span data-account-order-fields></span></form>
+        </section>
+      </div>
+
+      <div id="providers" role="tabpanel" aria-labelledby="providers-tab" data-tab-panel="providers" hidden>
+        <section class="page-head">
+          <div><h1 class="page-title">Providers</h1><p class="page-dek">Connection health and routing endpoints for non-OpenAI models.</p></div>
+          <div class="page-actions"><form class="inline" method="post" action="/admin/refresh" data-refresh><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="return_tab" value="providers"><button class="btn btn-secondary" type="submit">Refresh providers</button></form></div>
+        </section>
+
+        <section class="metric-strip">
+          <div class="metric"><div class="metric-label">Configured</div><div class="metric-value num">{{number .ConfiguredProviderCount}}</div><div class="metric-note">Enabled provider routes</div></div>
+          <div class="metric"><div class="metric-label">Healthy</div><div class="metric-value num">{{number .HealthyProviderCount}}</div><div class="metric-note">{{if .ProvidersChecked}}Checked {{.ProvidersChecked}}{{else}}Not checked yet{{end}}</div></div>
+          <div class="metric"><div class="metric-label">Discovered models</div><div class="metric-value num">{{number .ProviderModelCount}}</div><div class="metric-note">Provider catalog only</div></div>
+          <div class="metric"><div class="metric-label">Connections</div><div class="metric-value num">{{number (len .Providers)}}</div><div class="metric-note">Available to configure</div></div>
+        </section>
+
+        <section class="section">
+          <div class="provider-list">
+            {{range .Providers}}
+            <article class="provider-entry">
+              <div class="provider-row">
+                <div><div class="provider-name">{{.DisplayName}}</div><div class="account-sub">{{.Description}}</div></div>
+                <div class="endpoint">{{.BaseURL}}{{if and (eq .Name "openrouter") .HasCredential}} · key stored securely{{end}}</div>
+                <div class="provider-check"><span class="state {{if eq .Health "healthy"}}good{{else if eq .Health "error"}}bad{{else}}warn{{end}}">{{.Health}}</span><div class="account-sub">Checked {{.Updated}}</div></div>
+                <div class="row-actions"><button class="btn btn-ghost" type="submit" form="provider-{{.Name}}">Test</button><button class="icon-btn btn-secondary provider-config-trigger" type="button" data-provider-toggle="provider-config-{{.Name}}" aria-controls="provider-{{.Name}}" aria-expanded="false" aria-label="Configure provider" data-tooltip="Configure provider"><span class="material-symbols-outlined" aria-hidden="true">settings</span></button></div>
+              </div>
+              <form class="provider-config" id="provider-{{.Name}}" method="post" action="/admin/providers/{{.Name}}" data-provider-config="provider-config-{{.Name}}" hidden>
+                <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="providers">
+                <div class="provider-config-head"><div><h2 class="section-title">Configure {{.DisplayName}}</h2><p class="section-meta">Saving validates the connection and refreshes its catalog.</p></div><label class="switch"><input type="checkbox" name="enabled" {{if .Enabled}}checked{{end}}> Enabled</label></div>
+                <div class="provider-config-grid">
+                  <div class="field"><label for="base-url-{{.Name}}">Base URL</label><input class="field-input num" id="base-url-{{.Name}}" type="url" name="base_url" value="{{.BaseURL}}" spellcheck="false" required></div>
+                  {{if eq .Name "openrouter"}}<div class="field"><label for="api-key-{{.Name}}">API key</label><input class="field-input" id="api-key-{{.Name}}" type="password" name="api_key" autocomplete="new-password" placeholder="{{if .HasCredential}}Stored securely · enter a value to replace{{else}}Enter OpenRouter API key{{end}}"><span class="field-hint">The credential is encrypted at rest and is never shown again.</span></div>{{end}}
+                </div>
+                {{if .LastError}}<p class="provider-error">{{.LastError}}</p>{{end}}
+                <div class="provider-config-actions">{{if and (eq .Name "openrouter") .HasCredential}}<button class="btn btn-danger" type="submit" form="remove-provider-{{.Name}}">Remove credential</button>{{end}}<button class="btn btn-primary" type="submit">Save &amp; test connection</button></div>
+              </form>
+              {{if and (eq .Name "openrouter") .HasCredential}}<form class="inline" id="remove-provider-{{.Name}}" method="post" action="/admin/providers/{{.Name}}/remove-secret" data-confirm="Remove the stored OpenRouter credential? This disables the provider and removes its catalog."><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="providers"></form>{{end}}
+            </article>
+            {{else}}<p class="empty">No configurable providers are available.</p>{{end}}
+          </div>
+          <p class="section-note">Testing validates authentication, model discovery, and provider health without changing routing beyond the saved configuration.</p>
+        </section>
+      </div>
+
+      <div id="devices" role="tabpanel" aria-labelledby="devices-tab" data-tab-panel="devices" hidden>
+        <section class="page-head"><div><h1 class="page-title">Devices</h1><p class="page-dek">Review helpers with access to this router and revoke anything you no longer recognize.</p></div></section>
+        <section class="section">
+          {{if .Devices}}<div class="device-list">
+            {{range .Devices}}<article class="device-row">
+              <div><div class="account-name">{{.Name}}</div><div class="account-sub">{{if .Laptop}}Desktop helper{{else}}Router helper{{end}}</div></div>
+              <div class="device-seen"><span class="state {{if eq .Status "approved"}}good{{else if eq .Status "revoked"}}bad{{else}}warn{{end}}">{{.Status}}</span><div class="account-sub">Last seen {{.LastSeen}}</div></div>
+              <div class="device-sync"><div class="muted">Catalog synced</div><div class="account-sub num">{{.CatalogSynced}}</div></div>
+              <div class="row-actions">{{if eq .Status "pending"}}<form class="inline" method="post" action="/admin/devices/{{.ID}}/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="devices"><button class="btn btn-primary" type="submit">Approve</button></form><form class="inline" method="post" action="/admin/devices/{{.ID}}/reject" data-confirm="Reject enrollment for {{.Name}}?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="devices"><button class="btn btn-danger" type="submit">Reject</button></form>{{end}}{{if eq .Status "approved"}}<form class="inline" method="post" action="/admin/devices/{{.ID}}/revoke" data-confirm="Revoke access for {{.Name}}? The helper will need to enroll again."><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="devices"><button class="btn btn-danger" type="submit">Revoke</button></form>{{end}}</div>
+            </article>{{end}}
+          </div>{{else}}<p class="empty">No helper has requested enrollment.</p>{{end}}
+          <p class="section-note">Revoking ends this helper’s session immediately. The device must be approved again before it can read the catalog or route work.</p>
+        </section>
+      </div>
+
+      <div id="catalog" role="tabpanel" aria-labelledby="catalog-tab" data-tab-panel="catalog" hidden>
+        <section class="page-head">
+          <div><h1 class="page-title">Catalog</h1><p class="page-dek">Discovered provider models and the reason each model can—or cannot—route.</p></div>
+          <div class="page-actions"><form class="inline" method="post" action="/admin/refresh" data-refresh><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="return_tab" value="catalog"><button class="btn btn-secondary" type="submit"><span class="material-symbols-outlined action-symbol" aria-hidden="true">refresh</span>Refresh catalog</button></form></div>
+        </section>
+        <section>
+          <div class="toolbar">
+            <div class="toolbar-group toolbar-grow"><label class="sr-only" for="model-search">Search models</label><input class="search" id="model-search" data-catalog-filter placeholder="Search provider or model" autocomplete="off"></div>
+            <div class="toolbar-group"><label class="muted" for="state-filter">State</label><select class="select" id="state-filter" data-state-filter><option value="all">All · {{number (len .Models)}}</option><option value="available">Available · {{number .AvailableModelCount}}</option><option value="excluded">Excluded · {{number .ExcludedModelCount}}</option></select></div>
+          </div>
+        </section>
+        <section class="section">
+          {{if .Conflicts}}<aside class="conflicts"><h3>Native definition conflicts</h3><p class="muted">Two OpenAI accounts returned different complete definitions for the same model. The primary account’s definition was retained without merging fields.</p>{{range .Conflicts}}<p><strong>{{.Model}}</strong> · {{.Detail}}</p>{{end}}</aside>{{end}}
+          {{if .Models}}<div class="data-scroll catalog-scroll" tabindex="0" aria-label="All discovered models; scroll to browse"><table class="data-table" data-sort-table><thead><tr><th aria-sort="none"><button type="button" data-sort="provider" data-direction="none">Provider</button></th><th aria-sort="none"><button type="button" data-sort="model" data-direction="none">Model</button></th><th aria-sort="none"><button type="button" data-sort="state" data-direction="none">State</button></th><th>Detail</th></tr></thead><tbody>{{range .Models}}<tr data-model-row data-provider="{{.Provider}}" data-model="{{.Model}}" data-state="{{.State}}"><td>{{.Provider}}</td><td class="num">{{.Model}}</td><td><span class="state {{if eq .State "available"}}good{{else}}bad{{end}}">{{.State}}</span></td><td class="catalog-detail">{{if .Detail}}{{.Detail}}{{else}}—{{end}}</td></tr>{{end}}</tbody></table></div><p class="empty catalog-empty" data-catalog-empty hidden>No models match these filters.</p>{{else}}<p class="empty">No provider catalog has been fetched.</p>{{end}}
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="/assets/dashboard.js" defer></script>
+</body>
+</html>

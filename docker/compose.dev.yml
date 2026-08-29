@@ -1,0 +1,29 @@
+services:
+  router:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${OPENCODEX_DEV_BIND:-127.0.0.1}:8080:8080"
+    environment:
+      OPENCODEX_LISTEN: ":8080"
+      OPENCODEX_PUBLIC_URL: "${OPENCODEX_PUBLIC_URL:-http://127.0.0.1:8080}"
+      OPENCODEX_INSECURE_DEV: "true"
+      OPENCODEX_DATABASE: "/var/lib/opencdx/router.db"
+      OPENCODEX_MASTER_KEY_FILE: "/run/secrets/master_key"
+      OPENCODEX_ADMIN_TOKEN_FILE: "/run/secrets/admin_token"
+    secrets:
+      - master_key
+      - admin_token
+    volumes:
+      - router_data:/var/lib/opencdx
+
+secrets:
+  master_key:
+    file: ./secrets/master_key
+  admin_token:
+    file: ./secrets/admin_token
+
+volumes:
+  router_data:

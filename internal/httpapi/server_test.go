@@ -1,0 +1,313 @@
+package httpapi
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"html/template"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	secure "github.com/opencdx/opencdx/internal/crypto"
+	"github.com/opencdx/opencdx/internal/routing"
+	"github.com/opencdx/opencdx/internal/storage"
+	"github.com/opencdx/opencdx/internal/usagehistory"
+	site "github.com/opencdx/opencdx/web"
+)
+
+func TestAPIErrorRedaction(t *testing.T) {
+	for _, message := range []string{
+		"refresh token rejected", "Bearer abc", "credential failed", "API key denied", "authorization code invalid", "account ID changed",
+	} {
+		redacted := safeError(errors.New(message))
+		if strings.Contains(strings.ToLower(redacted), "token") || strings.Contains(strings.ToLower(redacted), "bearer") || strings.Contains(strings.ToLower(redacted), "api key") || strings.Contains(strings.ToLower(redacted), "account id") {
+			t.Fatalf("sensitive error was not redacted: %q", redacted)
+		}
+	}
+}
+
+func TestClientVersionNormalization(t *testing.T) {
+	if value := normalizedVersion("0.150.1"); value != "0.150.1" {
+		t.Fatalf("valid Codex version changed to %q", value)
+	}
+	for _, input := range []string{"", "codex-cli 0.150.1", "background", "1.2"} {
+		if value := normalizedVersion(input); value != "0.0.0" {
+			t.Fatalf("invalid client version %q became %q", input, value)
+		}
+	}
+}
+
+func TestDeviceAcknowledgesCatalogRestart(t *testing.T) {
+	registry := routing.NewStatusRegistry()
+	registry.Update("device-a", func(status *routing.RouteStatus) {
+		status.RestartRequired = true
+	})
+	server := &Server{status: registry}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/catalog/restart-ack", nil)
+	request = request.WithContext(context.WithValue(request.Context(), deviceContextKey{}, storage.Device{ID: "device-a"}))
+	response := httptest.NewRecorder()
+	server.acknowledgeCatalogRestart(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("acknowledgement status = %d", response.Code)
+	}
+	if registry.Get("device-a").RestartRequired {
+		t.Fatal("router restart reminder remained set after acknowledgement")
+	}
+}
+
+func TestFormatIntegerUsesApostropheGrouping(t *testing.T) {
+	for value, want := range map[int]string{
+		0:         "0",
+		12:        "12",
+		1999:      "1'999",
+		123456789: "123'456'789",
+		-42000:    "-42'000",
+	} {
+		if got := formatInteger(value); got != want {
+			t.Fatalf("formatInteger(%d) = %q, want %q", value, got, want)
+		}
+	}
+}
+
+func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
+	templates, err := template.New("site").Funcs(template.FuncMap{"number": formatInteger}).ParseFS(site.Templates, "templates/*.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := dashboardPage{
+		Message: "Settings saved",
+		Accounts: []accountView{
+			{
+				ID: "account", MaskedEmail: "a***@example.com", Plan: "pro", Status: "ready", Primary: true,
+				VisibleModels: []string{"gpt-test"}, MoreModels: []string{"gpt-test-2"},
+				Quotas: []quotaView{{Name: "Codex", Remaining: 80}, {Name: "Codex Spark", Remaining: 60, Spark: true}},
+			},
+			{ID: "fallback", MaskedEmail: "b***@example.com", Plan: "plus", Status: "ready"},
+		},
+		Providers:           []providerView{{Name: "openrouter", DisplayName: "OpenRouter", Description: "OpenRouter API", Health: "healthy", HasCredential: true}},
+		Devices:             []deviceView{{ID: "device", Name: "MacBook Pro", Status: "approved", Laptop: true}},
+		Models:              []modelView{{Provider: "openrouter", Model: "example/model", State: "available"}},
+		Conflicts:           []conflictView{{Model: "gpt-test", Detail: "definitions differ"}},
+		AvailableModelCount: 1,
+	}
+	var output strings.Builder
+	if err = templates.ExecuteTemplate(&output, "dashboard.html", page); err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{
+		`data-tab="home"`, `data-tab="accounts"`, `data-tab="providers"`, `data-tab="devices"`, `data-tab="catalog"`,
+		`class="sidebar"`, `data-telemetry`, `data-telemetry-range`, `data-usage-chart="tokens"`, `model-breakdown-section`,
+		`data-custom-range`, `role="dialog"`, `data-flash-dismiss`,
+		`class="rail-actions"`, `data-theme-toggle`, `aria-label="Sign out"`, `material-symbols-outlined`,
+		`href="opencdx://oauth/openai/start">Connect account`, `provider-config-trigger`, `Refresh catalog`,
+		`account-order-controls`, `account-primary-star`, `material-symbols-filled`, `/admin/accounts/fallback/primary`,
+		`data-account-list`, `data-account-drag`, `/admin/accounts/reorder`,
+		"[hidden]{display:none!important}", "Codex Spark", "gpt-test-2", `data-sort="provider"`, `data-sort="model"`, `data-sort="state"`,
+	} {
+		if !strings.Contains(output.String(), marker) {
+			t.Fatalf("dashboard is missing %q", marker)
+		}
+	}
+	if strings.Contains(output.String(), "cost") || strings.Contains(output.String(), "price") {
+		t.Fatal("dashboard still exposes removed price estimation")
+	}
+	if strings.Contains(output.String(), "Router online") || strings.Contains(output.String(), "session active") {
+		t.Fatal("dashboard still exposes the removed router status footer")
+	}
+	if strings.Contains(output.String(), "<svg") {
+		t.Fatal("dashboard template still embeds hand-authored SVG icons")
+	}
+	if strings.Contains(output.String(), `class="account-detail-label"`) || strings.Contains(output.String(), `>Make primary</button>`) {
+		t.Fatal("dashboard still renders removed account-row labels or the text primary action")
+	}
+	headerEnd := strings.Index(output.String(), "</header>")
+	if headerEnd < 0 {
+		t.Fatal("dashboard is missing its header")
+	}
+	header := output.String()[:headerEnd]
+	for _, removed := range []string{"Connect account", `data-refresh`, `data-theme-toggle`, `/admin/logout`} {
+		if strings.Contains(header, removed) {
+			t.Fatalf("dashboard header still contains %q", removed)
+		}
+	}
+}
+
+func TestDashboardJavaScriptIsServed(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/assets/dashboard.js", nil)
+	response := httptest.NewRecorder()
+	(&Server{}).routes().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("dashboard asset status = %d", response.Code)
+	}
+	if contentType := response.Header().Get("Content-Type"); !strings.Contains(contentType, "text/javascript") {
+		t.Fatalf("dashboard asset content type = %q", contentType)
+	}
+	bundle := response.Body.String()
+	for _, marker := range []string{"data-sort-table", "pill.hidden = false", "formatNumber", "renderUsageChart(range, report, mode)", "data-flash-dismiss", "prepareModelColors", "const visible = ordered.map", "moveRowAtY", "data-account-order-form"} {
+		if !strings.Contains(bundle, marker) {
+			t.Fatalf("dashboard behavior bundle is missing %q", marker)
+		}
+	}
+	if strings.Contains(bundle, ".toLocaleString(") {
+		t.Fatal("dashboard behavior bundle still delegates numeric grouping to the browser locale")
+	}
+}
+
+func TestAdminAccountOrderPersistsFallbackPriority(t *testing.T) {
+	box, err := secure.NewBox(bytes.Repeat([]byte{0x39}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := storage.Open(":memory:", box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	create := func(stable string) storage.Account {
+		account, _, createErr := store.PutAccount(context.Background(), storage.AccountInput{
+			Credential: storage.OpenAICredential{
+				AccountID: stable, AccessToken: "access-" + stable, RefreshToken: "refresh-" + stable,
+				IDToken: "id-" + stable, ExpiresAt: time.Now().Add(time.Hour),
+			},
+			MaskedEmail: stable + "@masked", Plan: "plus", Status: "ready", EntitledModels: []string{"gpt-test"},
+		}, false)
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		return account
+	}
+	first, second, third := create("first"), create("second"), create("third")
+	form := url.Values{
+		"account_id": {third.ID, first.ID, second.ID},
+		"return_tab": {"accounts"},
+	}
+	request := httptest.NewRequest(http.MethodPost, "/admin/accounts/reorder", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if err = request.ParseForm(); err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	(&Server{store: store}).adminAccountOrder(response, request)
+	if response.Code != http.StatusSeeOther || !strings.Contains(response.Header().Get("Location"), "#accounts") {
+		t.Fatalf("account reorder response = %d %q", response.Code, response.Header().Get("Location"))
+	}
+	accounts, err := store.Accounts(context.Background(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wanted := []string{third.ID, first.ID, second.ID}
+	for index, account := range accounts {
+		if account.ID != wanted[index] || account.Primary != (index == 0) {
+			t.Fatalf("account %d = %s, want %s", index, account.ID, wanted[index])
+		}
+	}
+}
+
+func TestDashboardPresentationAssetsAreServed(t *testing.T) {
+	for _, test := range []struct {
+		path, contentType, marker string
+	}{
+		{path: "/assets/dashboard.css", contentType: "text/css", marker: "--activity-4: #56d364"},
+		{path: "/assets/material-symbols-outlined.woff2", contentType: "font/woff2"},
+		{path: "/assets/opencdx-router-logo.png", contentType: "image/png"},
+	} {
+		request := httptest.NewRequest(http.MethodGet, test.path, nil)
+		response := httptest.NewRecorder()
+		(&Server{}).routes().ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("asset %s status = %d", test.path, response.Code)
+		}
+		if contentType := response.Header().Get("Content-Type"); !strings.Contains(contentType, test.contentType) {
+			t.Fatalf("asset %s content type = %q", test.path, contentType)
+		}
+		if test.marker != "" && !strings.Contains(response.Body.String(), test.marker) {
+			t.Fatalf("asset %s is missing %q", test.path, test.marker)
+		}
+	}
+}
+
+func TestRedirectMessagePreservesSelectedTab(t *testing.T) {
+	for _, test := range []struct {
+		name, submitted, expected string
+	}{
+		{name: "valid tab", submitted: "providers", expected: "#providers"},
+		{name: "invalid tab", submitted: "unexpected", expected: "#home"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			form := url.Values{"return_tab": {test.submitted}}
+			request := httptest.NewRequest(http.MethodPost, "/admin/refresh", strings.NewReader(form.Encode()))
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			response := httptest.NewRecorder()
+			redirectMessage(response, request, "updated", false)
+			if location := response.Header().Get("Location"); !strings.HasSuffix(location, test.expected) {
+				t.Fatalf("redirect location = %q, expected suffix %q", location, test.expected)
+			}
+		})
+	}
+}
+
+func TestDeviceCanReconcilePrivacyMinimalUsageSnapshot(t *testing.T) {
+	box, err := secure.NewBox(bytes.Repeat([]byte{0x52}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := storage.Open(":memory:", box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	enrollment, err := store.CreateEnrollment(context.Background(), "History Mac")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.ApproveDevice(context.Background(), enrollment.DeviceID); err != nil {
+		t.Fatal(err)
+	}
+	approved, err := store.EnrollmentStatus(context.Background(), enrollment.DeviceID, enrollment.EnrollmentSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot := usagehistory.Snapshot{
+		Version: usagehistory.SnapshotVersion, GeneratedAt: "2026-08-28T18:00:00Z",
+		FilesScanned: 3, EventsImported: 2,
+		Rows: []usagehistory.Row{{
+			Day: "2026-08-28", Provider: "openai", Model: "gpt-test", Requests: 2,
+			InputTokens: 100, CachedInputTokens: 25, OutputTokens: 30, ReasoningOutputTokens: 10,
+		}},
+	}
+	body, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{store: store}
+	handler := server.device(http.HandlerFunc(server.reconcileUsage))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/telemetry/reconcile", bytes.NewReader(body))
+	request.Header.Set("Authorization", "Bearer "+approved.DeviceToken)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("reconciliation status = %d, body=%s", response.Code, response.Body.String())
+	}
+	usage, err := store.Usage(context.Background(), time.Time{})
+	if err != nil || len(usage) != 1 || usage[0].CachedInputTokens != 25 || usage[0].ReasoningOutputTokens != 10 {
+		t.Fatalf("reconciled usage = %#v, %v", usage, err)
+	}
+
+	// The strict wire schema prevents conversation-shaped fields from being
+	// accepted accidentally in a future helper implementation.
+	withPrompt := bytes.TrimSuffix(body, []byte("}"))
+	withPrompt = append(withPrompt, []byte(`,"prompts":["must never be accepted"]}`)...)
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/telemetry/reconcile", bytes.NewReader(withPrompt))
+	request.Header.Set("Authorization", "Bearer "+approved.DeviceToken)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("conversation-shaped payload status = %d", response.Code)
+	}
+}
