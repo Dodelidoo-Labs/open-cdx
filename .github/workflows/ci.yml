@@ -45,6 +45,19 @@ jobs:
           OPENCODEX_CODESIGN_IDENTITY: '-'
         run: |
           ./scripts/build-macos-app.sh
+          SPARKLE_FRAMEWORK="dist/OpenCDX Router.app/Contents/Frameworks/Sparkle.framework"
+          SPARKLE_VERSION_DIR="$SPARKLE_FRAMEWORK/Versions/Current"
+          test -L "$SPARKLE_FRAMEWORK/Versions/Current"
+          lipo "$SPARKLE_VERSION_DIR/Sparkle" -verify_arch arm64 x86_64
+          lipo "$SPARKLE_VERSION_DIR/Autoupdate" -verify_arch arm64 x86_64
+          lipo "$SPARKLE_VERSION_DIR/Updater.app/Contents/MacOS/Updater" -verify_arch arm64 x86_64
+          lipo "$SPARKLE_VERSION_DIR/XPCServices/Installer.xpc/Contents/MacOS/Installer" -verify_arch arm64 x86_64
+          lipo "$SPARKLE_VERSION_DIR/XPCServices/Downloader.xpc/Contents/MacOS/Downloader" -verify_arch arm64 x86_64
+          codesign --verify --strict --verbose=2 "$SPARKLE_VERSION_DIR/XPCServices/Installer.xpc"
+          codesign --verify --strict --verbose=2 "$SPARKLE_VERSION_DIR/XPCServices/Downloader.xpc"
+          codesign --verify --strict --verbose=2 "$SPARKLE_VERSION_DIR/Autoupdate"
+          codesign --verify --strict --verbose=2 "$SPARKLE_VERSION_DIR/Updater.app"
+          codesign --verify --strict --verbose=2 "$SPARKLE_FRAMEWORK"
           codesign --verify --deep --strict --verbose=2 "dist/OpenCDX Router.app"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "$(cat VERSION)"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "OpenCDXRouter.icns"
@@ -52,6 +65,10 @@ jobs:
           test -s "dist/OpenCDX Router.app/Contents/Resources/OpenCDXRouter.icns"
           test -s "dist/OpenCDX Router.app/Contents/Resources/Assets.car"
           test -s "dist/OpenCDX Router.app/Contents/Resources/OpenCDXMenuBarTemplate.png"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "https://github.com/Dodelidoo-Labs/open-cdx/releases/latest/download/appcast.xml"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "i+JDg7U+GX4CUOSnzOJXIvoovrLA49cR1Hz3GqgcAzA="
+          test "$(/usr/libexec/PlistBuddy -c 'Print :SUAutomaticallyUpdate' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "false"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :SUEnableSystemProfiling' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "false"
           "dist/OpenCDX Router.app/Contents/Resources/router-helper" version
 
   docker:

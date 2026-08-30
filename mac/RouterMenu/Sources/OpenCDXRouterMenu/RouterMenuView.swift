@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RouterMenuView: View {
     @ObservedObject var model: HelperModel
+    let checkForUpdates: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -78,6 +79,10 @@ struct RouterMenuView: View {
                     MenuActionButton("Settings…", systemImage: "gearshape") {
                         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
                     }
+                }
+
+                MenuActionButton("Check for Updates…", systemImage: "arrow.down.circle") {
+                    checkForUpdates()
                 }
 
                 HStack(spacing: 0) {
