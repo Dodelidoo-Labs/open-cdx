@@ -94,11 +94,21 @@ Use **Add OpenAI Account…** for each account. The browser is forced through a 
 
 After the first catalog sync, choose **Copy Codex Configuration** and paste the snippet into `~/.codex/config.toml` yourself. Restart Codex whenever the menu reports that the catalog changed, then choose **Done** beside the reminder; Codex loads `model_catalog_json` at startup.
 
-After pairing, the app asks once whether to import existing Codex usage history. The scan stays on the Mac and extracts only the UTC day, provider, model, routing classification, request count, and input/cached/cache-write/output/reasoning token counters from `~/.codex/sessions` and `~/.codex/archived_sessions` (or `CODEX_HOME`). Prompt and response records are ignored and the server rejects fields outside the aggregate schema. Reconciliation transactionally replaces existing telemetry and records the import instant. Telemetry keeps ingestion source (`reconciled` or live proxy `routed`) separate from routing classification (`routed` or `native`). The latter is derived from Codex's durable `model_provider = "opencdx"` rollout metadata, so the dashboard's **Group by → Routed / native** view remains accurate after any later full reconciliation. Running reconciliation again replaces both the aggregates and that boundary. Run it at any time with **Reconcile Usage History…** in the menu or:
+After pairing, the app asks once whether to import existing Codex usage history. The menu app explicitly scans the default Codex home at `~/.codex`, then shows the resolved source path plus file and routed/native request counts before asking whether to replace telemetry. The scan stays on the Mac and extracts only the UTC day, provider, model, routing classification, request count, and input/cached/cache-write/output/reasoning token counters from `sessions` and `archived_sessions`. Prompt and response records are ignored and the server rejects fields outside the aggregate schema. Reconciliation transactionally replaces existing telemetry and records the import instant. Telemetry keeps ingestion source (`reconciled` or live proxy `routed`) separate from routing classification (`routed` or `native`). The latter is derived from Codex's durable `model_provider = "opencdx"` rollout metadata, so the dashboard's **Group by → Routed / native** view remains accurate after any later full reconciliation. Running reconciliation again replaces both the aggregates and that boundary. Run it at any time with **Reconcile Usage History…** in the menu or:
 
 ```sh
 router-helper reconcile-usage
 ```
+
+For a custom Codex data directory, select that single history root explicitly from the CLI:
+
+```sh
+router-helper reconcile-usage --codex-home /absolute/path/to/codex-home --dry-run
+# Review the routed/native counts, then replace telemetry:
+router-helper reconcile-usage --codex-home /absolute/path/to/codex-home
+```
+
+OpenCDX does not discover or combine multiple Codex homes automatically. Each reconciliation is a complete replacement from the one selected root, which avoids silently mixing histories that may represent different configuration or authentication contexts.
 
 See [helper and Codex setup](docs/helper-and-codex.md) and [deployment](docs/deployment.md) for the complete runbook.
 

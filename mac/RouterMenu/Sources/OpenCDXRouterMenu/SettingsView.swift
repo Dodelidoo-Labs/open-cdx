@@ -23,11 +23,11 @@ struct SettingsView: View {
                 }
                 Divider()
                 Text("Usage History").font(.headline)
-                Text("Import aggregate request and token counts from local Codex rollouts. Conversation content and credentials never leave this Mac. Reconciliation replaces the router's current telemetry snapshot.")
+                Text("Import aggregate request and token counts from the default Codex home (~/.codex). OpenCDX shows the exact source and routed/native counts before replacement. Conversation content and credentials never leave this Mac.")
                     .font(.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Reconcile Usage History…") { model.requestUsageReconciliation() }
-                    .disabled(!model.status.connected)
+                    .disabled(!model.status.connected || model.usageReconciliationInProgress)
                 if !model.operation.isEmpty {
                     Text(model.operation)
                         .font(.callout)

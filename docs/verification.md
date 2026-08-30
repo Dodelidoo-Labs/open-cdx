@@ -70,10 +70,12 @@ This checklist requires credentials and deliberate browser choices, so it must b
 9. Copy the generated TOML manually into the isolated Codex config and restart Codex.
 10. Confirm `/model` contains the complete entitled native union, native auto-review/safety entries, and only compatible namespaced OpenRouter entries.
 11. Run one native model and one OpenRouter model.
-12. Pause A and confirm a shared entitled model routes through B while an A-only model becomes unavailable.
-13. Restart/recreate the Docker router without deleting its volume and confirm both accounts still refresh and route.
-14. Enroll and approve a second Mac; revoke it and confirm only that helper loses access.
-15. Sign normal Codex/ChatGPT into an unrelated account and confirm the isolated router provider behavior is unchanged.
-16. Run the uninstall script and confirm the Codex executable, native auth, and `~/.codex` content are untouched.
+12. Choose **Reconcile Usage History…**, confirm the preview names the default `~/.codex` source and shows routed/native counts, then cancel and verify telemetry is unchanged.
+13. Run a dry run against the isolated Codex home with `router-helper reconcile-usage --codex-home /absolute/test/home --dry-run`; confirm it reports the routed requests, then run the same command without `--dry-run` and verify the dashboard preserves their routed classification.
+14. Pause A and confirm a shared entitled model routes through B while an A-only model becomes unavailable.
+15. Restart/recreate the Docker router without deleting its volume and confirm both accounts still refresh and route.
+16. Enroll and approve a second Mac; remove it and confirm only that helper loses access and the device row disappears.
+17. Sign normal Codex/ChatGPT into an unrelated account and confirm the isolated router provider behavior is unchanged.
+18. Run the uninstall script and confirm the Codex executable, native auth, and `~/.codex` content are untouched.
 
 Record account labels only as masked values. Never paste tokens, OAuth codes, raw account IDs, prompts, or responses into a test log.

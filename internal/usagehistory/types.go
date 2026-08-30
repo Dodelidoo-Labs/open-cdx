@@ -39,3 +39,32 @@ type Result struct {
 	EventsImported int    `json:"events_imported"`
 	RowsImported   int    `json:"rows_imported"`
 }
+
+// ReconciliationPreview is a compact, local-only summary used to confirm a
+// destructive telemetry replacement. It deliberately omits rollout paths and
+// individual aggregate rows.
+type ReconciliationPreview struct {
+	FilesScanned    int   `json:"files_scanned"`
+	EventsImported  int   `json:"events_imported"`
+	RowsFound       int   `json:"rows_found"`
+	RoutedRequests  int64 `json:"routed_requests"`
+	NativeRequests  int64 `json:"native_requests"`
+	DuplicateEvents int   `json:"duplicate_events_skipped"`
+	MalformedLines  int   `json:"malformed_lines_skipped"`
+}
+
+func Preview(snapshot Snapshot) ReconciliationPreview {
+	preview := ReconciliationPreview{
+		FilesScanned: snapshot.FilesScanned, EventsImported: snapshot.EventsImported,
+		RowsFound: len(snapshot.Rows), DuplicateEvents: snapshot.DuplicateEvents,
+		MalformedLines: snapshot.MalformedLines,
+	}
+	for _, row := range snapshot.Rows {
+		if row.Routing == RoutingRouted {
+			preview.RoutedRequests += row.Requests
+		} else {
+			preview.NativeRequests += row.Requests
+		}
+	}
+	return preview
+}

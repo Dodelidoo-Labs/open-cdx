@@ -67,6 +67,25 @@ Copy it manually into `~/.codex/config.toml`. Do not add `requires_openai_auth =
 
 Codex must restart after a catalog file changes. The menu app and catalog endpoint report this explicitly.
 
+## Reconcile usage history
+
+The menu app previews and imports only the default Codex home at `~/.codex`.
+Before replacement it shows the resolved directory plus scanned-file and
+routed/native request counts. It never discovers or combines other Codex homes.
+
+Use the helper directly when Codex runs with a custom `CODEX_HOME`:
+
+```sh
+router-helper reconcile-usage --codex-home /absolute/path/to/codex-home --dry-run
+# Review the routed/native counts, then replace telemetry:
+router-helper reconcile-usage --codex-home /absolute/path/to/codex-home
+```
+
+The chosen directory is the complete reconciliation source. A successful run
+replaces existing telemetry rather than merging it, so importing a different
+home later also replaces the previous snapshot. Prompts, responses, paths,
+credentials, and account identifiers are never sent to the router.
+
 ## Useful commands
 
 | Command | Effect |
@@ -76,6 +95,7 @@ Codex must restart after a catalog file changes. The menu app and catalog endpoi
 | `router-helper refresh-catalog` | Refresh providers, atomically download catalog |
 | `router-helper refresh-quotas` | Refresh account quotas |
 | `router-helper reconnect` | Recheck remote connectivity |
+| `router-helper reconcile-usage [--codex-home PATH] [--dry-run]` | Preview or replace telemetry from one Codex history root |
 | `router-helper open-dashboard` | Open the configured dashboard |
 | `router-helper quit` | Stop the user helper daemon |
 | `router-helper config` | Print, but never install, the Codex TOML snippet |

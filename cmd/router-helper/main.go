@@ -297,6 +297,7 @@ func reconcileUsageToWithSecrets(configPath string, args []string, output io.Wri
 	codexHome := flags.String("codex-home", "", "Codex data directory (defaults to CODEX_HOME or ~/.codex)")
 	jsonOutput := flags.Bool("json", false, "print the reconciliation result as JSON")
 	dryRun := flags.Bool("dry-run", false, "scan and summarize without replacing router telemetry")
+	previewJSON := flags.Bool("preview-json", false, "print a compact JSON preview without replacing router telemetry")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -314,12 +315,19 @@ func reconcileUsageToWithSecrets(configPath string, args []string, output io.Wri
 	if snapshot.EventsImported == 0 || len(snapshot.Rows) == 0 {
 		return errors.New("no importable Codex usage history was found; existing telemetry was left unchanged")
 	}
+	if *previewJSON {
+		encoded, _ := json.Marshal(usagehistory.Preview(snapshot))
+		fmt.Fprintln(output, string(encoded))
+		return nil
+	}
 	if *dryRun {
 		if *jsonOutput {
 			encoded, _ := json.Marshal(snapshot)
 			fmt.Fprintln(output, string(encoded))
 		} else {
-			fmt.Fprintf(output, "Found %s. Prompts and responses were not read or exported.\n", snapshot.Summary())
+			preview := usagehistory.Preview(snapshot)
+			fmt.Fprintf(output, "Found %s: %d routed and %d native requests. Prompts and responses were not read or exported.\n",
+				snapshot.Summary(), preview.RoutedRequests, preview.NativeRequests)
 		}
 		return nil
 	}

@@ -17,7 +17,9 @@ import (
 
 func TestReconcileUsageScansLocallyAndSendsOnlyAggregateSnapshot(t *testing.T) {
 	var received usagehistory.Snapshot
+	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests++
 		if request.URL.Path != "/api/v1/telemetry/reconcile" || request.Header.Get("Authorization") != "Bearer device-secret" {
 			http.Error(writer, "unexpected request", http.StatusUnauthorized)
 			return
@@ -61,8 +63,30 @@ func TestReconcileUsageScansLocallyAndSendsOnlyAggregateSnapshot(t *testing.T) {
 	}
 	var output bytes.Buffer
 	secrets := memorySecretStore{"device-token": "device-secret"}
+	var previewOutput bytes.Buffer
+	if err := reconcileUsageToWithSecrets(configPath, []string{"--codex-home", codexHome, "--preview-json"}, &previewOutput, secrets); err != nil {
+		t.Fatal(err)
+	}
+	var preview usagehistory.ReconciliationPreview
+	if err := json.Unmarshal(previewOutput.Bytes(), &preview); err != nil {
+		t.Fatalf("decode preview %q: %v", previewOutput.String(), err)
+	}
+	if requests != 0 || preview.FilesScanned != 1 || preview.EventsImported != 1 || preview.RowsFound != 1 ||
+		preview.RoutedRequests != 1 || preview.NativeRequests != 0 {
+		t.Fatalf("preview = %#v, server requests = %d", preview, requests)
+	}
+	var dryRunOutput bytes.Buffer
+	if err := reconcileUsageToWithSecrets(configPath, []string{"--codex-home", codexHome, "--dry-run"}, &dryRunOutput, secrets); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 0 || !strings.Contains(dryRunOutput.String(), "1 routed and 0 native requests") {
+		t.Fatalf("dry-run output = %q, server requests = %d", dryRunOutput.String(), requests)
+	}
 	if err := reconcileUsageToWithSecrets(configPath, []string{"--codex-home", codexHome, "--json"}, &output, secrets); err != nil {
 		t.Fatal(err)
+	}
+	if requests != 1 {
+		t.Fatalf("server requests after reconciliation = %d", requests)
 	}
 	if received.EventsImported != 1 || len(received.Rows) != 1 || received.Rows[0].Provider != "openrouter" ||
 		received.Rows[0].Routing != usagehistory.RoutingRouted || received.Rows[0].CachedInputTokens != 4 {

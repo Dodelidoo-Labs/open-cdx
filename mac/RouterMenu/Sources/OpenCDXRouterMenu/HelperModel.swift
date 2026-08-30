@@ -102,6 +102,51 @@ func routerOperationsAvailable(configured: Bool, connected: Bool) -> Bool {
     configured && connected
 }
 
+struct UsageHistoryPreview: Decodable, Equatable {
+    let filesScanned: Int
+    let eventsImported: Int
+    let rowsFound: Int
+    let routedRequests: Int64
+    let nativeRequests: Int64
+    let duplicateEvents: Int
+    let malformedLines: Int
+
+    enum CodingKeys: String, CodingKey {
+        case filesScanned = "files_scanned"
+        case eventsImported = "events_imported"
+        case rowsFound = "rows_found"
+        case routedRequests = "routed_requests"
+        case nativeRequests = "native_requests"
+        case duplicateEvents = "duplicate_events_skipped"
+        case malformedLines = "malformed_lines_skipped"
+    }
+}
+
+func defaultCodexHomePath(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> String {
+    homeDirectory.appendingPathComponent(".codex", isDirectory: true).standardizedFileURL.path
+}
+
+func usageHistoryHelperArguments(codexHome: String, preview: Bool) -> [String] {
+    var arguments = ["reconcile-usage", "--codex-home", codexHome]
+    if preview { arguments.append("--preview-json") }
+    return arguments
+}
+
+func usageHistoryPreviewMessage(_ preview: UsageHistoryPreview, codexHome: String) -> String {
+    var message = """
+    Source: \(codexHome)
+
+    Scanned \(preview.filesScanned.formatted()) rollout files and found \(preview.eventsImported.formatted()) usage events across \(preview.rowsFound.formatted()) daily model/routing rows:
+    • \(preview.routedRequests.formatted()) routed
+    • \(preview.nativeRequests.formatted()) native (not routed)
+    """
+    if preview.duplicateEvents > 0 || preview.malformedLines > 0 {
+        message += "\n\nSkipped copied events: \(preview.duplicateEvents.formatted()) · malformed records: \(preview.malformedLines.formatted())."
+    }
+    message += "\n\nOnly aggregate dates, providers, models, routing classifications, request counts, and token counters will be sent. Existing router telemetry will be replaced; prompts, responses, paths, credentials, and account identifiers are never imported."
+    return message
+}
+
 @MainActor
 final class HelperModel: ObservableObject {
     @Published var status = HelperStatus()
@@ -113,6 +158,7 @@ final class HelperModel: ObservableObject {
     @Published private(set) var configured = false
     @Published private(set) var accountLoginInProgress = false
     @Published private(set) var activityPulsePhase = false
+    @Published private(set) var usageReconciliationInProgress = false
 
     private var timer: AnyCancellable?
     private var activityTimer: AnyCancellable?
@@ -260,14 +306,11 @@ final class HelperModel: ObservableObject {
             operation = "Connect and approve this Mac before reconciling usage history."
             return
         }
-        let alert = NSAlert()
-        alert.messageText = "Replace telemetry with Codex usage history?"
-        alert.informativeText = "OpenCDX will scan Codex rollout files on this Mac and send only dates, providers, models, routing classifications, request counts, and token counters. Prompts, responses, paths, credentials, and account identifiers are never imported. Existing router telemetry will be replaced, then new proxied usage will continue accumulating."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Reconcile Usage")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        reconcileUsageHistory()
+        guard !usageReconciliationInProgress else {
+            operation = "A Codex usage history scan is already in progress."
+            return
+        }
+        previewUsageHistory()
     }
 
     func copyConfiguration() {
@@ -440,24 +483,62 @@ final class HelperModel: ObservableObject {
               !historyPromptVisible,
               !UserDefaults.standard.bool(forKey: historyImportDecisionKey) else { return }
         historyPromptVisible = true
+        let codexHome = defaultCodexHomePath()
         let alert = NSAlert()
         alert.messageText = "Import existing Codex usage history?"
-        alert.informativeText = "This optional one-time import runs locally and uploads only daily model/provider/routing request and token totals. It never imports prompts, responses, paths, credentials, or account identifiers. You can run it later from the Router menu."
+        alert.informativeText = "OpenCDX can review aggregate usage from the default Codex home:\n\n\(codexHome)\n\nYou will see the file and routed/native request counts before anything is replaced. Prompts, responses, paths, credentials, and account identifiers are never imported."
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "Import History")
+        alert.addButton(withTitle: "Review Import")
         alert.addButton(withTitle: "Skip")
         let response = alert.runModal()
         UserDefaults.standard.set(true, forKey: historyImportDecisionKey)
         historyPromptVisible = false
         if response == .alertFirstButtonReturn {
-            reconcileUsageHistory()
+            previewUsageHistory(codexHome: codexHome)
         }
     }
 
-    private func reconcileUsageHistory() {
-        operation = "Scanning local Codex usage history…"
-        runHelper(["reconcile-usage"], timeout: 10 * 60) { [weak self] result in
+    private func previewUsageHistory(codexHome: String = defaultCodexHomePath()) {
+        guard !usageReconciliationInProgress else { return }
+        usageReconciliationInProgress = true
+        operation = "Scanning \(codexHome) for a reconciliation preview…"
+        runHelper(usageHistoryHelperArguments(codexHome: codexHome, preview: true), timeout: 10 * 60) { [weak self] result in
             guard let self else { return }
+            guard result.success, let data = result.output.data(using: .utf8) else {
+                self.usageReconciliationInProgress = false
+                self.operation = result.error
+                return
+            }
+            guard let preview = try? JSONDecoder().decode(UsageHistoryPreview.self, from: data) else {
+                self.usageReconciliationInProgress = false
+                self.operation = "Helper returned an unreadable usage history preview. Existing telemetry was left unchanged."
+                return
+            }
+            guard self.status.connected else {
+                self.usageReconciliationInProgress = false
+                self.operation = "Router disconnected during the history scan. Existing telemetry was left unchanged."
+                return
+            }
+            let alert = NSAlert()
+            alert.messageText = "Replace telemetry with this Codex usage history?"
+            alert.informativeText = usageHistoryPreviewMessage(preview, codexHome: codexHome)
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Replace Telemetry")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                self.usageReconciliationInProgress = false
+                self.operation = "Usage history was not changed."
+                return
+            }
+            self.reconcileUsageHistory(codexHome: codexHome)
+        }
+    }
+
+    private func reconcileUsageHistory(codexHome: String) {
+        operation = "Reconciling usage history from \(codexHome)…"
+        runHelper(usageHistoryHelperArguments(codexHome: codexHome, preview: false), timeout: 10 * 60) { [weak self] result in
+            guard let self else { return }
+            self.usageReconciliationInProgress = false
             if result.success {
                 let summary = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
                 self.operation = summary.isEmpty ? "Usage history reconciled." : summary
