@@ -5,5 +5,8 @@ let package = Package(
     name: "OpenCDXRouterMenu",
     platforms: [.macOS(.v13)],
     products: [.executable(name: "OpenCDXRouterMenu", targets: ["OpenCDXRouterMenu"])],
-    targets: [.executableTarget(name: "OpenCDXRouterMenu")]
+    targets: [
+        .executableTarget(name: "OpenCDXRouterMenu"),
+        .testTarget(name: "OpenCDXRouterMenuTests", dependencies: ["OpenCDXRouterMenu"]),
+    ]
 )

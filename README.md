@@ -67,10 +67,24 @@ Build and install without administrator privileges:
 For stable macOS privacy identity across local rebuilds, configure an Apple-issued
 development certificate by placing its SHA-1 fingerprint in the ignored
 `.opencdx-codesign-identity` file, or set `OPENCODEX_CODESIGN_IDENTITY` for one
-build. The script signs the bundled helper first and then the app. Without either
-setting it deliberately falls back to ad-hoc signing.
+build. When exactly one Apple identity is available, the script selects it. With
+none or more than one, it fails instead of silently changing identity. Explicit
+`OPENCODEX_CODESIGN_IDENTITY=-` remains available for non-installed CI artifacts;
+the installer refuses ad-hoc builds and unintentional signer changes.
 
-The built artifact is `dist/OpenCDX Router.app`. On first launch, open Settings, enter the router's HTTPS address and a device name, request enrollment, then approve the pending Mac in the dashboard. The app detects approval and starts the bundled helper.
+Go must be available for every app build so a stale bundled helper can never be
+reused. If Go is not on `PATH`, set `OPENCODEX_GO_BINARY` or put its absolute path
+in the ignored `.opencdx-go-binary` file.
+
+The built artifact is `dist/OpenCDX Router.app`. The install script atomically
+moves that bundle to `~/Applications` rather than leaving a second copy behind;
+[Apple documents](https://developer.apple.com/documentation/Technotes/tn3179-understanding-local-network-privacy)
+that multiple app copies can produce unexpected Local Network privacy entries.
+The same technote notes that macOS has no supported per-app reset, so these
+safeguards prevent new duplicate entries but cannot erase historical entries.
+On first launch, open Settings, enter the router's HTTPS address and a device
+name, request enrollment, then approve the pending Mac in the dashboard. The app
+detects approval and starts the bundled helper.
 
 End users can download the signed, notarized universal macOS ZIP from the
 [latest GitHub release](https://github.com/Dodelidoo-Labs/open-cdx/releases/latest).

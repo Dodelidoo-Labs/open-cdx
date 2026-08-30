@@ -45,9 +45,6 @@ func TestReconcileUsageScansLocallyAndSendsOnlyAggregateSnapshot(t *testing.T) {
 	if err := helper.SaveConfig(configPath, config); err != nil {
 		t.Fatal(err)
 	}
-	if err := helper.NewSecretStore(configPath).Set("device-token", "device-secret"); err != nil {
-		t.Fatal(err)
-	}
 	codexHome := filepath.Join(directory, "codex")
 	sessions := filepath.Join(codexHome, "sessions")
 	if err := os.MkdirAll(sessions, 0o700); err != nil {
@@ -63,7 +60,8 @@ func TestReconcileUsageScansLocallyAndSendsOnlyAggregateSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	if err := reconcileUsageTo(configPath, []string{"--codex-home", codexHome, "--json"}, &output); err != nil {
+	secrets := memorySecretStore{"device-token": "device-secret"}
+	if err := reconcileUsageToWithSecrets(configPath, []string{"--codex-home", codexHome, "--json"}, &output, secrets); err != nil {
 		t.Fatal(err)
 	}
 	if received.EventsImported != 1 || len(received.Rows) != 1 || received.Rows[0].Provider != "openrouter" ||
@@ -80,4 +78,16 @@ func TestReconcileUsageScansLocallyAndSendsOnlyAggregateSnapshot(t *testing.T) {
 	if !strings.Contains(output.String(), `"events_imported":1`) {
 		t.Fatalf("unexpected command output %q", output.String())
 	}
+}
+
+type memorySecretStore map[string]string
+
+func (store memorySecretStore) Get(account string) (string, error) { return store[account], nil }
+func (store memorySecretStore) Set(account, value string) error {
+	store[account] = value
+	return nil
+}
+func (store memorySecretStore) Delete(account string) error {
+	delete(store, account)
+	return nil
 }

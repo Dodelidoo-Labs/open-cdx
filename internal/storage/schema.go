@@ -137,6 +137,8 @@ CREATE INDEX IF NOT EXISTS accounts_ready_idx ON accounts(status, paused, quota_
 CREATE INDEX IF NOT EXISTS oauth_expiry_idx ON oauth_transactions(expires_at);
 CREATE INDEX IF NOT EXISTS affinities_updated_idx ON affinities(updated_at);
 
+DELETE FROM devices WHERE status='revoked';
+
 INSERT OR IGNORE INTO schema_migrations(version) VALUES (1);
 INSERT OR IGNORE INTO schema_migrations(version) VALUES (2);
 `

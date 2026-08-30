@@ -40,7 +40,7 @@ The router may replay once after an upstream 401 following refresh, or after a r
 
 ## Operations
 
-- Revoke a lost Mac in the dashboard immediately.
+- Remove a lost Mac in the dashboard immediately; removal deletes its device row and credential.
 - Pause an account to keep it stored but ineligible.
 - Remove an account/provider to delete its encrypted credentials.
 - Rotate the administrator token by updating its Docker secret and recreating the container.

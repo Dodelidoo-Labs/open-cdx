@@ -38,8 +38,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Build Swift target
-        run: swift build --disable-sandbox -c debug --package-path mac/RouterMenu
+      - name: Test Swift target
+        run: swift test --disable-sandbox -c debug --package-path mac/RouterMenu
       - name: Build and verify ad-hoc app bundle
         env:
           OPENCODEX_CODESIGN_IDENTITY: '-'

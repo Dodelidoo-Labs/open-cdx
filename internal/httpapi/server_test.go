@@ -102,6 +102,48 @@ func TestAdminDeletesRejectedDeviceAndRouteStatus(t *testing.T) {
 	}
 }
 
+func TestAdminRevokePermanentlyRemovesApprovedDeviceAndRouteStatus(t *testing.T) {
+	box, err := secure.NewBox(bytes.Repeat([]byte{0x72}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := storage.Open(":memory:", box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	enrollment, err := store.CreateEnrollment(context.Background(), "Retired Mac")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.ApproveDevice(context.Background(), enrollment.DeviceID); err != nil {
+		t.Fatal(err)
+	}
+	registry := routing.NewStatusRegistry()
+	registry.Update(enrollment.DeviceID, func(status *routing.RouteStatus) {
+		status.State, status.Connected = "degraded", false
+	})
+	form := url.Values{"return_tab": {"devices"}}
+	request := httptest.NewRequest(http.MethodPost, "/admin/devices/"+enrollment.DeviceID+"/revoke", strings.NewReader(form.Encode()))
+	request.SetPathValue("id", enrollment.DeviceID)
+	request.SetPathValue("action", "revoke")
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if err = request.ParseForm(); err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	(&Server{store: store, status: registry}).adminDevice(response, request)
+	if response.Code != http.StatusSeeOther || !strings.Contains(response.Header().Get("Location"), "Device+removed") {
+		t.Fatalf("device revoke response = %d %q", response.Code, response.Header().Get("Location"))
+	}
+	if devices, listErr := store.Devices(context.Background()); listErr != nil || len(devices) != 0 {
+		t.Fatalf("revoked device remains listed: %#v, %v", devices, listErr)
+	}
+	if status := registry.Get(enrollment.DeviceID); status.State != "connected" || !status.Connected {
+		t.Fatalf("stale route status remained after revoke: %#v", status)
+	}
+}
+
 func TestFormatIntegerUsesApostropheGrouping(t *testing.T) {
 	for value, want := range map[int]string{
 		0:         "0",

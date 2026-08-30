@@ -34,10 +34,13 @@ OPENCODEX_HELPER_BINARY=./dist/router-helper-linux sudo -E ./scripts/test-helper
 Build the macOS target and app bundle:
 
 ```sh
-swift build --disable-sandbox -c release --package-path mac/RouterMenu
-./scripts/build-macos-app.sh
+swift test --disable-sandbox -c release --package-path mac/RouterMenu
+OPENCODEX_CODESIGN_IDENTITY=- ./scripts/build-macos-app.sh
 codesign --verify --deep --strict "dist/OpenCDX Router.app"
 ```
+
+The explicit ad-hoc identity above is only for build validation. Installed local
+builds must use a stable Apple-issued signing identity.
 
 The suite covers OAuth state/PKCE, duplicate detection, encrypted persistence, refresh single-flight, native entry preservation, entitlement selection, sticky affinity, quota failover, partial-stream no-retry, headers/auth replacement, capability-driven OpenRouter catalog mapping, account-collapsed token telemetry, Codex-local patch exposure, unsupported/no-op reasoning handling, Ollama hosted-search suppression, atomic catalogs, device lifecycle, error redaction, HTTP policy, and helper local tokens.
 

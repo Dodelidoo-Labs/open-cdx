@@ -385,15 +385,18 @@ func TestDeviceApprovalAcknowledgementAndRevocation(t *testing.T) {
 	if _, err = store.AuthenticateDevice(context.Background(), issued.DeviceToken); err == nil {
 		t.Fatal("revoked device credential still authenticated")
 	}
-	if err = store.DeleteDevice(context.Background(), enrollment.DeviceID); err != nil {
-		t.Fatalf("delete revoked device: %v", err)
+	if _, err = store.EnrollmentStatus(context.Background(), enrollment.DeviceID, enrollment.EnrollmentSecret); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked device enrollment row still exists: %v", err)
 	}
 	if devices, listErr := store.Devices(context.Background()); listErr != nil || len(devices) != 0 {
-		t.Fatalf("deleted device remains listed: %#v, %v", devices, listErr)
+		t.Fatalf("revoked device remains listed: %#v, %v", devices, listErr)
+	}
+	if err = store.RevokeDevice(context.Background(), enrollment.DeviceID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second device revoke error = %v", err)
 	}
 }
 
-func TestDeviceDeletionRequiresRejectedOrRevokedStatus(t *testing.T) {
+func TestDeviceDeletionRequiresRejectedStatus(t *testing.T) {
 	store := testStore(t, ":memory:")
 	pending, err := store.CreateEnrollment(context.Background(), "Pending Mac")
 	if err != nil {
@@ -410,5 +413,20 @@ func TestDeviceDeletionRequiresRejectedOrRevokedStatus(t *testing.T) {
 	}
 	if err = store.DeleteDevice(context.Background(), pending.DeviceID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("second device deletion error = %v", err)
+	}
+}
+
+func TestMigrationRemovesLegacyRevokedDeviceRows(t *testing.T) {
+	store := testStore(t, ":memory:")
+	if _, err := store.Database().ExecContext(context.Background(), `
+		INSERT INTO devices(id, name, status, enrollment_hash, created_at)
+		VALUES('legacy-revoked', 'Old Mac', 'revoked', X'01', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if devices, err := store.Devices(context.Background()); err != nil || len(devices) != 0 {
+		t.Fatalf("legacy revoked device remains after migration: %#v, %v", devices, err)
 	}
 }

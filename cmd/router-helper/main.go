@@ -288,6 +288,10 @@ func reconcileUsage(configPath string, args []string) error {
 }
 
 func reconcileUsageTo(configPath string, args []string, output io.Writer) error {
+	return reconcileUsageToWithSecrets(configPath, args, output, helper.NewSecretStore(configPath))
+}
+
+func reconcileUsageToWithSecrets(configPath string, args []string, output io.Writer, secrets helper.SecretStore) error {
 	flags := flag.NewFlagSet("reconcile-usage", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	codexHome := flags.String("codex-home", "", "Codex data directory (defaults to CODEX_HOME or ~/.codex)")
@@ -319,7 +323,7 @@ func reconcileUsageTo(configPath string, args []string, output io.Writer) error 
 		}
 		return nil
 	}
-	_, client, err := pairedClient(configPath)
+	_, client, err := pairedClientWithSecrets(configPath, secrets)
 	if err != nil {
 		return err
 	}
@@ -404,11 +408,15 @@ func control(configPath, method, path string, args []string, output io.Writer) e
 }
 
 func pairedClient(configPath string) (helper.Config, *helper.RemoteClient, error) {
+	return pairedClientWithSecrets(configPath, helper.NewSecretStore(configPath))
+}
+
+func pairedClientWithSecrets(configPath string, secrets helper.SecretStore) (helper.Config, *helper.RemoteClient, error) {
 	config, err := helper.LoadConfig(configPath)
 	if err != nil {
 		return helper.Config{}, nil, err
 	}
-	token, err := helper.NewSecretStore(configPath).Get("device-token")
+	token, err := secrets.Get("device-token")
 	if err != nil {
 		return helper.Config{}, nil, errors.New("device is not paired with the router")
 	}

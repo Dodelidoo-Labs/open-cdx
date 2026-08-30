@@ -91,6 +91,13 @@ struct HelperStatus: Codable {
     }
 }
 
+func operationAfterApplyingStatus(_ operation: String, status: HelperStatus) -> String {
+    if status.connected && operation == "Device approved. Connecting…" {
+        return ""
+    }
+    return operation
+}
+
 @MainActor
 final class HelperModel: ObservableObject {
     @Published var status = HelperStatus()
@@ -364,6 +371,7 @@ final class HelperModel: ObservableObject {
         }
         guard let decoded = try? decoder.decode(HelperStatus.self, from: data) else { return false }
         status = decoded
+        operation = operationAfterApplyingStatus(operation, status: decoded)
         offerInitialHistoryImportIfNeeded()
         return true
     }

@@ -89,7 +89,7 @@ struct RouterMenuView: View {
                 .padding(.horizontal, 10)
                 .frame(height: 30)
 
-                MenuActionButton("Quit OpenCDX Router", systemImage: "xmark.circle", destructive: true) {
+                MenuActionButton("Quit OpenCDX Router", systemImage: "xmark.circle") {
                     model.quit()
                 }
             }
@@ -346,19 +346,17 @@ private struct AccountAllowanceRow: View {
 private struct MenuActionButton: View {
     let title: String
     let systemImage: String
-    let destructive: Bool
     let action: () -> Void
 
-    init(_ title: String, systemImage: String, destructive: Bool = false, action: @escaping () -> Void) {
+    init(_ title: String, systemImage: String, action: @escaping () -> Void) {
         self.title = title
         self.systemImage = systemImage
-        self.destructive = destructive
         self.action = action
     }
 
     var body: some View {
-        Button(role: destructive ? .destructive : nil, action: action) {
-            MenuActionLabel(title, systemImage: systemImage, destructive: destructive)
+        Button(action: action) {
+            MenuActionLabel(title, systemImage: systemImage)
         }
         .buttonStyle(.plain)
     }
@@ -367,15 +365,13 @@ private struct MenuActionButton: View {
 private struct MenuActionLabel: View {
     let title: String
     let systemImage: String
-    let destructive: Bool
 
     @Environment(\.isEnabled) private var isEnabled
     @State private var isHovering = false
 
-    init(_ title: String, systemImage: String, destructive: Bool = false) {
+    init(_ title: String, systemImage: String) {
         self.title = title
         self.systemImage = systemImage
-        self.destructive = destructive
     }
 
     var body: some View {
@@ -385,7 +381,7 @@ private struct MenuActionLabel: View {
             Text(title)
             Spacer(minLength: 8)
         }
-        .foregroundStyle(destructive ? Color.red : Color.primary)
+        .foregroundStyle(Color.primary)
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
         .background {

@@ -74,4 +74,4 @@ test "$REVOKED" = "401"
 "$HELPER_BINARY" --config "$TASK_TEMP/helper.json" quit >/dev/null
 wait "$HELPER_PID"
 HELPER_PID=""
-echo "Helper end-to-end passed: local-auth=401 paired-route=400 revoked-route=401."
+echo "Helper end-to-end passed: local-auth=401 paired-route=400 removed-route=401."

@@ -13,7 +13,7 @@ var (
 	ErrEnrollmentRejected  = errors.New("device enrollment was rejected")
 	ErrEnrollmentComplete  = errors.New("device enrollment token was already acknowledged")
 	ErrDeviceRevoked       = errors.New("device is revoked")
-	ErrDeviceNotDeletable  = errors.New("only revoked or rejected devices can be deleted")
+	ErrDeviceNotDeletable  = errors.New("only rejected devices can be deleted")
 	ErrOAuthInvalid        = errors.New("OAuth transaction is invalid, expired, or already used")
 	ErrInvalidAccountOrder = errors.New("account order must contain every account exactly once")
 )

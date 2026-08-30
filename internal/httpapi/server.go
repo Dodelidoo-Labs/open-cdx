@@ -644,6 +644,10 @@ func (server *Server) adminDevice(writer http.ResponseWriter, request *http.Requ
 		err = server.store.RejectDevice(request.Context(), id)
 	case "revoke":
 		err = server.store.RevokeDevice(request.Context(), id)
+		if err == nil {
+			server.status.Delete(id)
+			message = "Device removed"
+		}
 	case "delete":
 		err = server.store.DeleteDevice(request.Context(), id)
 		if err == nil {

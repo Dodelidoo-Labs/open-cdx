@@ -113,9 +113,7 @@ func (store *Store) RejectDevice(ctx context.Context, deviceID string) error {
 }
 
 func (store *Store) RevokeDevice(ctx context.Context, deviceID string) error {
-	result, err := store.db.ExecContext(ctx, `
-		UPDATE devices SET status='revoked', credential_hash=NULL, issued_credential_blob=NULL, revoked_at=? WHERE id=?`,
-		time.Now().Unix(), deviceID)
+	result, err := store.db.ExecContext(ctx, `DELETE FROM devices WHERE id=? AND status='approved'`, deviceID)
 	if err != nil {
 		return err
 	}
@@ -134,10 +132,10 @@ func (store *Store) DeleteDevice(ctx context.Context, deviceID string) error {
 	} else if err != nil {
 		return err
 	}
-	if status != "revoked" && status != "rejected" {
+	if status != "rejected" {
 		return ErrDeviceNotDeletable
 	}
-	result, err := transaction.ExecContext(ctx, `DELETE FROM devices WHERE id=? AND status IN ('revoked','rejected')`, deviceID)
+	result, err := transaction.ExecContext(ctx, `DELETE FROM devices WHERE id=? AND status='rejected'`, deviceID)
 	if err != nil {
 		return err
 	}

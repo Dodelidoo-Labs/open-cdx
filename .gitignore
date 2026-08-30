@@ -3,6 +3,7 @@
 .env.local
 .env.*.local
 .opencdx-codesign-identity
+.opencdx-go-binary
 *.db
 *.db-shm
 *.db-wal
