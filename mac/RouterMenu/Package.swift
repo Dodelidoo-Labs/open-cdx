@@ -5,8 +5,19 @@ let package = Package(
     name: "OpenCDXRouterMenu",
     platforms: [.macOS(.v13)],
     products: [.executable(name: "OpenCDXRouterMenu", targets: ["OpenCDXRouterMenu"])],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.6"),
+    ],
     targets: [
-        .executableTarget(name: "OpenCDXRouterMenu"),
+        .executableTarget(
+            name: "OpenCDXRouterMenu",
+            dependencies: [
+                .product(name: "Sparkle", package: "Sparkle"),
+            ],
+            linkerSettings: [
+                .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@loader_path/../Frameworks"]),
+            ]
+        ),
         .testTarget(name: "OpenCDXRouterMenuTests", dependencies: ["OpenCDXRouterMenu"]),
     ]
 )

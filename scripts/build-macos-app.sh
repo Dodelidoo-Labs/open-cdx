@@ -63,7 +63,9 @@ STAGED_HELPER="$STAGED_APP/Contents/Resources/router-helper"
 STAGED_MENU="$STAGED_APP/Contents/MacOS/OpenCDX Router"
 STAGED_ICON="$STAGED_APP/Contents/Resources/OpenCDXRouter.icns"
 STAGED_MENU_ICON="$STAGED_APP/Contents/Resources/OpenCDXMenuBarTemplate.png"
-mkdir -p "$REPO_ROOT/dist" "$STAGED_APP/Contents/MacOS" "$STAGED_APP/Contents/Resources"
+STAGED_SPARKLE="$STAGED_APP/Contents/Frameworks/Sparkle.framework"
+SPARKLE_PACKAGE_ROOT=
+mkdir -p "$REPO_ROOT/dist" "$STAGED_APP/Contents/MacOS" "$STAGED_APP/Contents/Resources" "$STAGED_APP/Contents/Frameworks"
 
 build_helper() {
   if [ -n "${HELPER_BINARY:-}" ]; then
@@ -104,6 +106,7 @@ build_menu_app() {
       SWIFT_BIN_DIR=$(cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH" --triple "$SWIFT_ARCH-apple-macosx13.0" --show-bin-path)
       cp "$SWIFT_BIN_DIR/OpenCDXRouterMenu" "$STAGING_DIR/OpenCDXRouterMenu-$SWIFT_ARCH"
     done
+    SPARKLE_PACKAGE_ROOT="$SWIFT_ROOT/.build-arm64/artifacts/sparkle/Sparkle"
     lipo -create "$STAGING_DIR/OpenCDXRouterMenu-arm64" "$STAGING_DIR/OpenCDXRouterMenu-x86_64" -output "$STAGED_MENU"
   else
     SWIFT_SCRATCH="$SWIFT_ROOT/.build"
@@ -112,11 +115,62 @@ build_menu_app() {
     (cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH")
     SWIFT_BIN_DIR=$(cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH" --show-bin-path)
     cp "$SWIFT_BIN_DIR/OpenCDXRouterMenu" "$STAGED_MENU"
+    SPARKLE_PACKAGE_ROOT="$SWIFT_ROOT/.build/artifacts/sparkle/Sparkle"
   fi
+}
+
+stage_sparkle_framework() {
+  SPARKLE_FRAMEWORK_SOURCE="$SPARKLE_PACKAGE_ROOT/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
+  if [ ! -d "$SPARKLE_FRAMEWORK_SOURCE" ]; then
+    echo "The pinned Sparkle framework was not found at $SPARKLE_FRAMEWORK_SOURCE." >&2
+    exit 1
+  fi
+
+  # ditto preserves Sparkle's versioned-framework symlinks, modes, and metadata.
+  ditto "$SPARKLE_FRAMEWORK_SOURCE" "$STAGED_SPARKLE"
+  for SPARKLE_SYMLINK in Versions/Current Sparkle Autoupdate Updater.app Headers Modules Resources XPCServices
+  do
+    if [ ! -L "$STAGED_SPARKLE/$SPARKLE_SYMLINK" ]; then
+      echo "Sparkle.framework lost its $SPARKLE_SYMLINK symlink while being staged." >&2
+      exit 1
+    fi
+  done
+  SPARKLE_VERSION=$(readlink "$STAGED_SPARKLE/Versions/Current")
+  case "$SPARKLE_VERSION" in
+    ''|.|..|*/*) echo "Sparkle.framework has an invalid current version: $SPARKLE_VERSION" >&2; exit 1 ;;
+  esac
+  SPARKLE_VERSION_DIR="$STAGED_SPARKLE/Versions/$SPARKLE_VERSION"
+  for SPARKLE_COMPONENT in \
+    "$SPARKLE_VERSION_DIR/Sparkle" \
+    "$SPARKLE_VERSION_DIR/Autoupdate" \
+    "$SPARKLE_VERSION_DIR/Updater.app/Contents/MacOS/Updater" \
+    "$SPARKLE_VERSION_DIR/XPCServices/Installer.xpc/Contents/MacOS/Installer" \
+    "$SPARKLE_VERSION_DIR/XPCServices/Downloader.xpc/Contents/MacOS/Downloader"
+  do
+    if [ ! -x "$SPARKLE_COMPONENT" ]; then
+      echo "Sparkle component is missing or not executable: $SPARKLE_COMPONENT" >&2
+      exit 1
+    fi
+  done
+}
+
+sign_sparkle_components() {
+  SPARKLE_SIGNING_IDENTITY=$1
+  SPARKLE_TIMESTAMP_FLAG=$2
+  SPARKLE_VERSION=$(readlink "$STAGED_SPARKLE/Versions/Current")
+  SPARKLE_VERSION_DIR="$STAGED_SPARKLE/Versions/$SPARKLE_VERSION"
+
+  # Sparkle's documented manual distribution order. Do not replace this with --deep.
+  codesign --force --options runtime "$SPARKLE_TIMESTAMP_FLAG" --sign "$SPARKLE_SIGNING_IDENTITY" "$SPARKLE_VERSION_DIR/XPCServices/Installer.xpc"
+  codesign --force --options runtime "$SPARKLE_TIMESTAMP_FLAG" --preserve-metadata=entitlements --sign "$SPARKLE_SIGNING_IDENTITY" "$SPARKLE_VERSION_DIR/XPCServices/Downloader.xpc"
+  codesign --force --options runtime "$SPARKLE_TIMESTAMP_FLAG" --sign "$SPARKLE_SIGNING_IDENTITY" "$SPARKLE_VERSION_DIR/Autoupdate"
+  codesign --force --options runtime "$SPARKLE_TIMESTAMP_FLAG" --sign "$SPARKLE_SIGNING_IDENTITY" "$SPARKLE_VERSION_DIR/Updater.app"
+  codesign --force --options runtime "$SPARKLE_TIMESTAMP_FLAG" --sign "$SPARKLE_SIGNING_IDENTITY" "$STAGED_SPARKLE"
 }
 
 build_helper
 build_menu_app
+stage_sparkle_framework
 "$REPO_ROOT/scripts/generate-icon-assets.sh" icns "$STAGED_ICON"
 "$REPO_ROOT/scripts/generate-icon-assets.sh" menubar "$STAGED_MENU_ICON"
 cp "$REPO_ROOT/mac/RouterMenu/Info.plist" "$STAGED_APP/Contents/Info.plist"
@@ -127,6 +181,7 @@ chmod 755 "$STAGED_MENU" "$STAGED_HELPER"
 if [ "$SIGNING_IDENTITY" = "-" ]; then
   echo "Using an explicitly requested ad-hoc signature; do not install this build because macOS cannot preserve its privacy identity across rebuilds." >&2
   codesign --force --identifier "$HELPER_SIGNING_IDENTIFIER" --sign - "$STAGED_HELPER"
+  sign_sparkle_components - --timestamp=none
   codesign --force --sign - "$STAGED_APP"
 else
   if ! security find-identity -v -p codesigning | grep -F "$SIGNING_IDENTITY" >/dev/null; then
@@ -135,14 +190,24 @@ else
   fi
   if [ "$RELEASE_BUILD" = "1" ]; then
     codesign --force --identifier "$HELPER_SIGNING_IDENTIFIER" --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$STAGED_HELPER"
+    sign_sparkle_components "$SIGNING_IDENTITY" --timestamp
     codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$STAGED_APP"
     echo "Signed hardened release with: $SIGNING_IDENTITY"
   else
     codesign --force --identifier "$HELPER_SIGNING_IDENTIFIER" --timestamp=none --sign "$SIGNING_IDENTITY" "$STAGED_HELPER"
+    sign_sparkle_components "$SIGNING_IDENTITY" --timestamp=none
     codesign --force --timestamp=none --sign "$SIGNING_IDENTITY" "$STAGED_APP"
     echo "Signed development build with: $SIGNING_IDENTITY"
   fi
 fi
+SPARKLE_VERSION=$(readlink "$STAGED_SPARKLE/Versions/Current")
+SPARKLE_VERSION_DIR="$STAGED_SPARKLE/Versions/$SPARKLE_VERSION"
+codesign --verify --strict --verbose=2 "$STAGED_HELPER"
+codesign --verify --strict --verbose=2 "$SPARKLE_VERSION_DIR/XPCServices/Installer.xpc"
+codesign --verify --strict --verbose=2 "$SPARKLE_VERSION_DIR/XPCServices/Downloader.xpc"
+codesign --verify --strict --verbose=2 "$SPARKLE_VERSION_DIR/Autoupdate"
+codesign --verify --strict --verbose=2 "$SPARKLE_VERSION_DIR/Updater.app"
+codesign --verify --strict --verbose=2 "$STAGED_SPARKLE"
 codesign --verify --deep --strict --verbose=2 "$STAGED_APP"
 if [ -e "$APP_DIR" ]; then
   mv "$APP_DIR" "$STAGING_DIR/previous.app"

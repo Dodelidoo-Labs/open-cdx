@@ -7,8 +7,10 @@ struct OpenCDXRouterMenuApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            RouterMenuView(model: model)
-                .onAppear { model.refreshStatus() }
+            RouterMenuView(model: model) {
+                appDelegate.checkForUpdates()
+            }
+            .onAppear { model.refreshStatus() }
         } label: {
             Image(nsImage: OpenCDXMenuBarIcon.image)
                 .renderingMode(.template)

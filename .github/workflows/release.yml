@@ -30,13 +30,18 @@ jobs:
           version=$(tr -d '[:space:]' < VERSION)
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           test "v$version" = "$GITHUB_REF_NAME"
+          test "$GITHUB_RUN_NUMBER" -gt 1
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+      - name: Require Sparkle release signing key
+        env:
+          SPARKLE_PRIVATE_KEY_BASE64: ${{ secrets.SPARKLE_PRIVATE_KEY_BASE64 }}
+        run: test -n "$SPARKLE_PRIVATE_KEY_BASE64"
       - run: go test ./...
       - run: go vet ./...
 
   docker:
     name: Publish multi-architecture image
-    needs: validate
+    needs: [validate, macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -83,6 +88,7 @@ jobs:
       contents: read
     env:
       VERSION: ${{ needs.validate.outputs.version }}
+      BUILD_NUMBER: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -128,16 +134,38 @@ jobs:
           OPENCODEX_UNIVERSAL: '1'
           OPENCODEX_VERSION: ${{ needs.validate.outputs.version }}
           OPENCODEX_COMMIT: ${{ github.sha }}
-          OPENCODEX_BUILD_NUMBER: ${{ github.run_number }}
+          OPENCODEX_BUILD_NUMBER: ${{ env.BUILD_NUMBER }}
         run: |
           ./scripts/build-macos-app.sh
+          SPARKLE_FRAMEWORK="dist/OpenCDX Router.app/Contents/Frameworks/Sparkle.framework"
+          SPARKLE_VERSION_DIR="$SPARKLE_FRAMEWORK/Versions/Current"
+          test -L "$SPARKLE_FRAMEWORK/Versions/Current"
           lipo "dist/OpenCDX Router.app/Contents/MacOS/OpenCDX Router" -verify_arch arm64 x86_64
           lipo "dist/OpenCDX Router.app/Contents/Resources/router-helper" -verify_arch arm64 x86_64
+          lipo "$SPARKLE_VERSION_DIR/Sparkle" -verify_arch arm64 x86_64
+          lipo "$SPARKLE_VERSION_DIR/Autoupdate" -verify_arch arm64 x86_64
+          lipo "$SPARKLE_VERSION_DIR/Updater.app/Contents/MacOS/Updater" -verify_arch arm64 x86_64
+          lipo "$SPARKLE_VERSION_DIR/XPCServices/Installer.xpc/Contents/MacOS/Installer" -verify_arch arm64 x86_64
+          lipo "$SPARKLE_VERSION_DIR/XPCServices/Downloader.xpc/Contents/MacOS/Downloader" -verify_arch arm64 x86_64
+          otool -L "dist/OpenCDX Router.app/Contents/MacOS/OpenCDX Router" | grep -F 'Sparkle.framework'
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "OpenCDXRouter.icns"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "AppIcon"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "com.opencdx.router-menu"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "$VERSION"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "$BUILD_NUMBER"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "13.0"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "https://github.com/Dodelidoo-Labs/open-cdx/releases/latest/download/appcast.xml"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "i+JDg7U+GX4CUOSnzOJXIvoovrLA49cR1Hz3GqgcAzA="
+          test "$(/usr/libexec/PlistBuddy -c 'Print :SUAutomaticallyUpdate' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "false"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :SUEnableSystemProfiling' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "false"
           test -s "dist/OpenCDX Router.app/Contents/Resources/OpenCDXRouter.icns"
           test -s "dist/OpenCDX Router.app/Contents/Resources/Assets.car"
           test -s "dist/OpenCDX Router.app/Contents/Resources/OpenCDXMenuBarTemplate.png"
+          codesign --verify --strict --verbose=2 "$SPARKLE_VERSION_DIR/XPCServices/Installer.xpc"
+          codesign --verify --strict --verbose=2 "$SPARKLE_VERSION_DIR/XPCServices/Downloader.xpc"
+          codesign --verify --strict --verbose=2 "$SPARKLE_VERSION_DIR/Autoupdate"
+          codesign --verify --strict --verbose=2 "$SPARKLE_VERSION_DIR/Updater.app"
+          codesign --verify --strict --verbose=2 "$SPARKLE_FRAMEWORK"
           codesign --verify --deep --strict --verbose=2 "dist/OpenCDX Router.app"
       - name: Notarize and staple
         env:
@@ -155,14 +183,74 @@ jobs:
           mkdir -p artifacts
           ditto -c -k --sequesterRsrc --keepParent "dist/OpenCDX Router.app" "artifacts/OpenCDX-Router-${VERSION}-macOS-universal.zip"
           (cd artifacts && shasum -a 256 "OpenCDX-Router-${VERSION}-macOS-universal.zip" > SHA256SUMS.txt)
+      - name: Generate and verify Sparkle appcast and signed update
+        env:
+          SPARKLE_PRIVATE_KEY_BASE64: ${{ secrets.SPARKLE_PRIVATE_KEY_BASE64 }}
+        run: |
+          SPARKLE_KEY_FILE="$RUNNER_TEMP/sparkle-private-key"
+          TAMPERED_ARCHIVE="$RUNNER_TEMP/OpenCDX-Router-tampered.zip"
+          cleanup_sparkle_key() {
+            rm -f "$SPARKLE_KEY_FILE" "$TAMPERED_ARCHIVE"
+          }
+          trap cleanup_sparkle_key EXIT HUP INT TERM
+          umask 077
+          printf '%s' "$SPARKLE_PRIVATE_KEY_BASE64" | openssl base64 -d -A -out "$SPARKLE_KEY_FILE"
+          chmod 600 "$SPARKLE_KEY_FILE"
+          test -s "$SPARKLE_KEY_FILE"
+
+          SPARKLE_TOOLS_DIR="mac/RouterMenu/.build-arm64/artifacts/sparkle/Sparkle/bin"
+          GENERATE_APPCAST="$SPARKLE_TOOLS_DIR/generate_appcast"
+          SIGN_UPDATE="$SPARKLE_TOOLS_DIR/sign_update"
+          test -x "$GENERATE_APPCAST"
+          test -x "$SIGN_UPDATE"
+
+          APPCAST_INPUT_DIR="$RUNNER_TEMP/sparkle-appcast-input"
+          mkdir -m 700 "$APPCAST_INPUT_DIR"
+          ARCHIVE_NAME="OpenCDX-Router-${VERSION}-macOS-universal.zip"
+          ARCHIVE="artifacts/$ARCHIVE_NAME"
+          cp "$ARCHIVE" "$APPCAST_INPUT_DIR/$ARCHIVE_NAME"
+          DOWNLOAD_PREFIX="https://github.com/Dodelidoo-Labs/open-cdx/releases/download/v${VERSION}/"
+          "$GENERATE_APPCAST" \
+            --ed-key-file "$SPARKLE_KEY_FILE" \
+            --download-url-prefix "$DOWNLOAD_PREFIX" \
+            --maximum-deltas 0 \
+            -o "artifacts/appcast.xml" \
+            "$APPCAST_INPUT_DIR"
+
+          APPCAST="artifacts/appcast.xml"
+          test -s "$APPCAST"
+          xmllint --noout "$APPCAST"
+          test "$(xmllint --xpath 'count(//*[local-name()="enclosure"])' "$APPCAST")" = "1"
+          ENCLOSURE_URL=$(xmllint --xpath 'string((//*[local-name()="enclosure"])[1]/@url)' "$APPCAST")
+          ENCLOSURE_LENGTH=$(xmllint --xpath 'string((//*[local-name()="enclosure"])[1]/@length)' "$APPCAST")
+          ED_SIGNATURE=$(xmllint --xpath 'string((//*[local-name()="enclosure"])[1]/@*[local-name()="edSignature"])' "$APPCAST")
+          APPCAST_VERSION=$(xmllint --xpath 'string((//*[local-name()="version"])[1])' "$APPCAST")
+          APPCAST_SHORT_VERSION=$(xmllint --xpath 'string((//*[local-name()="shortVersionString"])[1])' "$APPCAST")
+          APPCAST_MINIMUM_SYSTEM_VERSION=$(xmllint --xpath 'string((//*[local-name()="minimumSystemVersion"])[1])' "$APPCAST")
+          test "$ENCLOSURE_URL" = "${DOWNLOAD_PREFIX}${ARCHIVE_NAME}"
+          test "$ENCLOSURE_LENGTH" = "$(stat -f '%z' "$ARCHIVE")"
+          test -n "$ED_SIGNATURE"
+          test "$APPCAST_VERSION" = "$BUILD_NUMBER"
+          test "$APPCAST_SHORT_VERSION" = "$VERSION"
+          test "$APPCAST_MINIMUM_SYSTEM_VERSION" = "13.0"
+
+          "$SIGN_UPDATE" --verify --ed-key-file "$SPARKLE_KEY_FILE" "$ARCHIVE" "$ED_SIGNATURE" >/dev/null 2>&1
+          cp "$ARCHIVE" "$TAMPERED_ARCHIVE"
+          printf 'invalid Sparkle signature\n' >> "$TAMPERED_ARCHIVE"
+          if "$SIGN_UPDATE" --verify --ed-key-file "$SPARKLE_KEY_FILE" "$TAMPERED_ARCHIVE" "$ED_SIGNATURE" >/dev/null 2>&1; then
+            echo "Sparkle unexpectedly accepted a tampered update archive." >&2
+            exit 1
+          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: macos-release
           path: artifacts/*
           if-no-files-found: error
-      - name: Remove temporary signing keychain
+      - name: Remove temporary signing material
         if: always()
-        run: security delete-keychain "$RUNNER_TEMP/opencdx-release.keychain-db" || true
+        run: |
+          rm -f "$RUNNER_TEMP/sparkle-private-key" "$RUNNER_TEMP/OpenCDX-Router-tampered.zip"
+          security delete-keychain "$RUNNER_TEMP/opencdx-release.keychain-db" || true
 
   github-release:
     name: Publish GitHub release
