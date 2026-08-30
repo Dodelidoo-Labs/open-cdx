@@ -159,6 +159,7 @@ final class HelperModel: ObservableObject {
     @Published private(set) var accountLoginInProgress = false
     @Published private(set) var activityPulsePhase = false
     @Published private(set) var usageReconciliationInProgress = false
+    @Published private(set) var telemetryResetInProgress = false
 
     private var timer: AnyCancellable?
     private var activityTimer: AnyCancellable?
@@ -295,11 +296,41 @@ final class HelperModel: ObservableObject {
             operation = "Connect and approve this Mac before reconciling usage history."
             return
         }
-        guard !usageReconciliationInProgress else {
-            operation = "A Codex usage history scan is already in progress."
+        guard !usageReconciliationInProgress && !telemetryResetInProgress else {
+            operation = "Another telemetry change is already in progress."
             return
         }
         previewUsageHistory()
+    }
+
+    func requestTelemetryReset() {
+        guard status.connected else {
+            operation = "Connect and approve this Mac before resetting telemetry."
+            return
+        }
+        guard !telemetryResetInProgress && !usageReconciliationInProgress else {
+            operation = "Another telemetry change is already in progress."
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Reset all router telemetry?"
+        alert.informativeText = "This permanently deletes aggregate request and token history stored by OpenCDX, including reconciled history. Providers, devices, accounts, and every file in ~/.codex remain unchanged. New routed usage starts again from zero, and you can reconcile local history later."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Reset Telemetry")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            operation = "Telemetry was not changed."
+            return
+        }
+        telemetryResetInProgress = true
+        operation = "Resetting router telemetry…"
+        runHelper(["reset-telemetry"], timeout: 60) { [weak self] result in
+            guard let self else { return }
+            self.telemetryResetInProgress = false
+            self.operation = result.success
+                ? "Telemetry reset. Local Codex history was not changed."
+                : result.error
+        }
     }
 
     func copyConfiguration() {

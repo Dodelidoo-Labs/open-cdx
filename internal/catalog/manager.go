@@ -95,6 +95,9 @@ func (manager *Manager) translatedEntries(ctx context.Context, providerName stri
 		}
 		entries, excluded, err = client.TranslateCatalog(discovery)
 	case "ollama":
+		// This client only translates an already stored catalog snapshot and
+		// performs no network I/O. Live refreshes and routed requests enforce the
+		// persisted Allow HTTP policy at their network boundaries.
 		client, clientErr := ollama.New(nil, provider.BaseURL, true)
 		if clientErr != nil {
 			return nil, clientErr

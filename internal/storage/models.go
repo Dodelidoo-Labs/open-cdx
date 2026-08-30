@@ -106,6 +106,16 @@ type ProviderConfig struct {
 	Config    json.RawMessage
 }
 
+// AllowHTTP reports whether this provider was explicitly configured to allow
+// plaintext HTTP beyond loopback. Unknown or malformed provider options fail
+// closed.
+func (provider ProviderConfig) AllowHTTP() bool {
+	var options struct {
+		AllowHTTP bool `json:"allow_http"`
+	}
+	return json.Unmarshal(provider.Config, &options) == nil && options.AllowHTTP
+}
+
 type CatalogSnapshot struct {
 	Provider  string
 	AccountID string

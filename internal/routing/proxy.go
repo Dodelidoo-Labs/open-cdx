@@ -239,7 +239,7 @@ func (proxy *Proxy) resolveTarget(ctx context.Context, providerName, modelID, up
 		if err != nil || !provider.Enabled {
 			return routeTarget{}, errors.New("Ollama is not configured")
 		}
-		client, err := ollama.New(proxy.httpClient, provider.BaseURL, proxy.insecureDev)
+		client, err := ollama.New(proxy.httpClient, provider.BaseURL, proxy.insecureDev || provider.AllowHTTP())
 		if err != nil {
 			return routeTarget{}, err
 		}

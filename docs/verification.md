@@ -72,10 +72,12 @@ This checklist requires credentials and deliberate browser choices, so it must b
 11. Run one native model and one OpenRouter model.
 12. Choose **Reconcile Usage History…**, confirm the preview names the default `~/.codex` source and shows routed/native counts, then cancel and verify telemetry is unchanged.
 13. Run a dry run against the isolated Codex home with `router-helper reconcile-usage --codex-home /absolute/test/home --dry-run`; confirm it reports the routed requests, then run the same command without `--dry-run` and verify the dashboard preserves their routed classification.
-14. Pause A and confirm a shared entitled model routes through B while an A-only model becomes unavailable.
-15. Restart/recreate the Docker router without deleting its volume and confirm both accounts still refresh and route.
-16. Enroll and approve a second Mac; remove it and confirm only that helper loses access and the device row disappears.
-17. Sign normal Codex/ChatGPT into an unrelated account and confirm the isolated router provider behavior is unchanged.
-18. Run the uninstall script and confirm the Codex executable, native auth, and `~/.codex` content are untouched.
+14. Configure a LAN Ollama `http://` endpoint with **Allow HTTP** off and confirm it is rejected; enable the option and confirm the connection can be tested. Verify HTTPS and loopback HTTP still work with the option off.
+15. Choose **Reset Telemetry…**, confirm the dashboard returns to zero, then verify accounts, providers, devices, and the isolated `~/.codex` rollout files are unchanged. Confirm a new routed request starts telemetry fresh, or reconcile again.
+16. Pause A and confirm a shared entitled model routes through B while an A-only model becomes unavailable.
+17. Restart/recreate the Docker router without deleting its volume and confirm both accounts still refresh and route.
+18. Enroll and approve a second Mac; remove it and confirm only that helper loses access and the device row disappears.
+19. Sign normal Codex/ChatGPT into an unrelated account and confirm the isolated router provider behavior is unchanged.
+20. Run the uninstall script and confirm the Codex executable, native auth, and `~/.codex` content are untouched.
 
 Record account labels only as masked values. Never paste tokens, OAuth codes, raw account IDs, prompts, or responses into a test log.

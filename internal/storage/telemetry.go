@@ -18,6 +18,24 @@ func (store *Store) RecordUsage(ctx context.Context, provider, modelID, accountI
 	return err
 }
 
+// ResetTelemetry transactionally removes only aggregate usage and its
+// reconciliation metadata. Provider, device, account, catalog, and routing
+// state are deliberately outside this transaction.
+func (store *Store) ResetTelemetry(ctx context.Context) error {
+	transaction, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer transaction.Rollback()
+	if _, err = transaction.ExecContext(ctx, `DELETE FROM usage_aggregate`); err != nil {
+		return err
+	}
+	if _, err = transaction.ExecContext(ctx, `DELETE FROM usage_reconciliation`); err != nil {
+		return err
+	}
+	return transaction.Commit()
+}
+
 // ReplaceUsage transactionally replaces all telemetry with a local history
 // snapshot. The synthetic account value carries no local or remote identity.
 // Requests recorded by the proxy after this transaction commits continue to

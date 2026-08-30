@@ -23,7 +23,7 @@ type Client struct {
 	BaseURL string
 }
 
-func New(httpClient *http.Client, baseURL string, allowInsecureRemote bool) (*Client, error) {
+func New(httpClient *http.Client, baseURL string, allowHTTP bool) (*Client, error) {
 	parsed, err := url.Parse(baseURL)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return nil, errors.New("Ollama URL must be an absolute HTTP or HTTPS URL")
@@ -31,8 +31,8 @@ func New(httpClient *http.Client, baseURL string, allowInsecureRemote bool) (*Cl
 	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return nil, errors.New("Ollama URL must not contain credentials, query parameters, or a fragment")
 	}
-	if parsed.Scheme == "http" && !allowInsecureRemote && !loopback(parsed.Hostname()) {
-		return nil, errors.New("plaintext Ollama is allowed only on loopback unless insecure development mode is enabled")
+	if parsed.Scheme == "http" && !allowHTTP && !loopback(parsed.Hostname()) {
+		return nil, errors.New("plaintext Ollama on a non-loopback address requires Allow HTTP")
 	}
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 5 * time.Minute}

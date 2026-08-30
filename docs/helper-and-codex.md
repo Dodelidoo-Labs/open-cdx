@@ -86,6 +86,16 @@ replaces existing telemetry rather than merging it, so importing a different
 home later also replaces the previous snapshot. Prompts, responses, paths,
 credentials, and account identifiers are never sent to the router.
 
+To start the dashboard counters over without changing the local history, use
+**Reset Telemetry…** in the menu app or run:
+
+```sh
+router-helper reset-telemetry
+```
+
+This removes only aggregate telemetry and reconciliation metadata from the
+router. It leaves providers, devices, accounts, and all `~/.codex` files intact.
+
 ## Useful commands
 
 | Command | Effect |
@@ -96,6 +106,7 @@ credentials, and account identifiers are never sent to the router.
 | `router-helper refresh-quotas` | Refresh account quotas |
 | `router-helper reconnect` | Recheck remote connectivity |
 | `router-helper reconcile-usage [--codex-home PATH] [--dry-run]` | Preview or replace telemetry from one Codex history root |
+| `router-helper reset-telemetry` | Reset router telemetry without changing local Codex history or router configuration |
 | `router-helper open-dashboard` | Open the configured dashboard |
 | `router-helper quit` | Stop the user helper daemon |
 | `router-helper config` | Print, but never install, the Codex TOML snippet |

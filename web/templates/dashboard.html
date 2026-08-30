@@ -87,7 +87,10 @@
             <h1 class="page-title">Telemetry</h1>
             <p class="page-dek">Routed work and token volume across connected accounts.</p>
           </div>
-          <div class="page-actions"><button class="btn btn-secondary" type="button" data-export-telemetry disabled>Export CSV</button></div>
+          <div class="page-actions">
+            <button class="btn btn-secondary" type="button" data-export-telemetry disabled>Export CSV</button>
+            <form class="inline" method="post" action="/admin/telemetry/reset" data-confirm="Reset all telemetry stored by OpenCDX? Providers, devices, accounts, and files in ~/.codex will not be changed."><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="return_tab" value="home"><button class="btn btn-danger" type="submit">Reset telemetry…</button></form>
+          </div>
         </section>
 
         <section class="telemetry-controls">
@@ -232,7 +235,7 @@
             <article class="provider-entry">
               <div class="provider-row">
                 <div><div class="provider-name">{{.DisplayName}}</div><div class="account-sub">{{.Description}}</div></div>
-                <div class="endpoint">{{.BaseURL}}{{if and (eq .Name "openrouter") .HasCredential}} · key stored securely{{end}}</div>
+                <div class="endpoint">{{.BaseURL}}{{if and (eq .Name "openrouter") .HasCredential}} · key stored securely{{end}}{{if and (eq .Name "ollama") .AllowHTTP}} · HTTP allowed{{end}}</div>
                 <div class="provider-check"><span class="state {{if eq .Health "healthy"}}good{{else if eq .Health "error"}}bad{{else}}warn{{end}}">{{.Health}}</span><div class="account-sub">Checked {{if .UpdatedAt}}<time datetime="{{.UpdatedAt}}" data-local-datetime>{{.Updated}}</time>{{else}}{{.Updated}}{{end}}</div></div>
                 <div class="row-actions"><button class="btn btn-ghost" type="submit" form="provider-{{.Name}}">Test</button><button class="icon-btn btn-secondary provider-config-trigger" type="button" data-provider-toggle="provider-config-{{.Name}}" aria-controls="provider-{{.Name}}" aria-expanded="false" aria-label="Configure provider" data-tooltip="Configure provider"><span class="material-symbols-outlined" aria-hidden="true">settings</span></button></div>
               </div>
@@ -242,6 +245,7 @@
                 <div class="provider-config-grid">
                   <div class="field"><label for="base-url-{{.Name}}">Base URL</label><input class="field-input num" id="base-url-{{.Name}}" type="url" name="base_url" value="{{.BaseURL}}" spellcheck="false" required></div>
                   {{if eq .Name "openrouter"}}<div class="field"><label for="api-key-{{.Name}}">API key</label><input class="field-input" id="api-key-{{.Name}}" type="password" name="api_key" autocomplete="new-password" placeholder="{{if .HasCredential}}Stored securely · enter a value to replace{{else}}Enter OpenRouter API key{{end}}"><span class="field-hint">The credential is encrypted at rest and is never shown again.</span></div>{{end}}
+                  {{if eq .Name "ollama"}}<div class="field"><label class="switch"><input type="checkbox" name="allow_http" {{if .AllowHTTP}}checked{{end}}> Allow HTTP</label><span class="field-hint">Off by default. Enable only for a trusted Ollama host on your LAN; HTTPS and loopback HTTP do not require this option.</span></div>{{end}}
                 </div>
                 {{if .LastError}}<p class="provider-error">{{.LastError}}</p>{{end}}
                 <div class="provider-config-actions">{{if and (eq .Name "openrouter") .HasCredential}}<button class="btn btn-danger" type="submit" form="remove-provider-{{.Name}}">Remove credential</button>{{end}}<button class="btn btn-primary" type="submit">Save &amp; test connection</button></div>

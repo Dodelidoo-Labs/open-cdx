@@ -104,6 +104,36 @@ func TestReconcileUsageScansLocallyAndSendsOnlyAggregateSnapshot(t *testing.T) {
 	}
 }
 
+func TestResetTelemetryUsesPairedDeviceWithoutReadingCodexHome(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests++
+		if request.Method != http.MethodPost || request.URL.Path != "/api/v1/telemetry/reset" || request.Header.Get("Authorization") != "Bearer device-secret" {
+			http.Error(writer, "unexpected request", http.StatusUnauthorized)
+			return
+		}
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	directory := t.TempDir()
+	configPath := filepath.Join(directory, "helper.json")
+	config := helper.Config{
+		RouterURL: server.URL, DeviceID: "device", DeviceName: "Test Mac", ListenPort: helper.DefaultPort,
+		CatalogPath: filepath.Join(directory, "catalog.json"),
+	}
+	if err := helper.SaveConfig(configPath, config); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := resetTelemetryToWithSecrets(configPath, nil, &output, memorySecretStore{"device-token": "device-secret"}); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 || !strings.Contains(output.String(), "local Codex history were not changed") {
+		t.Fatalf("reset requests = %d, output = %q", requests, output.String())
+	}
+}
+
 type memorySecretStore map[string]string
 
 func (store memorySecretStore) Get(account string) (string, error) { return store[account], nil }

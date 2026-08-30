@@ -194,7 +194,10 @@ func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
 			},
 			{ID: "fallback", MaskedEmail: "b***@example.com", Plan: "plus", Status: "ready"},
 		},
-		Providers: []providerView{{Name: "openrouter", DisplayName: "OpenRouter", Description: "OpenRouter API", Health: "healthy", HasCredential: true, Updated: "Aug 30 02:31", UpdatedAt: "2026-08-30T02:31:00Z"}},
+		Providers: []providerView{
+			{Name: "openrouter", DisplayName: "OpenRouter", Description: "OpenRouter API", Health: "healthy", HasCredential: true, Updated: "Aug 30 02:31", UpdatedAt: "2026-08-30T02:31:00Z"},
+			{Name: "ollama", DisplayName: "Ollama", Description: "Local or remote Ollama API", BaseURL: "http://192.168.1.20:11434", Health: "healthy", AllowHTTP: true},
+		},
 		Devices: []deviceView{
 			{ID: "device", Name: "MacBook Pro", Status: "approved", LastSeen: "Aug 30 02:31", LastSeenAt: "2026-08-30T02:31:00Z", Laptop: true},
 			{ID: "retired", Name: "Old Mac", Status: "rejected"},
@@ -213,6 +216,7 @@ func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
 		`data-custom-range`, `role="dialog"`, `data-flash-dismiss`,
 		`class="rail-actions"`, `data-theme-toggle`, `aria-label="Sign out"`, `material-symbols-outlined`,
 		`href="opencdx://oauth/openai/start">Connect account`, `provider-config-trigger`, `Refresh catalog`,
+		`/admin/telemetry/reset`, `Reset telemetry…`, `name="allow_http" checked`, `HTTP allowed`,
 		`account-order-controls`, `account-primary-star`, `material-symbols-filled`, `/admin/accounts/fallback/primary`,
 		`data-account-list`, `data-account-drag`, `/admin/accounts/reorder`,
 		`class="project-version"`, `href="https://github.com/Dodelidoo-Labs/open-cdx"`, `class="update-current">v1.0.0`, `class="update-latest"> → v1.1.0`,
@@ -443,5 +447,100 @@ func TestDeviceCanReconcilePrivacyMinimalUsageSnapshot(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("conversation-shaped payload status = %d", response.Code)
+	}
+}
+
+func TestDeviceTelemetryResetRequiresAuthentication(t *testing.T) {
+	box, err := secure.NewBox(bytes.Repeat([]byte{0x53}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := storage.Open(":memory:", box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	enrollment, err := store.CreateEnrollment(context.Background(), "Reset Mac")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.ApproveDevice(context.Background(), enrollment.DeviceID); err != nil {
+		t.Fatal(err)
+	}
+	approved, err := store.EnrollmentStatus(context.Background(), enrollment.DeviceID, enrollment.EnrollmentSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.ReplaceUsage(context.Background(), []storage.UsageAggregate{{
+		Day: "2026-08-30", Provider: "openai", ModelID: "gpt-test", Routing: storage.UsageRoutingNative,
+		Requests: 1, InputTokens: 10,
+	}}, storage.UsageReconciliation{ReconciledAt: time.Now(), FilesScanned: 1, EventsImported: 1, RowsImported: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	server := &Server{store: store}
+	handler := server.device(http.HandlerFunc(server.resetTelemetry))
+	unauthenticated := httptest.NewRecorder()
+	handler.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodPost, "/api/v1/telemetry/reset", nil))
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated reset status = %d", unauthenticated.Code)
+	}
+	if usage, usageErr := store.Usage(context.Background(), time.Time{}); usageErr != nil || len(usage) != 1 {
+		t.Fatalf("unauthenticated reset changed telemetry: %#v, %v", usage, usageErr)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/telemetry/reset", nil)
+	request.Header.Set("Authorization", "Bearer "+approved.DeviceToken)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("authenticated reset status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if usage, usageErr := store.Usage(context.Background(), time.Time{}); usageErr != nil || len(usage) != 0 {
+		t.Fatalf("telemetry remains after authenticated reset: %#v, %v", usage, usageErr)
+	}
+	if _, metadataErr := store.UsageReconciliation(context.Background()); !errors.Is(metadataErr, storage.ErrNotFound) {
+		t.Fatalf("reconciliation metadata remains after reset: %v", metadataErr)
+	}
+}
+
+func TestAdminOllamaAllowHTTPIsExplicitAndPersistent(t *testing.T) {
+	box, err := secure.NewBox(bytes.Repeat([]byte{0x54}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := storage.Open(":memory:", box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	server := &Server{store: store}
+
+	submit := func(values url.Values) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/admin/providers/ollama", strings.NewReader(values.Encode()))
+		request.SetPathValue("name", "ollama")
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response := httptest.NewRecorder()
+		server.adminProvider(response, request)
+		return response
+	}
+	response := submit(url.Values{
+		"base_url": {"http://192.168.1.20:11434"}, "allow_http": {"on"}, "return_tab": {"providers"},
+	})
+	if response.Code != http.StatusSeeOther || strings.Contains(response.Header().Get("Location"), "error=1") {
+		t.Fatalf("explicit HTTP opt-in response = %d %q", response.Code, response.Header().Get("Location"))
+	}
+	provider, err := store.Provider(context.Background(), "ollama", false)
+	if err != nil || !provider.AllowHTTP() {
+		t.Fatalf("Allow HTTP was not persisted: %#v, %v", provider, err)
+	}
+
+	response = submit(url.Values{"base_url": {"http://192.168.1.20:11434"}, "return_tab": {"providers"}})
+	if response.Code != http.StatusSeeOther || !strings.Contains(response.Header().Get("Location"), "error=1") {
+		t.Fatalf("unchecked remote HTTP response = %d %q", response.Code, response.Header().Get("Location"))
+	}
+	provider, err = store.Provider(context.Background(), "ollama", false)
+	if err != nil || !provider.AllowHTTP() {
+		t.Fatalf("rejected update changed the persisted policy: %#v, %v", provider, err)
 	}
 }

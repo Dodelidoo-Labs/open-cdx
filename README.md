@@ -16,13 +16,13 @@ The project does not replace Codex, read an existing Codex or ChatGPT login, imp
 - Explicit browser authorization-code login with PKCE, five-minute state, duplicate detection, and replace flow
 - Per-account identity, plan, quota, reset-credit, and entitled-model validation before an account becomes ready
 - Exact native OpenAI catalog-entry preservation, union routing by entitlement, primary-account conflict resolution, and visible conflicts
-- Conservative OpenRouter discovery/translation and visible exclusions; remote-router Ollama support
+- Conservative OpenRouter discovery/translation and visible exclusions; remote-router Ollama support with an explicit LAN HTTP opt-in
 - Sticky thread/session affinity, primary-first operator-ordered account selection, quota failover, refresh-token single-flight, and stream-safe retry rules
 - Per-device enrollment, administrator approval, one-time credential delivery, acknowledgement, and revocation
 - Loopback helper with short-lived command authentication, Keychain storage on macOS, atomic catalogs, browser callbacks, and no inference-body inspection
 - Native `MenuBarExtra` application with no Dock icon and normal macOS login-item registration
 - Administration dashboard with Home telemetry, OpenAI account quotas, provider health, devices, sortable catalog diagnostics, and credential removal
-- One-year aggregate activity plus per-model token charts without storing prompts or responses
+- One-year aggregate activity plus per-model token charts without storing prompts or responses, with a telemetry-only reset
 - Optional one-time Codex history reconciliation from local rollout files, with cumulative-counter deduplication and a strict aggregate-only wire format
 - HTTP-only loopback development Compose stack and a production Caddy stack that exposes clients only over HTTPS
 
@@ -110,6 +110,12 @@ router-helper reconcile-usage --codex-home /absolute/path/to/codex-home
 
 OpenCDX does not discover or combine multiple Codex homes automatically. Each reconciliation is a complete replacement from the one selected root, which avoids silently mixing histories that may represent different configuration or authentication contexts.
 
+Choose **Reset Telemetry…** in either the dashboard or menu app to return all request and token counters to zero. Resetting deletes only the router's aggregate telemetry and reconciliation metadata. It does not change providers, devices, accounts, catalogs, or routing configuration, and it never reads or deletes anything under `~/.codex`. New routed usage begins accumulating immediately, or you can reconcile local history again later. The same operation is available from the helper:
+
+```sh
+router-helper reset-telemetry
+```
+
 See [helper and Codex setup](docs/helper-and-codex.md) and [deployment](docs/deployment.md) for the complete runbook.
 
 ## Production
@@ -125,9 +131,14 @@ docker compose --env-file docker/.env -f docker/compose.production.yml up -d
 ```
 
 The production Compose file pulls `ghcr.io/dodelidoo-labs/open-cdx`; set
-`OPENCODEX_VERSION` to a release such as `1.0.0`, or use `latest`. Caddy is the
+`OPENCODEX_VERSION` to a release such as `1.1.0`, or use `latest`. Caddy is the
 only published service and terminates HTTPS. Back up the named SQLite volume
 and `docker/secrets/master_key` together; neither is useful alone.
+
+That HTTPS requirement applies to Mac-to-router traffic. If the router reaches
+an Ollama server elsewhere on a trusted LAN, its provider settings offer
+**Allow HTTP**, off by default. Enable it only for that deliberate plaintext
+upstream connection; loopback HTTP remains allowed without the option.
 
 Maintainers: see [release automation](docs/releases.md) for tag, signing, and
 notarization setup.

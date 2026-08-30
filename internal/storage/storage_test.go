@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -207,6 +208,50 @@ func TestUsageReconciliationPreservesRoutedAndNativeRows(t *testing.T) {
 	}
 	if requests[UsageRoutingNative] != 1 || requests[UsageRoutingRouted] != 2 {
 		t.Fatalf("routing dimension was merged: %#v", usage)
+	}
+}
+
+func TestResetTelemetryRemovesOnlyUsageAndReconciliation(t *testing.T) {
+	store := testStore(t, ":memory:")
+	account, _, err := store.PutAccount(context.Background(), accountInput("reset-stable-id", "reset-access"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enrollment, err := store.CreateEnrollment(context.Background(), "Reset Mac")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.PutProvider(context.Background(), ProviderConfig{
+		Name: "ollama", BaseURL: "http://192.168.1.20:11434", Enabled: true,
+		Health: "healthy", Config: json.RawMessage(`{"allow_http":true}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.ReplaceUsage(context.Background(), []UsageAggregate{{
+		Day: "2026-08-30", Provider: "openai", ModelID: "gpt-test", Routing: UsageRoutingNative,
+		Requests: 2, InputTokens: 100, OutputTokens: 20,
+	}}, UsageReconciliation{ReconciledAt: time.Now(), FilesScanned: 1, EventsImported: 2, RowsImported: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err = store.ResetTelemetry(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if usage, usageErr := store.Usage(context.Background(), time.Time{}); usageErr != nil || len(usage) != 0 {
+		t.Fatalf("telemetry remains after reset: %#v, %v", usage, usageErr)
+	}
+	if _, metadataErr := store.UsageReconciliation(context.Background()); !errors.Is(metadataErr, ErrNotFound) {
+		t.Fatalf("reconciliation metadata remains after reset: %v", metadataErr)
+	}
+	if _, accountErr := store.Account(context.Background(), account.ID, false); accountErr != nil {
+		t.Fatalf("account was changed by telemetry reset: %v", accountErr)
+	}
+	if devices, deviceErr := store.Devices(context.Background()); deviceErr != nil || len(devices) != 1 || devices[0].ID != enrollment.DeviceID {
+		t.Fatalf("device was changed by telemetry reset: %#v, %v", devices, deviceErr)
+	}
+	provider, providerErr := store.Provider(context.Background(), "ollama", false)
+	if providerErr != nil || !provider.Enabled || !provider.AllowHTTP() {
+		t.Fatalf("provider was changed by telemetry reset: %#v, %v", provider, providerErr)
 	}
 }
 

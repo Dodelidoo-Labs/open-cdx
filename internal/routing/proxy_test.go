@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -63,6 +64,38 @@ func TestNativeProxyPreservesBodyAndMetadataWhileReplacingAuthentication(t *test
 		if receivedHeaders.Get(name) != value {
 			t.Fatalf("required Codex metadata header %s changed: %q", name, receivedHeaders.Get(name))
 		}
+	}
+}
+
+func TestOllamaRoutingEnforcesPersistedAllowHTTPPolicy(t *testing.T) {
+	box, err := secure.NewBox(bytes.Repeat([]byte{0x63}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := storage.Open(":memory:", box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	provider := storage.ProviderConfig{
+		Name: "ollama", BaseURL: "http://192.168.1.20:11434", Enabled: true,
+		Health: "healthy", Config: []byte(`{"allow_http":true}`),
+	}
+	if err = store.PutProvider(context.Background(), provider); err != nil {
+		t.Fatal(err)
+	}
+	proxy := NewProxy(store, nil, nil, nil, NewStatusRegistry(), &http.Client{}, false)
+	target, err := proxy.resolveTarget(context.Background(), "ollama", "ollama/model", "model", "/v1/responses", "device", "", "")
+	if err != nil || target.url != "http://192.168.1.20:11434/v1/responses" {
+		t.Fatalf("explicitly allowed Ollama target = %#v, %v", target, err)
+	}
+
+	provider.Config = []byte(`{"allow_http":false}`)
+	if err = store.PutProvider(context.Background(), provider); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = proxy.resolveTarget(context.Background(), "ollama", "ollama/model", "model", "/v1/responses", "device", "", ""); err == nil || !strings.Contains(err.Error(), "requires Allow HTTP") {
+		t.Fatalf("remote HTTP route without opt-in error = %v", err)
 	}
 }
 

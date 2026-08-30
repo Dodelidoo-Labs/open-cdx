@@ -27,7 +27,9 @@ struct SettingsView: View {
                     .font(.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Reconcile Usage History…") { model.requestUsageReconciliation() }
-                    .disabled(!model.status.connected || model.usageReconciliationInProgress)
+                    .disabled(!model.status.connected || model.usageReconciliationInProgress || model.telemetryResetInProgress)
+                Button("Reset Telemetry…", role: .destructive) { model.requestTelemetryReset() }
+                    .disabled(!model.status.connected || model.usageReconciliationInProgress || model.telemetryResetInProgress)
                 if !model.operation.isEmpty {
                     Text(model.operation)
                         .font(.callout)

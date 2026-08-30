@@ -56,7 +56,12 @@ struct RouterMenuView: View {
                 MenuActionButton("Reconcile Usage History…", systemImage: "clock.arrow.circlepath") {
                     model.requestUsageReconciliation()
                 }
-                .disabled(!model.status.connected || model.usageReconciliationInProgress)
+                .disabled(!model.status.connected || model.usageReconciliationInProgress || model.telemetryResetInProgress)
+
+                MenuActionButton("Reset Telemetry…", systemImage: "trash") {
+                    model.requestTelemetryReset()
+                }
+                .disabled(!model.status.connected || model.usageReconciliationInProgress || model.telemetryResetInProgress)
             }
             .padding(8)
 

@@ -26,6 +26,10 @@ Native OpenAI request bodies remain byte-for-byte unchanged. Third-party catalog
 
 Daily telemetry contains provider, routed model, opaque internal account key, request count, and token totals. The dashboard telemetry endpoint combines account rows and never returns the internal account key. It contains no prompts or responses.
 
+The dashboard and paired-device reset operations delete only those aggregate
+rows and their reconciliation metadata. They do not access Codex rollout files
+and do not delete accounts, devices, providers, catalogs, or routing state.
+
 Dashboard cost figures are estimates. The router refreshes the unauthenticated public OpenRouter model catalog, applies exact published input/output token prices to matching routed model IDs, and leaves unmatched models visibly unpriced. It does not present subscription usage as a bill or invent a cost for local Ollama execution.
 
 ## Header policy

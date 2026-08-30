@@ -149,6 +149,7 @@ func (server *Server) routes() http.Handler {
 	mux.Handle("POST /api/v1/catalog/restart-ack", server.device(http.HandlerFunc(server.acknowledgeCatalogRestart)))
 	mux.Handle("POST /api/v1/quotas/refresh", server.device(http.HandlerFunc(server.refreshQuotas)))
 	mux.Handle("POST /api/v1/telemetry/reconcile", server.device(http.HandlerFunc(server.reconcileUsage)))
+	mux.Handle("POST /api/v1/telemetry/reset", server.device(http.HandlerFunc(server.resetTelemetry)))
 	mux.Handle("POST /v1/responses", server.device(http.HandlerFunc(server.responses)))
 	mux.Handle("POST /v1/responses/compact", server.device(http.HandlerFunc(server.responses)))
 	mux.HandleFunc("GET /admin/login", server.loginPage)
@@ -163,6 +164,7 @@ func (server *Server) routes() http.Handler {
 	mux.Handle("POST /admin/logout", server.admin(http.HandlerFunc(server.logout)))
 	mux.Handle("GET /admin", server.admin(http.HandlerFunc(server.dashboard)))
 	mux.Handle("GET /admin/telemetry", server.admin(http.HandlerFunc(server.adminTelemetry)))
+	mux.Handle("POST /admin/telemetry/reset", server.admin(http.HandlerFunc(server.adminResetTelemetry)))
 	mux.Handle("POST /admin/refresh", server.admin(http.HandlerFunc(server.adminRefresh)))
 	mux.Handle("POST /admin/accounts/reorder", server.admin(http.HandlerFunc(server.adminAccountOrder)))
 	mux.Handle("POST /admin/accounts/{id}/{action}", server.admin(http.HandlerFunc(server.adminAccount)))
@@ -401,6 +403,14 @@ func (server *Server) reconcileUsage(writer http.ResponseWriter, request *http.R
 	})
 }
 
+func (server *Server) resetTelemetry(writer http.ResponseWriter, request *http.Request) {
+	if err := server.store.ResetTelemetry(request.Context()); err != nil {
+		writeAPIError(writer, http.StatusInternalServerError, "telemetry_reset_failed", "telemetry could not be reset")
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
+}
+
 func validatedHistorySnapshot(snapshot usagehistory.Snapshot, now time.Time) ([]storage.UsageAggregate, error) {
 	if snapshot.Version != usagehistory.SnapshotVersion {
 		return nil, errors.New("usage history format is unsupported")
@@ -488,7 +498,7 @@ func (server *Server) RefreshProviders(ctx context.Context) error {
 		}
 	}
 	if provider, err := server.store.Provider(ctx, "ollama", false); err == nil && provider.Enabled {
-		client, clientErr := ollama.New(server.httpClient, provider.BaseURL, server.insecureDev)
+		client, clientErr := ollama.New(server.httpClient, provider.BaseURL, server.insecureDev || provider.AllowHTTP())
 		if clientErr == nil {
 			clientErr = server.catalog.RefreshOllama(ctx, client)
 		}
@@ -620,6 +630,15 @@ func (server *Server) adminTelemetry(writer http.ResponseWriter, request *http.R
 	writeJSON(writer, http.StatusOK, telemetry.Build(usage, reconciliation, now))
 }
 
+func (server *Server) adminResetTelemetry(writer http.ResponseWriter, request *http.Request) {
+	err := server.store.ResetTelemetry(request.Context())
+	message := "Telemetry reset; providers, devices, accounts, and local Codex history were not changed"
+	if err != nil {
+		message = "Telemetry could not be reset"
+	}
+	redirectMessage(writer, request, message, err != nil)
+}
+
 func (server *Server) adminRefresh(writer http.ResponseWriter, request *http.Request) {
 	providerErr := server.RefreshProviders(request.Context())
 	accountErr := server.accounts.RefreshAll(request.Context(), normalizedVersion(""))
@@ -690,6 +709,11 @@ func (server *Server) adminProvider(writer http.ResponseWriter, request *http.Re
 		return
 	}
 	provider := storage.ProviderConfig{Name: name, BaseURL: strings.TrimSpace(request.FormValue("base_url")), APIKey: strings.TrimSpace(request.FormValue("api_key")), Enabled: request.FormValue("enabled") == "on", Health: "disabled"}
+	if name == "ollama" {
+		provider.Config, _ = json.Marshal(struct {
+			AllowHTTP bool `json:"allow_http"`
+		}{AllowHTTP: request.FormValue("allow_http") == "on"})
+	}
 	if provider.Enabled {
 		provider.Health = "checking"
 	}
@@ -707,7 +731,7 @@ func (server *Server) adminProvider(writer http.ResponseWriter, request *http.Re
 			_, validationErr = openrouter.New(server.httpClient, provider.BaseURL, effectiveKey)
 		}
 	} else {
-		_, validationErr = ollama.New(server.httpClient, provider.BaseURL, server.insecureDev)
+		_, validationErr = ollama.New(server.httpClient, provider.BaseURL, server.insecureDev || provider.AllowHTTP())
 	}
 	if validationErr != nil {
 		redirectMessage(writer, request, validationErr.Error(), true)
@@ -780,7 +804,7 @@ type deviceView struct {
 }
 type providerView struct {
 	Name, DisplayName, Description, BaseURL, Health, LastError, Updated, UpdatedAt string
-	Enabled, HasCredential                                                         bool
+	Enabled, HasCredential, AllowHTTP                                              bool
 }
 type conflictView struct{ Model, Detail string }
 type modelView struct{ Provider, Model, State, Detail string }
@@ -871,6 +895,7 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 		view := providerView{
 			Name: provider.Name, BaseURL: provider.BaseURL, Enabled: provider.Enabled, Health: provider.Health,
 			LastError: provider.LastError, Updated: friendlyTime(provider.UpdatedAt), UpdatedAt: browserTimestamp(provider.UpdatedAt),
+			AllowHTTP: provider.AllowHTTP(),
 		}
 		switch provider.Name {
 		case "ollama":

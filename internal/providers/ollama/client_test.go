@@ -43,6 +43,20 @@ func TestCatalogUsesOnlyNoReasoningSentinel(t *testing.T) {
 	}
 }
 
+func TestRemotePlaintextRequiresExplicitOptIn(t *testing.T) {
+	if _, err := New(nil, "http://192.168.1.20:11434", false); err == nil {
+		t.Fatal("remote plaintext Ollama was accepted without explicit opt-in")
+	}
+	if _, err := New(nil, "http://192.168.1.20:11434", true); err != nil {
+		t.Fatalf("remote plaintext Ollama was rejected with explicit opt-in: %v", err)
+	}
+	for _, endpoint := range []string{"http://127.0.0.1:11434", "https://ollama.example.com"} {
+		if _, err := New(nil, endpoint, false); err != nil {
+			t.Fatalf("safe default endpoint %q was rejected: %v", endpoint, err)
+		}
+	}
+}
+
 func TestResponsesVersionFloor(t *testing.T) {
 	for _, value := range []string{"0.13.3", "v0.13.4", "0.14.0", "1.0.0"} {
 		if !versionAtLeast(value, 0, 13, 3) {

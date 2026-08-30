@@ -59,6 +59,8 @@ func run(args []string) error {
 		return control(configPath, http.MethodPost, "/control/quotas/refresh", commandArgs, os.Stdout)
 	case "reconcile-usage":
 		return reconcileUsage(configPath, commandArgs)
+	case "reset-telemetry":
+		return resetTelemetry(configPath, commandArgs)
 	case "quit":
 		return control(configPath, http.MethodPost, "/control/quit", commandArgs, io.Discard)
 	case "login-openai":
@@ -352,6 +354,27 @@ func reconcileUsageToWithSecrets(configPath string, args []string, output io.Wri
 	return nil
 }
 
+func resetTelemetry(configPath string, args []string) error {
+	return resetTelemetryToWithSecrets(configPath, args, os.Stdout, helper.NewSecretStore(configPath))
+}
+
+func resetTelemetryToWithSecrets(configPath string, args []string, output io.Writer, secrets helper.SecretStore) error {
+	flags := flag.NewFlagSet("reset-telemetry", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	_, client, err := pairedClientWithSecrets(configPath, secrets)
+	if err != nil {
+		return err
+	}
+	if _, err = client.JSON(context.Background(), http.MethodPost, "/api/v1/telemetry/reset", nil, nil, true); err != nil {
+		return err
+	}
+	fmt.Fprintln(output, "Telemetry reset. Providers, devices, accounts, and local Codex history were not changed.")
+	return nil
+}
+
 func printConfig(configPath string, args []string) error {
 	flags := flag.NewFlagSet("config", flag.ContinueOnError)
 	if err := flags.Parse(args); err != nil {
@@ -441,5 +464,5 @@ func defaultDeviceName() string {
 }
 
 func usageError() error {
-	return errors.New("usage: router-helper [--config PATH] <enroll|pair|daemon|token|status|login-openai|sync-catalog|refresh-catalog|acknowledge-restart|refresh-quotas|reconcile-usage|reconnect|config|open-dashboard|quit|version>")
+	return errors.New("usage: router-helper [--config PATH] <enroll|pair|daemon|token|status|login-openai|sync-catalog|refresh-catalog|acknowledge-restart|refresh-quotas|reconcile-usage|reset-telemetry|reconnect|config|open-dashboard|quit|version>")
 }
