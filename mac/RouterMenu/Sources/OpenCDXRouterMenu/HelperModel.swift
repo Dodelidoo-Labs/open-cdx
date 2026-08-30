@@ -39,6 +39,7 @@ struct AccountAllowanceStatus: Codable {
 struct HelperStatus: Codable {
     var state = "disconnected"
     var connected = false
+    var activeRequests = 0
     var routerURL = ""
     var deviceName = ""
     var accounts: [AccountAllowanceStatus] = []
@@ -55,6 +56,7 @@ struct HelperStatus: Codable {
 
     enum CodingKeys: String, CodingKey {
         case state, connected, accounts, provider, model, account
+        case activeRequests = "active_requests"
         case routerURL = "router_url"
         case deviceName = "device_name"
         case quotaRemaining = "quota_remaining"
@@ -72,6 +74,7 @@ struct HelperStatus: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         state = try container.decodeIfPresent(String.self, forKey: .state) ?? "disconnected"
         connected = try container.decodeIfPresent(Bool.self, forKey: .connected) ?? false
+        activeRequests = try container.decodeIfPresent(Int.self, forKey: .activeRequests) ?? 0
         routerURL = try container.decodeIfPresent(String.self, forKey: .routerURL) ?? ""
         deviceName = try container.decodeIfPresent(String.self, forKey: .deviceName) ?? ""
         accounts = try container.decodeIfPresent([AccountAllowanceStatus].self, forKey: .accounts) ?? []
@@ -98,8 +101,12 @@ final class HelperModel: ObservableObject {
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
     @Published private(set) var configured = false
     @Published private(set) var accountLoginInProgress = false
+    @Published private(set) var activityPulsePhase = false
 
     private var timer: AnyCancellable?
+    private var activityTimer: AnyCancellable?
+    private var activityRequestInFlight = false
+    private var helperHealthURL: URL?
     private var daemonProcess: Process?
     private var pairing = UserDefaults.standard.bool(forKey: "pairingPending")
     private var restartingDaemon = false
@@ -107,8 +114,11 @@ final class HelperModel: ObservableObject {
     private var historyPromptVisible = false
     private let historyImportDecisionKey = "usageHistoryImportDecisionMade"
 
+    var inferenceActive: Bool { status.activeRequests > 0 }
+
     var menuIcon: String {
         if !configured { return "gearshape.fill" }
+        if inferenceActive { return activityPulsePhase ? "waveform.circle.fill" : "waveform" }
         switch status.state {
         case "connected": return "arrow.triangle.branch"
         case "connecting": return "arrow.clockwise.circle"
@@ -119,6 +129,7 @@ final class HelperModel: ObservableObject {
 
     var routerStatusLabel: String {
         if !configured { return "Setup Required" }
+        if inferenceActive { return "Responding" }
         return status.connected ? "Connected" : status.state.capitalized
     }
 
@@ -126,6 +137,7 @@ final class HelperModel: ObservableObject {
         guard !started else { return }
         started = true
         configured = helperConfigurationExists
+        updateHelperHealthURL()
         if configured {
             startDaemon()
             status.state = "connecting"
@@ -139,6 +151,9 @@ final class HelperModel: ObservableObject {
         timer = Timer.publish(every: 8, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in self?.tick() }
+        activityTimer = Timer.publish(every: 0.75, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in self?.activityTick() }
     }
 
     func requestEnrollment() {
@@ -157,6 +172,7 @@ final class HelperModel: ObservableObject {
             guard let self else { return }
             if result.success {
                 self.configured = true
+                self.updateHelperHealthURL()
                 self.pairing = true
                 UserDefaults.standard.set(true, forKey: "pairingPending")
                 self.status.state = "connecting"
@@ -235,7 +251,7 @@ final class HelperModel: ObservableObject {
         }
         let alert = NSAlert()
         alert.messageText = "Replace telemetry with Codex usage history?"
-        alert.informativeText = "OpenCDX will scan Codex rollout files on this Mac and send only dates, providers, models, request counts, and token counters. Prompts, responses, paths, credentials, and account identifiers are never imported. Existing router telemetry will be replaced, then new proxied usage will continue accumulating."
+        alert.informativeText = "OpenCDX will scan Codex rollout files on this Mac and send only dates, providers, models, routing classifications, request counts, and token counters. Prompts, responses, paths, credentials, and account identifiers are never imported. Existing router telemetry will be replaced, then new proxied usage will continue accumulating."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Reconcile Usage")
         alert.addButton(withTitle: "Cancel")
@@ -281,6 +297,7 @@ final class HelperModel: ObservableObject {
             guard let self else { return }
             guard result.success, let data = result.output.data(using: .utf8) else {
                 self.status.connected = false
+                self.status.activeRequests = 0
                 self.status.state = self.pairing ? "connecting" : "disconnected"
                 self.status.lastError = self.pairing ? "" : "Helper daemon is not running."
                 return
@@ -413,7 +430,7 @@ final class HelperModel: ObservableObject {
         historyPromptVisible = true
         let alert = NSAlert()
         alert.messageText = "Import existing Codex usage history?"
-        alert.informativeText = "This optional one-time import runs locally and uploads only daily model/provider request and token totals. It never imports prompts, responses, paths, credentials, or account identifiers. You can run it later from the Router menu."
+        alert.informativeText = "This optional one-time import runs locally and uploads only daily model/provider/routing request and token totals. It never imports prompts, responses, paths, credentials, or account identifiers. You can run it later from the Router menu."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Import History")
         alert.addButton(withTitle: "Skip")
@@ -462,17 +479,59 @@ final class HelperModel: ObservableObject {
         }
     }
 
-    private var helperConfigurationExists: Bool {
-        guard let applicationSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return false }
-        let config = applicationSupport
+    private func activityTick() {
+        let nextPhase = inferenceActive ? !activityPulsePhase : false
+        if nextPhase != activityPulsePhase {
+            activityPulsePhase = nextPhase
+        }
+        refreshInferenceActivity()
+    }
+
+    private func refreshInferenceActivity() {
+        guard configured, !activityRequestInFlight else { return }
+        if helperHealthURL == nil { updateHelperHealthURL() }
+        guard let helperHealthURL else { return }
+        activityRequestInFlight = true
+        var request = URLRequest(url: helperHealthURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 0.6)
+        request.httpMethod = "GET"
+        URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
+            let activeRequests = data.flatMap { try? JSONDecoder().decode(HelperHealthStatus.self, from: $0).activeRequests }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.activityRequestInFlight = false
+                guard let activeRequests, activeRequests != self.status.activeRequests else { return }
+                var updated = self.status
+                updated.activeRequests = max(0, activeRequests)
+                self.status = updated
+            }
+        }.resume()
+    }
+
+    private func updateHelperHealthURL() {
+        guard let configURL = helperConfigurationURL,
+              let data = try? Data(contentsOf: configURL),
+              let config = try? JSONDecoder().decode(HelperRuntimeConfiguration.self, from: data) else {
+            helperHealthURL = nil
+            return
+        }
+        let port = config.listenPort == 0 ? 17464 : config.listenPort
+        helperHealthURL = URL(string: "http://127.0.0.1:\(port)/healthz")
+    }
+
+    private var helperConfigurationURL: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent("OpenCDX Router", isDirectory: true)
             .appendingPathComponent("helper.json", isDirectory: false)
-        return FileManager.default.isReadableFile(atPath: config.path)
+    }
+
+    private var helperConfigurationExists: Bool {
+        guard let helperConfigurationURL else { return false }
+        return FileManager.default.isReadableFile(atPath: helperConfigurationURL.path)
     }
 
     private func markSetupRequired() {
-		status = HelperStatus()
-		status.state = "setup"
+        status = HelperStatus()
+        status.state = "setup"
         if operation.isEmpty || operation == "Helper daemon is not running." {
             operation = "Open Settings to connect and enroll this Mac."
         }
@@ -514,6 +573,22 @@ final class HelperModel: ObservableObject {
             let result = CommandResult(success: process.terminationStatus == 0, output: output, error: displayError.isEmpty ? "Helper command failed." : displayError)
             DispatchQueue.main.async { completion(result) }
         }
+    }
+}
+
+private struct HelperRuntimeConfiguration: Decodable {
+    let listenPort: Int
+
+    enum CodingKeys: String, CodingKey {
+        case listenPort = "listen_port"
+    }
+}
+
+private struct HelperHealthStatus: Decodable {
+    let activeRequests: Int
+
+    enum CodingKeys: String, CodingKey {
+        case activeRequests = "active_requests"
     }
 }
 

@@ -1,5 +1,7 @@
 # OpenCDX Router
 
+[GitHub](https://github.com/Dodelidoo-Labs/open-cdx) · [Releases](https://github.com/Dodelidoo-Labs/open-cdx/releases) · `ghcr.io/dodelidoo-labs/open-cdx`
+
 OpenCDX Router is a credential-isolating provider router for Codex. A central Go service owns OpenAI OAuth grants, OpenRouter credentials, catalogs, quota state, and routing. Each Mac runs a small loopback helper and a native SwiftUI menu-bar app.
 
 ```text
@@ -70,11 +72,15 @@ setting it deliberately falls back to ad-hoc signing.
 
 The built artifact is `dist/OpenCDX Router.app`. On first launch, open Settings, enter the router's HTTPS address and a device name, request enrollment, then approve the pending Mac in the dashboard. The app detects approval and starts the bundled helper.
 
+End users can download the signed, notarized universal macOS ZIP from the
+[latest GitHub release](https://github.com/Dodelidoo-Labs/open-cdx/releases/latest).
+Release builds support both Apple silicon and Intel Macs on macOS 13 or newer.
+
 Use **Add OpenAI Account…** for each account. The browser is forced through a fresh login, and duplicate accounts are rejected without replacing stored credentials. Account allowance changes appear in the menu within about 30 seconds; catalog changes are checked every minute or immediately with **Refresh Model Catalog**.
 
 After the first catalog sync, choose **Copy Codex Configuration** and paste the snippet into `~/.codex/config.toml` yourself. Restart Codex whenever the menu reports that the catalog changed, then choose **Done** beside the reminder; Codex loads `model_catalog_json` at startup.
 
-After pairing, the app asks once whether to import existing Codex usage history. The scan stays on the Mac and extracts only the UTC day, provider, model, request count, and input/cached/cache-write/output/reasoning token counters from `~/.codex/sessions` and `~/.codex/archived_sessions` (or `CODEX_HOME`). Prompt and response records are ignored and the server rejects fields outside the aggregate schema. Reconciliation transactionally replaces existing telemetry, after which normal proxy accounting continues. Run it again at any time with **Reconcile Usage History…** in the menu or:
+After pairing, the app asks once whether to import existing Codex usage history. The scan stays on the Mac and extracts only the UTC day, provider, model, routing classification, request count, and input/cached/cache-write/output/reasoning token counters from `~/.codex/sessions` and `~/.codex/archived_sessions` (or `CODEX_HOME`). Prompt and response records are ignored and the server rejects fields outside the aggregate schema. Reconciliation transactionally replaces existing telemetry and records the import instant. Telemetry keeps ingestion source (`reconciled` or live proxy `routed`) separate from routing classification (`routed` or `native`). The latter is derived from Codex's durable `model_provider = "opencdx"` rollout metadata, so the dashboard's **Group by → Routed / native** view remains accurate after any later full reconciliation. Running reconciliation again replaces both the aggregates and that boundary. Run it at any time with **Reconcile Usage History…** in the menu or:
 
 ```sh
 router-helper reconcile-usage
@@ -90,10 +96,17 @@ Production clients must never use plaintext LAN HTTP. Set a real DNS name and AC
 cp docker/.env.example docker/.env
 # Edit docker/.env.
 ./scripts/generate-docker-secrets.sh
-docker compose --env-file docker/.env -f docker/compose.production.yml up -d --build
+docker compose --env-file docker/.env -f docker/compose.production.yml pull
+docker compose --env-file docker/.env -f docker/compose.production.yml up -d
 ```
 
-Caddy is the only published service and terminates HTTPS. Back up the named SQLite volume and `docker/secrets/master_key` together; neither is useful alone.
+The production Compose file pulls `ghcr.io/dodelidoo-labs/open-cdx`; set
+`OPENCODEX_VERSION` to a release such as `1.0.0`, or use `latest`. Caddy is the
+only published service and terminates HTTPS. Back up the named SQLite volume
+and `docker/secrets/master_key` together; neither is useful alone.
+
+Maintainers: see [release automation](docs/releases.md) for tag, signing, and
+notarization setup.
 
 ## Verification status
 

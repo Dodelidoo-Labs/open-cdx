@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/opencdx/opencdx/internal/providers"
-	"github.com/opencdx/opencdx/internal/providers/ollama"
-	"github.com/opencdx/opencdx/internal/providers/openrouter"
-	"github.com/opencdx/opencdx/internal/storage"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/providers"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/providers/ollama"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/providers/openrouter"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/storage"
 )
 
 type Manager struct {

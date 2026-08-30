@@ -1,8 +1,6 @@
 services:
   router:
-    build:
-      context: ..
-      dockerfile: Dockerfile
+    image: "ghcr.io/dodelidoo-labs/open-cdx:${OPENCODEX_VERSION:-latest}"
     restart: unless-stopped
     expose:
       - "8080"

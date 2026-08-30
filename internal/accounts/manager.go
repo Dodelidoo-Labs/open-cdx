@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	secure "github.com/opencdx/opencdx/internal/crypto"
-	"github.com/opencdx/opencdx/internal/providers"
-	"github.com/opencdx/opencdx/internal/providers/openai"
-	"github.com/opencdx/opencdx/internal/storage"
+	secure "github.com/Dodelidoo-Labs/open-cdx/internal/crypto"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/providers"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/providers/openai"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/storage"
 )
 
 const oauthLifetime = 5 * time.Minute

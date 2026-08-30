@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/opencdx/opencdx/internal/providers"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/providers"
 )
 
 type Client struct {

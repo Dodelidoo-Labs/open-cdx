@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/opencdx/opencdx/internal/accounts"
-	"github.com/opencdx/opencdx/internal/catalog"
-	secure "github.com/opencdx/opencdx/internal/crypto"
-	"github.com/opencdx/opencdx/internal/providers/openai"
-	"github.com/opencdx/opencdx/internal/storage"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/accounts"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/catalog"
+	secure "github.com/Dodelidoo-Labs/open-cdx/internal/crypto"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/providers/openai"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/storage"
 )
 
 func TestNativeProxyPreservesBodyAndMetadataWhileReplacingAuthentication(t *testing.T) {
@@ -113,6 +113,62 @@ func TestNoRetryAfterPartialStreaming(t *testing.T) {
 	if writer.Body.String() != "data: partial\n\n" {
 		t.Fatalf("partial bytes were not forwarded: %q", writer.Body.String())
 	}
+	status := proxy.status.Get("device")
+	if status.Connected || status.State != "degraded" || status.LastError == "" {
+		t.Fatalf("upstream disconnect was not reflected in route health: %#v", status)
+	}
+}
+
+func TestTerminalEventBeforeTransportErrorKeepsRouteHealthy(t *testing.T) {
+	terminal := []byte("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":4,\"output_tokens\":2}}}\n\n")
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(&oneChunkThenError{chunk: terminal}), Request: request}, nil
+	})
+	proxy, _, _ := proxyFixture(t, &http.Client{Transport: transport}, "https://upstream.invalid", []routeFixture{{stable: "stream-account", quota: 1, models: []string{"gpt-stream"}}})
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-stream","stream":true}`))
+	proxy.ServeDeviceHTTP(httptest.NewRecorder(), request, DeviceContext{ID: "device"})
+	status := proxy.status.Get("device")
+	if !status.Connected || status.State != "connected" || status.LastError != "" {
+		t.Fatalf("completed response was misclassified as degraded: %#v", status)
+	}
+}
+
+func TestDownstreamDisconnectDoesNotDegradeUpstreamRoute(t *testing.T) {
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(bytes.NewBufferString("data: partial\n\n")), Request: request}, nil
+	})
+	proxy, _, _ := proxyFixture(t, &http.Client{Transport: transport}, "https://upstream.invalid", []routeFixture{{stable: "stream-account", quota: 1, models: []string{"gpt-stream"}}})
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-stream","stream":true}`))
+	proxy.ServeDeviceHTTP(&failingResponseWriter{header: make(http.Header)}, request, DeviceContext{ID: "device"})
+	status := proxy.status.Get("device")
+	if !status.Connected || status.State != "connected" || status.LastError != "" {
+		t.Fatalf("downstream disconnect degraded the upstream route: %#v", status)
+	}
+}
+
+func TestClientCancellationBeforeUpstreamHeadersDoesNotDegradeRoute(t *testing.T) {
+	started := make(chan struct{})
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		close(started)
+		<-request.Context().Done()
+		return nil, request.Context().Err()
+	})
+	proxy, _, _ := proxyFixture(t, &http.Client{Transport: transport}, "https://upstream.invalid", []routeFixture{{stable: "stream-account", quota: 1, models: []string{"gpt-stream"}}})
+	ctx, cancel := context.WithCancel(context.Background())
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-stream","stream":true}`)).WithContext(ctx)
+	done := make(chan struct{})
+	go func() {
+		proxy.ServeDeviceHTTP(httptest.NewRecorder(), request, DeviceContext{ID: "device"})
+		close(done)
+	}()
+	<-started
+	cancel()
+	<-done
+
+	status := proxy.status.Get("device")
+	if !status.Connected || status.State != "connected" || status.LastError != "" {
+		t.Fatalf("client cancellation degraded the upstream route: %#v", status)
+	}
 }
 
 func TestRoutingErrorsRedactSecrets(t *testing.T) {
@@ -166,6 +222,17 @@ func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, 
 type oneChunkThenError struct {
 	chunk []byte
 	sent  bool
+}
+
+type failingResponseWriter struct {
+	header http.Header
+	status int
+}
+
+func (writer *failingResponseWriter) Header() http.Header    { return writer.header }
+func (writer *failingResponseWriter) WriteHeader(status int) { writer.status = status }
+func (writer *failingResponseWriter) Write([]byte) (int, error) {
+	return 0, errors.New("simulated downstream disconnect")
 }
 
 func (reader *oneChunkThenError) Read(destination []byte) (int, error) {

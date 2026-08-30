@@ -11,15 +11,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/opencdx/opencdx/internal/accounts"
-	"github.com/opencdx/opencdx/internal/catalog"
-	"github.com/opencdx/opencdx/internal/config"
-	secure "github.com/opencdx/opencdx/internal/crypto"
-	"github.com/opencdx/opencdx/internal/httpapi"
-	"github.com/opencdx/opencdx/internal/providers/openai"
-	"github.com/opencdx/opencdx/internal/routing"
-	"github.com/opencdx/opencdx/internal/storage"
-	"github.com/opencdx/opencdx/internal/version"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/accounts"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/catalog"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/config"
+	secure "github.com/Dodelidoo-Labs/open-cdx/internal/crypto"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/httpapi"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/providers/openai"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/routing"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/storage"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/version"
 )
 
 func main() {

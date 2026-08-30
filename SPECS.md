@@ -175,16 +175,16 @@ This is a separate OAuth session from any Codex or ChatGPT login already present
 Generate a configuration resembling:
 
 ```toml
-model_provider = "router"
+model_provider = "opencdx"
 model_catalog_json = "/Users/USER/Library/Application Support/Router/catalog.json"
 
-[model_providers.router]
+[model_providers.opencdx]
 name = "Router"
 base_url = "http://127.0.0.1:PORT/v1"
 wire_api = "responses"
 supports_websockets = false
 
-[model_providers.router.auth]
+[model_providers.opencdx.auth]
 command = "/path/to/router-helper"
 args = ["token"]
 timeout_ms = 5000

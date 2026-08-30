@@ -19,17 +19,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/opencdx/opencdx/internal/accounts"
-	"github.com/opencdx/opencdx/internal/catalog"
-	secure "github.com/opencdx/opencdx/internal/crypto"
-	"github.com/opencdx/opencdx/internal/providers/ollama"
-	"github.com/opencdx/opencdx/internal/providers/openai"
-	"github.com/opencdx/opencdx/internal/providers/openrouter"
-	"github.com/opencdx/opencdx/internal/routing"
-	"github.com/opencdx/opencdx/internal/storage"
-	"github.com/opencdx/opencdx/internal/telemetry"
-	"github.com/opencdx/opencdx/internal/usagehistory"
-	site "github.com/opencdx/opencdx/web"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/accounts"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/catalog"
+	secure "github.com/Dodelidoo-Labs/open-cdx/internal/crypto"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/providers/ollama"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/providers/openai"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/providers/openrouter"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/routing"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/storage"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/telemetry"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/usagehistory"
+	appversion "github.com/Dodelidoo-Labs/open-cdx/internal/version"
+	site "github.com/Dodelidoo-Labs/open-cdx/web"
 )
 
 const sessionLifetime = 12 * time.Hour
@@ -44,6 +45,7 @@ type Server struct {
 	publicURL   *url.URL
 	insecureDev bool
 	httpClient  *http.Client
+	updates     *appversion.UpdateChecker
 	templates   *template.Template
 	sessionsMu  sync.Mutex
 	sessions    map[string]adminSession
@@ -66,11 +68,15 @@ func New(store *storage.Store, accountManager *accounts.Manager, catalogManager 
 	if err != nil {
 		return nil, fmt.Errorf("parse dashboard templates: %w", err)
 	}
+	updates := appversion.NewUpdateChecker(httpClient)
 	server := &Server{
 		store: store, accounts: accountManager, catalog: catalogManager, proxy: proxy, status: status,
 		adminSecret: adminSecret, publicURL: parsedURL, insecureDev: insecureDev, httpClient: httpClient,
-		templates: templates, sessions: make(map[string]adminSession),
+		updates: updates, templates: templates, sessions: make(map[string]adminSession),
 	}
+	// Prime the asynchronous cache at startup. GitHub availability never gates
+	// router startup or dashboard rendering.
+	_ = updates.Snapshot()
 	server.handler = server.routes()
 	return server, nil
 }
@@ -332,8 +338,6 @@ func (server *Server) catalogResponse(writer http.ResponseWriter, request *http.
 	previous := server.status.Get(device.ID)
 	now := time.Now().UTC()
 	server.status.Update(device.ID, func(status *routing.RouteStatus) {
-		status.Connected = true
-		status.State = "connected"
 		status.RestartRequired = previous.CatalogHash != "" && previous.CatalogHash != result.Hash
 		status.CatalogHash = result.Hash
 		status.CatalogUpdated = now
@@ -398,18 +402,21 @@ func validatedHistorySnapshot(snapshot usagehistory.Snapshot, now time.Time) ([]
 	var requests int64
 	for _, row := range snapshot.Rows {
 		day, err := time.Parse("2006-01-02", row.Day)
-		provider, model := strings.TrimSpace(row.Provider), strings.TrimSpace(row.Model)
+		provider, model, routing := strings.TrimSpace(row.Provider), strings.TrimSpace(row.Model), strings.TrimSpace(row.Routing)
 		if err != nil || day.Format("2006-01-02") != row.Day || day.After(now.Add(24*time.Hour)) {
 			return nil, errors.New("usage history contains an invalid date")
 		}
 		if provider == "" || len(provider) > 100 || model == "" || len(model) > 512 || strings.ContainsAny(provider+model, "\x00\r\n") {
 			return nil, errors.New("usage history contains an invalid provider or model")
 		}
+		if routing != usagehistory.RoutingRouted && routing != usagehistory.RoutingNative {
+			return nil, errors.New("usage history contains an invalid routing classification")
+		}
 		if row.Requests < 1 || row.Requests > 100_000_000 || !validUsageCount(row.InputTokens) || !validUsageCount(row.CachedInputTokens) ||
 			!validUsageCount(row.CacheWriteInputTokens) || !validUsageCount(row.OutputTokens) || !validUsageCount(row.ReasoningOutputTokens) {
 			return nil, errors.New("usage history contains invalid counters")
 		}
-		key := row.Day + "\x00" + provider + "\x00" + model
+		key := row.Day + "\x00" + provider + "\x00" + model + "\x00" + routing
 		if _, duplicate := seen[key]; duplicate {
 			return nil, errors.New("usage history contains duplicate rows")
 		}
@@ -419,7 +426,7 @@ func validatedHistorySnapshot(snapshot usagehistory.Snapshot, now time.Time) ([]
 		}
 		requests += row.Requests
 		aggregates = append(aggregates, storage.UsageAggregate{
-			Day: row.Day, Provider: provider, ModelID: model, Requests: row.Requests,
+			Day: row.Day, Provider: provider, ModelID: model, Routing: routing, Requests: row.Requests,
 			InputTokens: row.InputTokens, CachedInputTokens: row.CachedInputTokens,
 			CacheWriteInputTokens: row.CacheWriteInputTokens, OutputTokens: row.OutputTokens,
 			ReasoningOutputTokens: row.ReasoningOutputTokens,
@@ -582,7 +589,15 @@ func (server *Server) adminTelemetry(writer http.ResponseWriter, request *http.R
 		writeAPIError(writer, http.StatusInternalServerError, "telemetry_unavailable", "aggregate telemetry is unavailable")
 		return
 	}
-	writeJSON(writer, http.StatusOK, telemetry.Build(usage, now))
+	var reconciliation *storage.UsageReconciliation
+	metadata, metadataErr := server.store.UsageReconciliation(request.Context())
+	if metadataErr == nil {
+		reconciliation = &metadata
+	} else if !errors.Is(metadataErr, storage.ErrNotFound) {
+		writeAPIError(writer, http.StatusInternalServerError, "telemetry_unavailable", "reconciliation metadata is unavailable")
+		return
+	}
+	writeJSON(writer, http.StatusOK, telemetry.Build(usage, reconciliation, now))
 }
 
 func (server *Server) adminRefresh(writer http.ResponseWriter, request *http.Request) {
@@ -621,6 +636,7 @@ func (server *Server) adminAccountOrder(writer http.ResponseWriter, request *htt
 func (server *Server) adminDevice(writer http.ResponseWriter, request *http.Request) {
 	id, action := request.PathValue("id"), request.PathValue("action")
 	var err error
+	message := "Device updated"
 	switch action {
 	case "approve":
 		err = server.store.ApproveDevice(request.Context(), id)
@@ -628,10 +644,19 @@ func (server *Server) adminDevice(writer http.ResponseWriter, request *http.Requ
 		err = server.store.RejectDevice(request.Context(), id)
 	case "revoke":
 		err = server.store.RevokeDevice(request.Context(), id)
+	case "delete":
+		err = server.store.DeleteDevice(request.Context(), id)
+		if err == nil {
+			server.status.Delete(id)
+			message = "Device deleted"
+		}
 	default:
 		err = errors.New("unknown device action")
 	}
-	redirectMessage(writer, request, map[bool]string{true: "Device action failed", false: "Device updated"}[err != nil], err != nil)
+	if err != nil {
+		message = "Device action failed"
+	}
+	redirectMessage(writer, request, message, err != nil)
 }
 
 func (server *Server) adminProvider(writer http.ResponseWriter, request *http.Request) {
@@ -686,6 +711,10 @@ type dashboardPage struct {
 	CSRF                    string
 	Message                 string
 	MessageError            bool
+	RepositoryURL           string
+	CurrentVersion          string
+	LatestVersion           string
+	UpdateAvailable         bool
 	Accounts                []accountView
 	ReadyAccountCount       int
 	AccountsHealthy         bool
@@ -730,7 +759,14 @@ type conflictView struct{ Model, Detail string }
 type modelView struct{ Provider, Model, State, Detail string }
 
 func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboardPage, error) {
-	page := dashboardPage{CSRF: csrf, AccountsHealthy: true}
+	update := appversion.UpdateStatus{Current: appversion.Display()}
+	if server.updates != nil {
+		update = server.updates.Snapshot()
+	}
+	page := dashboardPage{
+		CSRF: csrf, AccountsHealthy: true, RepositoryURL: appversion.RepositoryURL,
+		CurrentVersion: update.Current, LatestVersion: update.Latest, UpdateAvailable: update.Available,
+	}
 	accounts, err := server.store.Accounts(ctx, false)
 	if err != nil {
 		return page, err

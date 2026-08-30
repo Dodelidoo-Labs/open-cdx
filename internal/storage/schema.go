@@ -114,13 +114,15 @@ CREATE TABLE IF NOT EXISTS usage_aggregate (
     provider TEXT NOT NULL,
     model_id TEXT NOT NULL,
     account_id TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'routed' CHECK(source IN ('routed','reconciled')),
+    routing TEXT NOT NULL DEFAULT 'routed' CHECK(routing IN ('routed','native')),
     requests INTEGER NOT NULL DEFAULT 0,
     input_tokens INTEGER NOT NULL DEFAULT 0,
     cached_input_tokens INTEGER NOT NULL DEFAULT 0,
     cache_write_input_tokens INTEGER NOT NULL DEFAULT 0,
     output_tokens INTEGER NOT NULL DEFAULT 0,
     reasoning_output_tokens INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (day, provider, model_id, account_id)
+    PRIMARY KEY (day, provider, model_id, account_id, routing)
 );
 
 CREATE TABLE IF NOT EXISTS usage_reconciliation (
@@ -136,4 +138,5 @@ CREATE INDEX IF NOT EXISTS oauth_expiry_idx ON oauth_transactions(expires_at);
 CREATE INDEX IF NOT EXISTS affinities_updated_idx ON affinities(updated_at);
 
 INSERT OR IGNORE INTO schema_migrations(version) VALUES (1);
+INSERT OR IGNORE INTO schema_migrations(version) VALUES (2);
 `

@@ -15,10 +15,10 @@ import (
 	"syscall"
 	"time"
 
-	secure "github.com/opencdx/opencdx/internal/crypto"
-	"github.com/opencdx/opencdx/internal/helper"
-	"github.com/opencdx/opencdx/internal/usagehistory"
-	"github.com/opencdx/opencdx/internal/version"
+	secure "github.com/Dodelidoo-Labs/open-cdx/internal/crypto"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/helper"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/usagehistory"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/version"
 )
 
 func main() {

@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/opencdx/opencdx/internal/accounts"
-	"github.com/opencdx/opencdx/internal/catalog"
-	"github.com/opencdx/opencdx/internal/providers"
-	"github.com/opencdx/opencdx/internal/providers/ollama"
-	"github.com/opencdx/opencdx/internal/providers/openrouter"
-	"github.com/opencdx/opencdx/internal/storage"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/accounts"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/catalog"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/providers"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/providers/ollama"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/providers/openrouter"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/storage"
 )
 
 const maxRequestBody = 64 << 20
@@ -95,11 +95,17 @@ func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Re
 	}
 	target, err := proxy.resolveTarget(request.Context(), providerName, modelID, upstreamModel, request.URL.Path, device.ID, affinity, "")
 	if err != nil {
+		if request.Context().Err() != nil {
+			return
+		}
 		proxy.reportError(device.ID, err)
 		writeProxyError(writer, http.StatusServiceUnavailable, "route_unavailable", publicRouteError(err))
 		return
 	}
 	if err = proxy.validateThirdParty(request.Context(), target, document); err != nil {
+		if request.Context().Err() != nil {
+			return
+		}
 		writeProxyError(writer, http.StatusBadRequest, "unsupported_parameter", err.Error())
 		return
 	}
@@ -112,6 +118,9 @@ func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Re
 	}
 	response, err := proxy.attempt(request.Context(), request, target, forwardBody)
 	if err != nil {
+		if request.Context().Err() != nil {
+			return
+		}
 		proxy.reportError(device.ID, err)
 		writeProxyError(writer, http.StatusBadGateway, "upstream_unavailable", "the selected provider could not be reached")
 		return
@@ -126,6 +135,9 @@ func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Re
 			response, err = proxy.attempt(request.Context(), request, target, forwardBody)
 		}
 		if refreshErr != nil || err != nil {
+			if request.Context().Err() != nil {
+				return
+			}
 			proxy.reportError(device.ID, errors.New("OpenAI account requires reauthentication"))
 			writeProxyError(writer, http.StatusBadGateway, "reauthentication_required", "the selected OpenAI account requires reauthentication")
 			return
@@ -146,6 +158,9 @@ func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Re
 			response, err = proxy.attempt(request.Context(), request, target, forwardBody)
 		}
 		if selectErr != nil || err != nil {
+			if request.Context().Err() != nil {
+				return
+			}
 			writeProxyError(writer, http.StatusTooManyRequests, "quota_exhausted", "all eligible OpenAI accounts are currently exhausted")
 			return
 		}
@@ -172,17 +187,18 @@ func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Re
 	_, copyErr := copyStreaming(writer, io.TeeReader(response.Body, collector))
 	inputTokens, outputTokens := collector.usage()
 	_ = proxy.store.RecordUsage(context.WithoutCancel(request.Context()), target.provider, modelID, target.account.ID, inputTokens, outputTokens)
+	streamHealthy := streamEndedNormally(request.Context(), collector, copyErr)
 	proxy.status.Update(device.ID, func(status *RouteStatus) {
-		status.Connected = copyErr == nil
-		status.State = map[bool]string{true: "connected", false: "degraded"}[copyErr == nil]
+		status.Connected = streamHealthy
+		status.State = map[bool]string{true: "connected", false: "degraded"}[streamHealthy]
 		status.Provider = target.provider
 		status.Model = modelID
 		status.Account = target.account.MaskedEmail
 		status.QuotaRemaining = max(0, 100-target.account.QuotaUsedPercent)
 		status.QuotaResetAt = target.account.QuotaResetAt
 		status.LastRequestAt = time.Now().UTC()
-		if copyErr != nil {
-			status.LastError = "upstream stream ended unexpectedly"
+		if !streamHealthy {
+			status.LastError = "upstream response stream disconnected"
 		} else {
 			status.LastError = ""
 		}
@@ -312,6 +328,21 @@ func copyResponseHeaders(destination, source http.Header) {
 	}
 }
 
+type streamCopyDirection uint8
+
+const (
+	streamCopyFromUpstream streamCopyDirection = iota
+	streamCopyToDownstream
+)
+
+type streamCopyError struct {
+	direction streamCopyDirection
+	cause     error
+}
+
+func (copyError *streamCopyError) Error() string { return copyError.cause.Error() }
+func (copyError *streamCopyError) Unwrap() error { return copyError.cause }
+
 func copyStreaming(writer http.ResponseWriter, reader io.Reader) (int64, error) {
 	buffer := make([]byte, 32<<10)
 	var total int64
@@ -324,16 +355,27 @@ func copyStreaming(writer http.ResponseWriter, reader io.Reader) (int64, error) 
 				flusher.Flush()
 			}
 			if writeErr != nil {
-				return total, writeErr
+				return total, &streamCopyError{direction: streamCopyToDownstream, cause: writeErr}
+			}
+			if written != count {
+				return total, &streamCopyError{direction: streamCopyToDownstream, cause: io.ErrShortWrite}
 			}
 		}
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) {
 				return total, nil
 			}
-			return total, readErr
+			return total, &streamCopyError{direction: streamCopyFromUpstream, cause: readErr}
 		}
 	}
+}
+
+func streamEndedNormally(ctx context.Context, collector *tailCollector, copyErr error) bool {
+	if copyErr == nil || collector.terminalResponseSeen() || ctx.Err() != nil {
+		return true
+	}
+	var typed *streamCopyError
+	return errors.As(copyErr, &typed) && typed.direction == streamCopyToDownstream
 }
 
 type tailCollector struct {
@@ -373,6 +415,38 @@ func (collector *tailCollector) usage() (int64, int64) {
 		}
 	}
 	return input, output
+}
+
+func (collector *tailCollector) terminalResponseSeen() bool {
+	trimmed := bytes.TrimSpace(collector.data)
+	if len(trimmed) == 0 {
+		return false
+	}
+	var document map[string]any
+	if json.Unmarshal(trimmed, &document) == nil {
+		// A complete non-streaming JSON response reached the client.
+		return true
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(collector.data))
+	scanner.Buffer(make([]byte, 4096), collector.limit)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		line = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if line == "[DONE]" {
+			return true
+		}
+		if json.Unmarshal([]byte(line), &document) != nil {
+			continue
+		}
+		switch document["type"] {
+		case "response.completed", "response.failed", "response.incomplete":
+			return true
+		}
+	}
+	return false
 }
 
 func findUsage(value any) (int64, int64) {

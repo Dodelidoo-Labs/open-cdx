@@ -40,7 +40,7 @@ type tokenUsage struct {
 }
 
 type rowKey struct {
-	day, provider, model string
+	day, provider, model, routing string
 }
 
 type scanState struct {
@@ -105,7 +105,10 @@ func Scan(ctx context.Context, codexHome string, now time.Time) (Snapshot, error
 		if snapshot.Rows[left].Provider != snapshot.Rows[right].Provider {
 			return snapshot.Rows[left].Provider < snapshot.Rows[right].Provider
 		}
-		return snapshot.Rows[left].Model < snapshot.Rows[right].Model
+		if snapshot.Rows[left].Model != snapshot.Rows[right].Model {
+			return snapshot.Rows[left].Model < snapshot.Rows[right].Model
+		}
+		return snapshot.Rows[left].Routing < snapshot.Rows[right].Routing
 	})
 	return snapshot, nil
 }
@@ -384,6 +387,7 @@ func scanTokenCount(line []byte, state *scanState, snapshot *Snapshot, aggregate
 		return err
 	}
 	provider, model := routeIdentity(state.provider, state.model)
+	routing := routingIdentity(state.provider)
 	if model == "" {
 		model = "unknown"
 	}
@@ -423,15 +427,21 @@ func scanTokenCount(line []byte, state *scanState, snapshot *Snapshot, aggregate
 		return nil
 	}
 	// Copied rollout history rewrites record timestamps but preserves the
-	// cumulative usage snapshot. Hash that snapshot without the timestamp so
-	// the same response is counted once across roots, resumes, forks, archives,
-	// and subagent rollouts. Fall back to the timestamp only for old records
-	// that do not carry cumulative counters.
+	// cumulative usage snapshot and turn ID. Hash those stable values and the
+	// route identity without the timestamp so the same response is counted once
+	// across roots, resumes, forks, archives, and subagent rollouts without
+	// merging unrelated turns or otherwise identical native and OpenCDX-routed
+	// responses. Fall back to the timestamp when either stable identifier is
+	// unavailable.
 	fingerprintInput := struct {
 		Timestamp string
+		TurnID    string
+		Routing   string
 		Usage     tokenUsage
-	}{Usage: dereferenceUsage(current, record.Payload.Info.Last)}
-	if current == nil {
+	}{
+		TurnID: state.turnID, Routing: routing, Usage: dereferenceUsage(current, record.Payload.Info.Last),
+	}
+	if current == nil || state.turnID == "" {
 		fingerprintInput.Timestamp = record.Timestamp
 	}
 	encoded, _ := json.Marshal(fingerprintInput)
@@ -441,10 +451,10 @@ func scanTokenCount(line []byte, state *scanState, snapshot *Snapshot, aggregate
 		return nil
 	}
 	seen[fingerprint] = struct{}{}
-	key := rowKey{day: when.UTC().Format("2006-01-02"), provider: provider, model: model}
+	key := rowKey{day: when.UTC().Format("2006-01-02"), provider: provider, model: model, routing: routing}
 	row := aggregates[key]
 	if row == nil {
-		row = &Row{Day: key.day, Provider: key.provider, Model: key.model}
+		row = &Row{Day: key.day, Provider: key.provider, Model: key.model, Routing: key.routing}
 		aggregates[key] = row
 	}
 	row.Requests++
@@ -501,7 +511,7 @@ func routeIdentity(configuredProvider, model string) (string, string) {
 		provider = "openrouter"
 	case strings.HasPrefix(model, "ollama/"):
 		provider = "ollama"
-	case provider == "" || provider == "router" || provider == "opencdx" || provider == "chatgpt":
+	case provider == "" || provider == "router" || provider == "opencdx" || provider == "opencdx_router" || provider == "chatgpt":
 		provider = "openai"
 	}
 	if provider == "" {
@@ -510,6 +520,13 @@ func routeIdentity(configuredProvider, model string) (string, string) {
 	return provider, model
 }
 
+func routingIdentity(configuredProvider string) string {
+	if strings.EqualFold(strings.TrimSpace(configuredProvider), "opencdx") {
+		return RoutingRouted
+	}
+	return RoutingNative
+}
+
 func (snapshot Snapshot) Summary() string {
-	return fmt.Sprintf("%d unique usage events from %d rollout files across %d daily model rows", snapshot.EventsImported, snapshot.FilesScanned, len(snapshot.Rows))
+	return fmt.Sprintf("%d unique usage events from %d rollout files across %d daily model/routing rows", snapshot.EventsImported, snapshot.FilesScanned, len(snapshot.Rows))
 }

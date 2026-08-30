@@ -3,11 +3,13 @@ package helper
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -34,6 +36,25 @@ func TestCodexVersionNormalization(t *testing.T) {
 		if actual := normalizeCodexVersion(input); actual != expected {
 			t.Fatalf("normalizeCodexVersion(%q)=%q, expected %q", input, actual, expected)
 		}
+	}
+}
+
+func TestConfigSnippetUsesProductSpecificProviderID(t *testing.T) {
+	snippet, err := ConfigSnippet(Config{ListenPort: DefaultPort, CatalogPath: "/tmp/catalog.json"}, "/tmp/router-helper")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`model_provider = "opencdx"`,
+		`[model_providers.opencdx]`,
+		`[model_providers.opencdx.auth]`,
+	} {
+		if !strings.Contains(snippet, expected) {
+			t.Fatalf("config snippet does not contain %q:\n%s", expected, snippet)
+		}
+	}
+	if strings.Contains(snippet, "model_providers.router") {
+		t.Fatalf("config snippet still uses the generic legacy provider ID:\n%s", snippet)
 	}
 }
 
@@ -128,11 +149,76 @@ func TestDaemonStatusNoticesCatalogWrittenBySiblingLogin(t *testing.T) {
 	}
 }
 
+func TestDaemonTracksConcurrentInferenceActivity(t *testing.T) {
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	daemon := &Daemon{}
+	handler := daemon.trackInferenceActivity(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		started <- struct{}{}
+		<-release
+	}))
+
+	var wait sync.WaitGroup
+	for range 2 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+		}()
+	}
+	<-started
+	<-started
+	if active := daemon.currentStatus().ActiveRequests; active != 2 {
+		t.Fatalf("active requests=%d, expected 2", active)
+	}
+	close(release)
+	wait.Wait()
+	if active := daemon.currentStatus().ActiveRequests; active != 0 {
+		t.Fatalf("active requests=%d after completion, expected 0", active)
+	}
+}
+
+func TestDaemonProxyCancellationDoesNotOverwriteRouterHealth(t *testing.T) {
+	daemon := &Daemon{status: LocalStatus{State: "connected", Connected: true}}
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	ctx, cancel := context.WithCancel(request.Context())
+	cancel()
+	response := httptest.NewRecorder()
+
+	daemon.handleProxyError(response, request.WithContext(ctx), context.Canceled)
+
+	status := daemon.currentStatus()
+	if !status.Connected || status.State != "connected" || status.LastError != "" {
+		t.Fatalf("client cancellation changed router health: %#v", status)
+	}
+	if response.Body.Len() != 0 {
+		t.Fatalf("client cancellation wrote a synthetic upstream error: %q", response.Body.String())
+	}
+}
+
+func TestDaemonProxyUpstreamFailureMarksRouterUnreachable(t *testing.T) {
+	daemon := &Daemon{status: LocalStatus{State: "connected", Connected: true}}
+	response := httptest.NewRecorder()
+
+	daemon.handleProxyError(response, httptest.NewRequest(http.MethodPost, "/v1/responses", nil), errors.New("connection refused"))
+
+	status := daemon.currentStatus()
+	if status.Connected || status.State != "error" || status.LastError != "remote router is unreachable" {
+		t.Fatalf("upstream failure did not change router health: %#v", status)
+	}
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("upstream failure status=%d, expected %d", response.Code, http.StatusBadGateway)
+	}
+}
+
 func TestUnchangedCatalogDoesNotClearRestartReminder(t *testing.T) {
-	daemon := &Daemon{status: LocalStatus{RestartRequired: true}}
+	daemon := &Daemon{status: LocalStatus{RestartRequired: true, LastError: "route failed"}}
 	daemon.recordCatalogResult(CatalogResult{Changed: false})
 	if !daemon.currentStatus().RestartRequired {
 		t.Fatal("an unchanged catalog cleared the Codex restart reminder")
+	}
+	if daemon.currentStatus().LastError != "route failed" {
+		t.Fatal("catalog synchronization cleared an unrelated route error")
 	}
 }
 
@@ -152,7 +238,7 @@ func TestCatalogRestartAcknowledgementClearsRemoteAndLocalStatus(t *testing.T) {
 
 	daemon := &Daemon{
 		remote: &RemoteClient{BaseURL: server.URL, DeviceToken: "device-token", HTTP: server.Client()},
-		status: LocalStatus{RestartRequired: true},
+		status: LocalStatus{RestartRequired: true, LastError: "route failed"},
 	}
 	response := httptest.NewRecorder()
 	daemon.controlCatalogRestartAck(response, httptest.NewRequest(http.MethodPost, "/control/catalog/restart-ack", nil))
@@ -161,6 +247,9 @@ func TestCatalogRestartAcknowledgementClearsRemoteAndLocalStatus(t *testing.T) {
 	}
 	if daemon.currentStatus().RestartRequired {
 		t.Fatal("local restart reminder remained set after acknowledgement")
+	}
+	if daemon.currentStatus().LastError != "route failed" {
+		t.Fatal("catalog acknowledgement cleared an unrelated route error")
 	}
 }
 

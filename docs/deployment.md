@@ -54,7 +54,8 @@ Then start the HTTPS stack:
 
 ```sh
 ./scripts/generate-docker-secrets.sh
-docker compose --env-file docker/.env -f docker/compose.production.yml up -d --build
+docker compose --env-file docker/.env -f docker/compose.production.yml pull
+docker compose --env-file docker/.env -f docker/compose.production.yml up -d
 docker compose --env-file docker/.env -f docker/compose.production.yml ps
 curl --fail "https://router.example.com/readyz"
 ```
@@ -80,7 +81,12 @@ Never add `-v` unless deleting all router data is explicitly intended.
 
 ## Upgrades
 
-Build the new image, back up the database volume and master key, then recreate the service. SQLite migrations run at startup and are additive. Check `/readyz`, the dashboard provider health, and one helper status before retiring the old image.
+Back up the database volume and master key, set `OPENCODEX_VERSION` in
+`docker/.env` to the desired [GitHub release](https://github.com/Dodelidoo-Labs/open-cdx/releases),
+then pull and recreate the service. Check `/readyz`, the dashboard provider
+health, and one helper status before retiring the old image. The small version
+link below the dashboard logout control turns red when GitHub reports a newer
+stable release.
 
 ## Environment reference
 
@@ -94,5 +100,8 @@ Build the new image, back up the database volume and master key, then recreate t
 | `OPENCODEX_INSECURE_DEV` | `false` | Explicit plaintext development override |
 | `OPENCODEX_CATALOG_REFRESH_INTERVAL` | `15m` | Provider catalog refresh interval |
 | `OPENCODEX_QUOTA_REFRESH_INTERVAL` | `5m` | Account quota refresh interval |
+
+`OPENCODEX_VERSION` is a Docker Compose substitution used to select
+`ghcr.io/dodelidoo-labs/open-cdx`; it is not read by the router process.
 
 The OpenAI auth, ChatGPT API, and Codex Responses endpoints are always required to be absolute HTTPS URLs, including in development.

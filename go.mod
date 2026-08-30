@@ -1,4 +1,4 @@
-module github.com/opencdx/opencdx
+module github.com/Dodelidoo-Labs/open-cdx
 
 go 1.22.0
 

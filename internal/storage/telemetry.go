@@ -2,17 +2,19 @@ package storage
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 )
 
 func (store *Store) RecordUsage(ctx context.Context, provider, modelID, accountID string, inputTokens, outputTokens int64) error {
 	day := time.Now().UTC().Format("2006-01-02")
 	_, err := store.db.ExecContext(ctx, `
-		INSERT INTO usage_aggregate(day, provider, model_id, account_id, requests, input_tokens, output_tokens)
-		VALUES(?,?,?,?,1,?,?)
-		ON CONFLICT(day,provider,model_id,account_id) DO UPDATE SET requests=requests+1,
+		INSERT INTO usage_aggregate(day, provider, model_id, account_id, source, routing, requests, input_tokens, output_tokens)
+		VALUES(?,?,?,?,?,?,1,?,?)
+		ON CONFLICT(day,provider,model_id,account_id,routing) DO UPDATE SET requests=requests+1,
 		input_tokens=input_tokens+excluded.input_tokens, output_tokens=output_tokens+excluded.output_tokens`,
-		day, provider, modelID, accountID, inputTokens, outputTokens)
+		day, provider, modelID, accountID, UsageSourceRouted, UsageRoutingRouted, inputTokens, outputTokens)
 	return err
 }
 
@@ -30,14 +32,14 @@ func (store *Store) ReplaceUsage(ctx context.Context, usage []UsageAggregate, re
 		return err
 	}
 	statement, err := transaction.PrepareContext(ctx, `
-		INSERT INTO usage_aggregate(day, provider, model_id, account_id, requests, input_tokens,
+		INSERT INTO usage_aggregate(day, provider, model_id, account_id, source, routing, requests, input_tokens,
 		cached_input_tokens, cache_write_input_tokens, output_tokens, reasoning_output_tokens)
-		VALUES(?,?,?,'reconciled-history',?,?,?,?,?,?)`)
+		VALUES(?,?,?,'reconciled-history',?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
 	for _, aggregate := range usage {
-		if _, err = statement.ExecContext(ctx, aggregate.Day, aggregate.Provider, aggregate.ModelID, aggregate.Requests,
+		if _, err = statement.ExecContext(ctx, aggregate.Day, aggregate.Provider, aggregate.ModelID, UsageSourceReconciled, aggregate.Routing, aggregate.Requests,
 			aggregate.InputTokens, aggregate.CachedInputTokens, aggregate.CacheWriteInputTokens,
 			aggregate.OutputTokens, aggregate.ReasoningOutputTokens); err != nil {
 			_ = statement.Close()
@@ -64,6 +66,9 @@ func (store *Store) UsageReconciliation(ctx context.Context) (UsageReconciliatio
 	var reconciledAt int64
 	err := store.db.QueryRowContext(ctx, `SELECT reconciled_at, files_scanned, events_imported, rows_imported
 		FROM usage_reconciliation WHERE singleton=1`).Scan(&reconciledAt, &result.FilesScanned, &result.EventsImported, &result.RowsImported)
+	if errors.Is(err, sql.ErrNoRows) {
+		return UsageReconciliation{}, ErrNotFound
+	}
 	if err != nil {
 		return UsageReconciliation{}, err
 	}
@@ -72,7 +77,7 @@ func (store *Store) UsageReconciliation(ctx context.Context) (UsageReconciliatio
 }
 
 func (store *Store) Usage(ctx context.Context, since time.Time) ([]UsageAggregate, error) {
-	query := `SELECT day, provider, model_id, account_id, requests, input_tokens, cached_input_tokens,
+	query := `SELECT day, provider, model_id, account_id, source, routing, requests, input_tokens, cached_input_tokens,
 		cache_write_input_tokens, output_tokens, reasoning_output_tokens FROM usage_aggregate`
 	args := make([]any, 0, 1)
 	if !since.IsZero() {
@@ -87,7 +92,7 @@ func (store *Store) Usage(ctx context.Context, since time.Time) ([]UsageAggregat
 	var usage []UsageAggregate
 	for rows.Next() {
 		var aggregate UsageAggregate
-		if err = rows.Scan(&aggregate.Day, &aggregate.Provider, &aggregate.ModelID, &aggregate.AccountID,
+		if err = rows.Scan(&aggregate.Day, &aggregate.Provider, &aggregate.ModelID, &aggregate.AccountID, &aggregate.Source, &aggregate.Routing,
 			&aggregate.Requests, &aggregate.InputTokens, &aggregate.CachedInputTokens,
 			&aggregate.CacheWriteInputTokens, &aggregate.OutputTokens, &aggregate.ReasoningOutputTokens); err != nil {
 			return nil, err

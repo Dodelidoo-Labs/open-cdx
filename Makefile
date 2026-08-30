@@ -1,15 +1,19 @@
 .PHONY: test build router helper mac-app docker-dev docker-production docker-restart-test helper-e2e-test
 
+VERSION ?= $(shell tr -d '[:space:]' < VERSION)
+COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || printf unknown)
+LDFLAGS = -s -w -X github.com/Dodelidoo-Labs/open-cdx/internal/version.Version=$(VERSION) -X github.com/Dodelidoo-Labs/open-cdx/internal/version.Commit=$(COMMIT)
+
 test:
 	go test ./...
 
 build: router helper
 
 router:
-	go build -o bin/routerd ./cmd/routerd
+	go build -trimpath -ldflags="$(LDFLAGS)" -o bin/routerd ./cmd/routerd
 
 helper:
-	CGO_ENABLED=0 go build -o bin/router-helper ./cmd/router-helper
+	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/router-helper ./cmd/router-helper
 
 mac-app:
 	./scripts/build-macos-app.sh

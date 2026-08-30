@@ -5,9 +5,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev &
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-ARG VERSION=dev
+ARG VERSION
 ARG COMMIT=unknown
-RUN CGO_ENABLED=1 go build -trimpath -ldflags="-s -w -X github.com/opencdx/opencdx/internal/version.Version=${VERSION} -X github.com/opencdx/opencdx/internal/version.Commit=${COMMIT}" -o /out/routerd ./cmd/routerd
+RUN BUILD_VERSION="${VERSION:-$(tr -d '[:space:]' < VERSION)}" \
+    && CGO_ENABLED=1 go build -trimpath -ldflags="-s -w -X github.com/Dodelidoo-Labs/open-cdx/internal/version.Version=${BUILD_VERSION} -X github.com/Dodelidoo-Labs/open-cdx/internal/version.Commit=${COMMIT}" -o /out/routerd ./cmd/routerd
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tzdata && rm -rf /var/lib/apt/lists/* \

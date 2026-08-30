@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/opencdx/opencdx/internal/providers"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/providers"
 )
 
 func ParseNativeModels(raw []byte) ([]providers.DiscoveredModel, error) {

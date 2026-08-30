@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	secure "github.com/opencdx/opencdx/internal/crypto"
+	secure "github.com/Dodelidoo-Labs/open-cdx/internal/crypto"
 )
 
 func (store *Store) CreateEnrollment(ctx context.Context, name string) (Enrollment, error) {
@@ -120,6 +120,31 @@ func (store *Store) RevokeDevice(ctx context.Context, deviceID string) error {
 		return err
 	}
 	return requireChanged(result)
+}
+
+func (store *Store) DeleteDevice(ctx context.Context, deviceID string) error {
+	transaction, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer transaction.Rollback()
+	var status string
+	if err = transaction.QueryRowContext(ctx, `SELECT status FROM devices WHERE id=?`, deviceID).Scan(&status); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if status != "revoked" && status != "rejected" {
+		return ErrDeviceNotDeletable
+	}
+	result, err := transaction.ExecContext(ctx, `DELETE FROM devices WHERE id=? AND status IN ('revoked','rejected')`, deviceID)
+	if err != nil {
+		return err
+	}
+	if err = requireChanged(result); err != nil {
+		return err
+	}
+	return transaction.Commit()
 }
 
 func (store *Store) AuthenticateDevice(ctx context.Context, token string) (Device, error) {

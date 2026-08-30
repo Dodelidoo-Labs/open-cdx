@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/opencdx/opencdx/internal/helper"
-	"github.com/opencdx/opencdx/internal/usagehistory"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/helper"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/usagehistory"
 )
 
 func TestReconcileUsageScansLocallyAndSendsOnlyAggregateSnapshot(t *testing.T) {
@@ -54,7 +54,7 @@ func TestReconcileUsageScansLocallyAndSendsOnlyAggregateSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	rollout := strings.Join([]string{
-		`{"timestamp":"2026-08-28T00:00:00Z","type":"session_meta","payload":{"model_provider":"router"}}`,
+		`{"timestamp":"2026-08-28T00:00:00Z","type":"session_meta","payload":{"model_provider":"opencdx"}}`,
 		`{"timestamp":"2026-08-28T00:00:01Z","type":"turn_context","payload":{"turn_id":"turn","model":"openrouter/vendor/model"}}`,
 		`{"timestamp":"2026-08-28T00:00:02Z","type":"response_item","payload":{"type":"message","content":"PRIVATE-CONVERSATION"}}`,
 		`{"timestamp":"2026-08-28T00:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":12,"cached_input_tokens":4,"output_tokens":3,"reasoning_output_tokens":1,"total_tokens":15},"last_token_usage":{"input_tokens":12,"cached_input_tokens":4,"output_tokens":3,"reasoning_output_tokens":1,"total_tokens":15}}}}`,
@@ -66,7 +66,8 @@ func TestReconcileUsageScansLocallyAndSendsOnlyAggregateSnapshot(t *testing.T) {
 	if err := reconcileUsageTo(configPath, []string{"--codex-home", codexHome, "--json"}, &output); err != nil {
 		t.Fatal(err)
 	}
-	if received.EventsImported != 1 || len(received.Rows) != 1 || received.Rows[0].Provider != "openrouter" || received.Rows[0].CachedInputTokens != 4 {
+	if received.EventsImported != 1 || len(received.Rows) != 1 || received.Rows[0].Provider != "openrouter" ||
+		received.Rows[0].Routing != usagehistory.RoutingRouted || received.Rows[0].CachedInputTokens != 4 {
 		t.Fatalf("received snapshot = %#v", received)
 	}
 	wire, err := json.Marshal(received)

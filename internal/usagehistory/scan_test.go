@@ -21,7 +21,7 @@ func TestScanUsesCumulativeDeltasDeduplicatesAndNeverExportsConversationContent(
 		t.Fatal(err)
 	}
 	lines := []string{
-		`{"timestamp":"2026-08-27T23:59:50Z","type":"session_meta","payload":{"id":"session-a","model_provider":"router"}}`,
+		`{"timestamp":"2026-08-27T23:59:50Z","type":"session_meta","payload":{"id":"session-a","model_provider":"opencdx"}}`,
 		`{"timestamp":"2026-08-28T00:00:00Z","type":"turn_context","payload":{"turn_id":"turn-a","model":"openrouter/vendor/model","developer_instructions":"PRIVATE-DEVELOPER-CONTENT"}}`,
 		`{"timestamp":"2026-08-28T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"PRIVATE-PROMPT-CONTENT"}]}}`,
 		`{"timestamp":"2026-08-28T00:00:02Z","ordinal":1,"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":3,"output_tokens":20,"reasoning_output_tokens":5,"total_tokens":120},"last_token_usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":3,"output_tokens":20,"reasoning_output_tokens":5,"total_tokens":120}},"rate_limits":null}}`,
@@ -56,10 +56,10 @@ func TestScanUsesCumulativeDeltasDeduplicatesAndNeverExportsConversationContent(
 			ollama = row
 		}
 	}
-	if openRouter.Provider != "openrouter" || openRouter.Model != "openrouter/vendor/model" || openRouter.Requests != 2 || openRouter.InputTokens != 180 || openRouter.CachedInputTokens != 50 || openRouter.CacheWriteInputTokens != 3 || openRouter.OutputTokens != 50 || openRouter.ReasoningOutputTokens != 12 {
+	if openRouter.Provider != "openrouter" || openRouter.Model != "openrouter/vendor/model" || openRouter.Routing != RoutingRouted || openRouter.Requests != 2 || openRouter.InputTokens != 180 || openRouter.CachedInputTokens != 50 || openRouter.CacheWriteInputTokens != 3 || openRouter.OutputTokens != 50 || openRouter.ReasoningOutputTokens != 12 {
 		t.Fatalf("OpenRouter history was counted incorrectly: %#v", openRouter)
 	}
-	if ollama.Provider != "ollama" || ollama.Requests != 1 || ollama.InputTokens != 20 || ollama.OutputTokens != 10 {
+	if ollama.Provider != "ollama" || ollama.Routing != RoutingRouted || ollama.Requests != 1 || ollama.InputTokens != 20 || ollama.OutputTokens != 10 {
 		t.Fatalf("Ollama history was counted incorrectly: %#v", ollama)
 	}
 	exported, err := json.Marshal(snapshot)
@@ -89,8 +89,70 @@ func TestScanTracksCurrentThreadSettingsProviderAndModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Rows) != 1 || snapshot.Rows[0].Provider != "custom-provider" || snapshot.Rows[0].Model != "vendor/new-model" {
+	if len(snapshot.Rows) != 1 || snapshot.Rows[0].Provider != "custom-provider" || snapshot.Rows[0].Model != "vendor/new-model" || snapshot.Rows[0].Routing != RoutingNative {
 		t.Fatalf("thread settings were not applied: %#v", snapshot.Rows)
+	}
+}
+
+func TestScanPreservesRoutedAndNativeUsageForSameUpstreamModel(t *testing.T) {
+	home := t.TempDir()
+	directory := filepath.Join(home, "sessions")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rollout := func(provider string) string {
+		return strings.Join([]string{
+			`{"timestamp":"2026-08-28T00:00:00Z","type":"session_meta","payload":{"model_provider":"` + provider + `"}}`,
+			`{"timestamp":"2026-08-28T00:00:01Z","type":"turn_context","payload":{"turn_id":"turn","model":"gpt-test"}}`,
+			`{"timestamp":"2026-08-28T00:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":8,"output_tokens":2,"total_tokens":10},"last_token_usage":{"input_tokens":8,"output_tokens":2,"total_tokens":10}}}}`,
+		}, "\n") + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(directory, "native.jsonl"), []byte(rollout("openai")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "routed.jsonl"), []byte(rollout("opencdx")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := Scan(context.Background(), home, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.EventsImported != 2 || snapshot.DuplicateEvents != 0 || len(snapshot.Rows) != 2 {
+		t.Fatalf("routing classifications were merged or deduplicated: %#v", snapshot)
+	}
+	if snapshot.Rows[0].Provider != "openai" || snapshot.Rows[0].Model != "gpt-test" ||
+		snapshot.Rows[0].Routing != RoutingNative || snapshot.Rows[1].Routing != RoutingRouted {
+		t.Fatalf("unexpected routing classifications: %#v", snapshot.Rows)
+	}
+}
+
+func TestScanDoesNotDeduplicateIndependentTurnsWithIdenticalUsage(t *testing.T) {
+	home := t.TempDir()
+	directory := filepath.Join(home, "sessions")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rollout := func(turn string) string {
+		return strings.Join([]string{
+			`{"timestamp":"2026-08-28T00:00:00Z","type":"session_meta","payload":{"model_provider":"openai"}}`,
+			`{"timestamp":"2026-08-28T00:00:01Z","type":"turn_context","payload":{"turn_id":"` + turn + `","model":"gpt-test"}}`,
+			`{"timestamp":"2026-08-28T00:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":8,"output_tokens":2,"total_tokens":10},"last_token_usage":{"input_tokens":8,"output_tokens":2,"total_tokens":10}}}}`,
+		}, "\n") + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(directory, "first.jsonl"), []byte(rollout("turn-first")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "second.jsonl"), []byte(rollout("turn-second")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := Scan(context.Background(), home, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.EventsImported != 2 || snapshot.DuplicateEvents != 0 || len(snapshot.Rows) != 1 || snapshot.Rows[0].Requests != 2 {
+		t.Fatalf("independent turns were collapsed: %#v", snapshot)
 	}
 }
 

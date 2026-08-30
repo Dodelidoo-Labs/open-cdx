@@ -73,16 +73,16 @@ func ConfigSnippet(config Config, helperPath string) (string, error) {
 	if !filepath.IsAbs(config.CatalogPath) || !filepath.IsAbs(helperPath) {
 		return "", errors.New("catalog and helper paths must be absolute")
 	}
-	return fmt.Sprintf(`model_provider = "router"
+	return fmt.Sprintf(`model_provider = "opencdx"
 model_catalog_json = %s
 
-[model_providers.router]
+[model_providers.opencdx]
 name = "OpenCDX Router"
 base_url = %s
 wire_api = "responses"
 supports_websockets = false
 
-[model_providers.router.auth]
+[model_providers.opencdx.auth]
 command = %s
 args = ["token"]
 timeout_ms = 5000

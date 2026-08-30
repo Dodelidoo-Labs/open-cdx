@@ -132,11 +132,15 @@ struct RouterMenuView: View {
             }
 
             if !model.status.lastError.isEmpty {
-                Text(model.status.lastError)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(model.status.lastError)
+                        .foregroundStyle(.secondary)
+                }
+                .font(.caption)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             if !model.operation.isEmpty {
@@ -179,6 +183,7 @@ struct RouterMenuView: View {
 
     private var routerStatusIcon: String {
         if !model.configured { return "gearshape.fill" }
+        if model.inferenceActive { return "waveform.circle.fill" }
         if model.status.connected { return "checkmark.circle.fill" }
         if model.status.state == "connecting" { return "arrow.clockwise.circle" }
         return "exclamationmark.circle.fill"

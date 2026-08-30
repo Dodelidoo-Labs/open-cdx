@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	secure "github.com/opencdx/opencdx/internal/crypto"
+	secure "github.com/Dodelidoo-Labs/open-cdx/internal/crypto"
 )
 
 const localTokenLifetime = 5 * time.Minute

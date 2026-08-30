@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	secure "github.com/opencdx/opencdx/internal/crypto"
+	secure "github.com/Dodelidoo-Labs/open-cdx/internal/crypto"
 )
 
 func testStore(t *testing.T, path string) *Store {
@@ -139,7 +139,7 @@ func TestUsageSupportsAllTimeAndSinceQueries(t *testing.T) {
 		t.Fatalf("all-time usage returned %d rows: %v", len(all), err)
 	}
 	recent, err := store.Usage(context.Background(), time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC))
-	if err != nil || len(recent) != 1 || recent[0].Day != "2026-08-28" {
+	if err != nil || len(recent) != 1 || recent[0].Day != "2026-08-28" || recent[0].Source != UsageSourceRouted || recent[0].Routing != UsageRoutingRouted {
 		t.Fatalf("bounded usage = %#v, err=%v", recent, err)
 	}
 }
@@ -153,8 +153,8 @@ func TestUsageReconciliationReplacesAtomicallyAndPreservesDetailedCounters(t *te
 	}
 	reconciledAt := time.Date(2026, time.August, 28, 20, 0, 0, 0, time.UTC)
 	duplicate := []UsageAggregate{
-		{Day: "2026-08-28", Provider: "openrouter", ModelID: "openrouter/vendor/model", Requests: 1, InputTokens: 20},
-		{Day: "2026-08-28", Provider: "openrouter", ModelID: "openrouter/vendor/model", Requests: 1, InputTokens: 30},
+		{Day: "2026-08-28", Provider: "openrouter", ModelID: "openrouter/vendor/model", Routing: UsageRoutingRouted, Requests: 1, InputTokens: 20},
+		{Day: "2026-08-28", Provider: "openrouter", ModelID: "openrouter/vendor/model", Routing: UsageRoutingRouted, Requests: 1, InputTokens: 30},
 	}
 	if err := store.ReplaceUsage(context.Background(), duplicate, UsageReconciliation{ReconciledAt: reconciledAt}); err == nil {
 		t.Fatal("duplicate replacement unexpectedly succeeded")
@@ -164,7 +164,7 @@ func TestUsageReconciliationReplacesAtomicallyAndPreservesDetailedCounters(t *te
 		t.Fatalf("failed replacement was not rolled back: %#v, %v", unchanged, err)
 	}
 	replacement := []UsageAggregate{{
-		Day: "2026-08-28", Provider: "openrouter", ModelID: "openrouter/vendor/model", Requests: 2,
+		Day: "2026-08-28", Provider: "openrouter", ModelID: "openrouter/vendor/model", Routing: UsageRoutingRouted, Requests: 2,
 		InputTokens: 100, CachedInputTokens: 40, CacheWriteInputTokens: 3,
 		OutputTokens: 20, ReasoningOutputTokens: 5,
 	}}
@@ -176,13 +176,37 @@ func TestUsageReconciliationReplacesAtomicallyAndPreservesDetailedCounters(t *te
 	if err != nil || len(usage) != 1 {
 		t.Fatalf("replacement usage = %#v, %v", usage, err)
 	}
-	if usage[0].ModelID != "openrouter/vendor/model" || usage[0].AccountID != "reconciled-history" ||
+	if usage[0].ModelID != "openrouter/vendor/model" || usage[0].AccountID != "reconciled-history" || usage[0].Source != UsageSourceReconciled || usage[0].Routing != UsageRoutingRouted ||
 		usage[0].CachedInputTokens != 40 || usage[0].CacheWriteInputTokens != 3 || usage[0].ReasoningOutputTokens != 5 {
 		t.Fatalf("detailed replacement counters were lost: %#v", usage[0])
 	}
 	storedMetadata, err := store.UsageReconciliation(context.Background())
 	if err != nil || !storedMetadata.ReconciledAt.Equal(reconciledAt) || storedMetadata.EventsImported != 2 {
 		t.Fatalf("reconciliation metadata = %#v, %v", storedMetadata, err)
+	}
+}
+
+func TestUsageReconciliationPreservesRoutedAndNativeRows(t *testing.T) {
+	store := testStore(t, ":memory:")
+	replacement := []UsageAggregate{
+		{Day: "2026-08-28", Provider: "openai", ModelID: "gpt-test", Routing: UsageRoutingNative, Requests: 1, InputTokens: 10},
+		{Day: "2026-08-28", Provider: "openai", ModelID: "gpt-test", Routing: UsageRoutingRouted, Requests: 2, InputTokens: 20},
+	}
+	if err := store.ReplaceUsage(context.Background(), replacement, UsageReconciliation{
+		ReconciledAt: time.Now(), FilesScanned: 2, EventsImported: 3, RowsImported: 2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	usage, err := store.Usage(context.Background(), time.Time{})
+	if err != nil || len(usage) != 2 {
+		t.Fatalf("routing rows = %#v, %v", usage, err)
+	}
+	requests := make(map[string]int64)
+	for _, aggregate := range usage {
+		requests[aggregate.Routing] = aggregate.Requests
+	}
+	if requests[UsageRoutingNative] != 1 || requests[UsageRoutingRouted] != 2 {
+		t.Fatalf("routing dimension was merged: %#v", usage)
 	}
 }
 
@@ -204,13 +228,20 @@ func TestExistingUsageTableMigratesDetailedCounters(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := testStore(t, path)
+	primaryKey, err := store.tablePrimaryKeyColumns(context.Background(), "usage_aggregate")
+	if err != nil || len(primaryKey) != 5 || primaryKey[4] != "routing" {
+		t.Fatalf("legacy usage primary key was not migrated: %#v, %v", primaryKey, err)
+	}
 	replacement := []UsageAggregate{{
-		Day: "2026-08-28", Provider: "openai", ModelID: "gpt-test", Requests: 1,
+		Day: "2026-08-28", Provider: "openai", ModelID: "gpt-test", Routing: UsageRoutingNative, Requests: 1,
 		InputTokens: 10, CachedInputTokens: 4, CacheWriteInputTokens: 2,
 		OutputTokens: 3, ReasoningOutputTokens: 1,
 	}}
 	if err = store.ReplaceUsage(context.Background(), replacement, UsageReconciliation{ReconciledAt: time.Now(), FilesScanned: 1, EventsImported: 1, RowsImported: 1}); err != nil {
 		t.Fatalf("legacy database migration did not add detailed counters: %v", err)
+	}
+	if usage, usageErr := store.Usage(context.Background(), time.Time{}); usageErr != nil || len(usage) != 1 || usage[0].Source != UsageSourceReconciled || usage[0].Routing != UsageRoutingNative {
+		t.Fatalf("legacy database migration did not persist source: %#v, %v", usage, usageErr)
 	}
 }
 
@@ -353,5 +384,31 @@ func TestDeviceApprovalAcknowledgementAndRevocation(t *testing.T) {
 	}
 	if _, err = store.AuthenticateDevice(context.Background(), issued.DeviceToken); err == nil {
 		t.Fatal("revoked device credential still authenticated")
+	}
+	if err = store.DeleteDevice(context.Background(), enrollment.DeviceID); err != nil {
+		t.Fatalf("delete revoked device: %v", err)
+	}
+	if devices, listErr := store.Devices(context.Background()); listErr != nil || len(devices) != 0 {
+		t.Fatalf("deleted device remains listed: %#v, %v", devices, listErr)
+	}
+}
+
+func TestDeviceDeletionRequiresRejectedOrRevokedStatus(t *testing.T) {
+	store := testStore(t, ":memory:")
+	pending, err := store.CreateEnrollment(context.Background(), "Pending Mac")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.DeleteDevice(context.Background(), pending.DeviceID); !errors.Is(err, ErrDeviceNotDeletable) {
+		t.Fatalf("pending device deletion error = %v", err)
+	}
+	if err = store.RejectDevice(context.Background(), pending.DeviceID); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.DeleteDevice(context.Background(), pending.DeviceID); err != nil {
+		t.Fatalf("delete rejected device: %v", err)
+	}
+	if err = store.DeleteDevice(context.Background(), pending.DeviceID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second device deletion error = %v", err)
 	}
 }

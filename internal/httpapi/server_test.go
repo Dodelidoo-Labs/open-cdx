@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	secure "github.com/opencdx/opencdx/internal/crypto"
-	"github.com/opencdx/opencdx/internal/routing"
-	"github.com/opencdx/opencdx/internal/storage"
-	"github.com/opencdx/opencdx/internal/usagehistory"
-	site "github.com/opencdx/opencdx/web"
+	secure "github.com/Dodelidoo-Labs/open-cdx/internal/crypto"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/routing"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/storage"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/usagehistory"
+	site "github.com/Dodelidoo-Labs/open-cdx/web"
 )
 
 func TestAPIErrorRedaction(t *testing.T) {
@@ -60,6 +60,48 @@ func TestDeviceAcknowledgesCatalogRestart(t *testing.T) {
 	}
 }
 
+func TestAdminDeletesRejectedDeviceAndRouteStatus(t *testing.T) {
+	box, err := secure.NewBox(bytes.Repeat([]byte{0x71}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := storage.Open(":memory:", box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	enrollment, err := store.CreateEnrollment(context.Background(), "Old Mac")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.RejectDevice(context.Background(), enrollment.DeviceID); err != nil {
+		t.Fatal(err)
+	}
+	registry := routing.NewStatusRegistry()
+	registry.Update(enrollment.DeviceID, func(status *routing.RouteStatus) {
+		status.State, status.Connected = "degraded", false
+	})
+	form := url.Values{"return_tab": {"devices"}}
+	request := httptest.NewRequest(http.MethodPost, "/admin/devices/"+enrollment.DeviceID+"/delete", strings.NewReader(form.Encode()))
+	request.SetPathValue("id", enrollment.DeviceID)
+	request.SetPathValue("action", "delete")
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if err = request.ParseForm(); err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	(&Server{store: store, status: registry}).adminDevice(response, request)
+	if response.Code != http.StatusSeeOther || !strings.Contains(response.Header().Get("Location"), "Device+deleted") {
+		t.Fatalf("device deletion response = %d %q", response.Code, response.Header().Get("Location"))
+	}
+	if devices, listErr := store.Devices(context.Background()); listErr != nil || len(devices) != 0 {
+		t.Fatalf("deleted device remains listed: %#v, %v", devices, listErr)
+	}
+	if status := registry.Get(enrollment.DeviceID); status.State != "connected" || !status.Connected {
+		t.Fatalf("stale route status remained after deletion: %#v", status)
+	}
+}
+
 func TestFormatIntegerUsesApostropheGrouping(t *testing.T) {
 	for value, want := range map[int]string{
 		0:         "0",
@@ -80,7 +122,8 @@ func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
 		t.Fatal(err)
 	}
 	page := dashboardPage{
-		Message: "Settings saved",
+		Message: "Settings saved", RepositoryURL: "https://github.com/Dodelidoo-Labs/open-cdx",
+		CurrentVersion: "1.0.0", LatestVersion: "1.1.0", UpdateAvailable: true,
 		Accounts: []accountView{
 			{
 				ID: "account", MaskedEmail: "a***@example.com", Plan: "pro", Status: "ready", Primary: true,
@@ -89,8 +132,11 @@ func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
 			},
 			{ID: "fallback", MaskedEmail: "b***@example.com", Plan: "plus", Status: "ready"},
 		},
-		Providers:           []providerView{{Name: "openrouter", DisplayName: "OpenRouter", Description: "OpenRouter API", Health: "healthy", HasCredential: true}},
-		Devices:             []deviceView{{ID: "device", Name: "MacBook Pro", Status: "approved", Laptop: true}},
+		Providers: []providerView{{Name: "openrouter", DisplayName: "OpenRouter", Description: "OpenRouter API", Health: "healthy", HasCredential: true}},
+		Devices: []deviceView{
+			{ID: "device", Name: "MacBook Pro", Status: "approved", Laptop: true},
+			{ID: "retired", Name: "Old Mac", Status: "rejected"},
+		},
 		Models:              []modelView{{Provider: "openrouter", Model: "example/model", State: "available"}},
 		Conflicts:           []conflictView{{Model: "gpt-test", Detail: "definitions differ"}},
 		AvailableModelCount: 1,
@@ -107,6 +153,8 @@ func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
 		`href="opencdx://oauth/openai/start">Connect account`, `provider-config-trigger`, `Refresh catalog`,
 		`account-order-controls`, `account-primary-star`, `material-symbols-filled`, `/admin/accounts/fallback/primary`,
 		`data-account-list`, `data-account-drag`, `/admin/accounts/reorder`,
+		`class="project-version"`, `href="https://github.com/Dodelidoo-Labs/open-cdx"`, `class="update-current">v1.0.0`, `class="update-latest"> → v1.1.0`,
+		`/admin/devices/device/revoke`, `/admin/devices/retired/delete`,
 		"[hidden]{display:none!important}", "Codex Spark", "gpt-test-2", `data-sort="provider"`, `data-sort="model"`, `data-sort="state"`,
 	} {
 		if !strings.Contains(output.String(), marker) {
@@ -148,7 +196,7 @@ func TestDashboardJavaScriptIsServed(t *testing.T) {
 		t.Fatalf("dashboard asset content type = %q", contentType)
 	}
 	bundle := response.Body.String()
-	for _, marker := range []string{"data-sort-table", "pill.hidden = false", "formatNumber", "renderUsageChart(range, report, mode)", "data-flash-dismiss", "prepareModelColors", "const visible = ordered.map", "moveRowAtY", "data-account-order-form"} {
+	for _, marker := range []string{"data-sort-table", "pill.hidden = false", "formatNumber", "renderUsageChart(range, report, mode, grouping)", "data-flash-dismiss", "prepareSeriesColors", "data-group-mode", "const visible = ordered.map", "moveRowAtY", "data-account-order-form"} {
 		if !strings.Contains(bundle, marker) {
 			t.Fatalf("dashboard behavior bundle is missing %q", marker)
 		}
@@ -277,7 +325,7 @@ func TestDeviceCanReconcilePrivacyMinimalUsageSnapshot(t *testing.T) {
 		Version: usagehistory.SnapshotVersion, GeneratedAt: "2026-08-28T18:00:00Z",
 		FilesScanned: 3, EventsImported: 2,
 		Rows: []usagehistory.Row{{
-			Day: "2026-08-28", Provider: "openai", Model: "gpt-test", Requests: 2,
+			Day: "2026-08-28", Provider: "openai", Model: "gpt-test", Routing: usagehistory.RoutingNative, Requests: 2,
 			InputTokens: 100, CachedInputTokens: 25, OutputTokens: 30, ReasoningOutputTokens: 10,
 		}},
 	}
@@ -295,8 +343,27 @@ func TestDeviceCanReconcilePrivacyMinimalUsageSnapshot(t *testing.T) {
 		t.Fatalf("reconciliation status = %d, body=%s", response.Code, response.Body.String())
 	}
 	usage, err := store.Usage(context.Background(), time.Time{})
-	if err != nil || len(usage) != 1 || usage[0].CachedInputTokens != 25 || usage[0].ReasoningOutputTokens != 10 {
+	if err != nil || len(usage) != 1 || usage[0].Source != storage.UsageSourceReconciled || usage[0].Routing != storage.UsageRoutingNative || usage[0].CachedInputTokens != 25 || usage[0].ReasoningOutputTokens != 10 {
 		t.Fatalf("reconciled usage = %#v, %v", usage, err)
+	}
+	telemetryRequest := httptest.NewRequest(http.MethodGet, "/admin/telemetry", nil)
+	telemetryResponse := httptest.NewRecorder()
+	server.adminTelemetry(telemetryResponse, telemetryRequest)
+	if telemetryResponse.Code != http.StatusOK {
+		t.Fatalf("telemetry status = %d, body=%s", telemetryResponse.Code, telemetryResponse.Body.String())
+	}
+	var report struct {
+		Usage []struct {
+			Source  string `json:"source"`
+			Routing string `json:"routing"`
+		} `json:"usage"`
+		Reconciliation *struct {
+			ReconciledAt   string `json:"reconciled_at"`
+			EventsImported int    `json:"events_imported"`
+		} `json:"reconciliation"`
+	}
+	if err = json.Unmarshal(telemetryResponse.Body.Bytes(), &report); err != nil || len(report.Usage) != 1 || report.Usage[0].Source != storage.UsageSourceReconciled || report.Usage[0].Routing != storage.UsageRoutingNative || report.Reconciliation == nil || report.Reconciliation.ReconciledAt == "" || report.Reconciliation.EventsImported != 2 {
+		t.Fatalf("telemetry reconciliation metadata = %#v, %v", report, err)
 	}
 
 	// The strict wire schema prevents conversation-shaped fields from being

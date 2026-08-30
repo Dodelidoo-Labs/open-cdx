@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	secure "github.com/opencdx/opencdx/internal/crypto"
+	secure "github.com/Dodelidoo-Labs/open-cdx/internal/crypto"
 )
 
 func (store *Store) CreateOAuthTransaction(ctx context.Context, deviceID, state, verifier, redirectURI string, expiresAt time.Time) (OAuthTransaction, error) {

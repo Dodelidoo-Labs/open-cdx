@@ -1,6 +1,11 @@
 package usagehistory
 
-const SnapshotVersion = 1
+const SnapshotVersion = 2
+
+const (
+	RoutingRouted = "routed"
+	RoutingNative = "native"
+)
 
 // Snapshot is the complete, privacy-minimal usage history sent by the local
 // helper to the router. It intentionally has no field capable of carrying
@@ -19,6 +24,7 @@ type Row struct {
 	Day                   string `json:"day"`
 	Provider              string `json:"provider"`
 	Model                 string `json:"model"`
+	Routing               string `json:"routing"`
 	Requests              int64  `json:"requests"`
 	InputTokens           int64  `json:"input_tokens"`
 	CachedInputTokens     int64  `json:"cached_input_tokens"`

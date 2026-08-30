@@ -13,6 +13,7 @@ var (
 	ErrEnrollmentRejected  = errors.New("device enrollment was rejected")
 	ErrEnrollmentComplete  = errors.New("device enrollment token was already acknowledged")
 	ErrDeviceRevoked       = errors.New("device is revoked")
+	ErrDeviceNotDeletable  = errors.New("only revoked or rejected devices can be deleted")
 	ErrOAuthInvalid        = errors.New("OAuth transaction is invalid, expired, or already used")
 	ErrInvalidAccountOrder = errors.New("account order must contain every account exactly once")
 )
@@ -124,6 +125,8 @@ type UsageAggregate struct {
 	Provider              string
 	ModelID               string
 	AccountID             string
+	Source                string
+	Routing               string
 	Requests              int64
 	InputTokens           int64
 	CachedInputTokens     int64
@@ -131,6 +134,13 @@ type UsageAggregate struct {
 	OutputTokens          int64
 	ReasoningOutputTokens int64
 }
+
+const (
+	UsageSourceRouted     = "routed"
+	UsageSourceReconciled = "reconciled"
+	UsageRoutingRouted    = "routed"
+	UsageRoutingNative    = "native"
+)
 
 type UsageReconciliation struct {
 	ReconciledAt   time.Time

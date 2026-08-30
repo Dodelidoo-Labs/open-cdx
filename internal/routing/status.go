@@ -47,3 +47,9 @@ func (registry *StatusRegistry) Update(deviceID string, update func(*RouteStatus
 	update(&status)
 	registry.status[deviceID] = status
 }
+
+func (registry *StatusRegistry) Delete(deviceID string) {
+	registry.mutex.Lock()
+	defer registry.mutex.Unlock()
+	delete(registry.status, deviceID)
+}

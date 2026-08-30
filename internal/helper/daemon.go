@@ -18,6 +18,7 @@ import (
 type LocalStatus struct {
 	State           string             `json:"state"`
 	Connected       bool               `json:"connected"`
+	ActiveRequests  int                `json:"active_requests"`
 	RouterURL       string             `json:"router_url"`
 	DeviceName      string             `json:"device_name"`
 	Accounts        []AccountAllowance `json:"accounts,omitempty"`
@@ -87,11 +88,14 @@ func (daemon *Daemon) Run(ctx context.Context) error {
 		return fmt.Errorf("start loopback helper: %w", err)
 	}
 	mux := http.NewServeMux()
-	proxy := daemon.responsesProxy()
+	proxy := daemon.trackInferenceActivity(daemon.responsesProxy())
 	mux.Handle("POST /v1/responses", daemon.localAuth(proxy))
 	mux.Handle("POST /v1/responses/compact", daemon.localAuth(proxy))
 	mux.HandleFunc("GET /healthz", func(writer http.ResponseWriter, _ *http.Request) {
-		writeHelperJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
+		writeHelperJSON(writer, http.StatusOK, map[string]any{
+			"status":          "ok",
+			"active_requests": daemon.currentStatus().ActiveRequests,
+		})
 	})
 	mux.Handle("GET /control/status", daemon.controlAuth(http.HandlerFunc(daemon.controlStatus)))
 	mux.Handle("POST /control/reconnect", daemon.controlAuth(http.HandlerFunc(daemon.controlReconnect)))
@@ -140,16 +144,36 @@ func (daemon *Daemon) responsesProxy() http.Handler {
 			}
 			return nil
 		},
-		ErrorHandler: func(writer http.ResponseWriter, _ *http.Request, _ error) {
-			daemon.updateStatus(func(status *LocalStatus) {
-				status.Connected = false
-				status.State = "error"
-				status.LastError = "remote router is unreachable"
-			})
-			writeHelperJSON(writer, http.StatusBadGateway, map[string]any{"error": map[string]string{"type": "router_unreachable", "message": "remote router is unreachable"}})
-		},
+		ErrorHandler: daemon.handleProxyError,
 	}
 	return proxy
+}
+
+func (daemon *Daemon) handleProxyError(writer http.ResponseWriter, request *http.Request, _ error) {
+	// ReverseProxy reports a cancelled local request through ErrorHandler when
+	// Codex stops reading or its context expires. That says nothing about the
+	// remote router's health, and the downstream connection is already gone.
+	if request.Context().Err() != nil {
+		return
+	}
+	daemon.updateStatus(func(status *LocalStatus) {
+		status.Connected = false
+		status.State = "error"
+		status.LastError = "remote router is unreachable"
+	})
+	writeHelperJSON(writer, http.StatusBadGateway, map[string]any{"error": map[string]string{"type": "router_unreachable", "message": "remote router is unreachable"}})
+}
+
+func (daemon *Daemon) trackInferenceActivity(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		daemon.updateStatus(func(status *LocalStatus) { status.ActiveRequests++ })
+		defer daemon.updateStatus(func(status *LocalStatus) {
+			if status.ActiveRequests > 0 {
+				status.ActiveRequests--
+			}
+		})
+		next.ServeHTTP(writer, request)
+	})
 }
 
 func (daemon *Daemon) localAuth(next http.Handler) http.Handler {
@@ -219,7 +243,6 @@ func (daemon *Daemon) controlCatalogRestartAck(writer http.ResponseWriter, reque
 	}
 	daemon.updateStatus(func(status *LocalStatus) {
 		status.RestartRequired = false
-		status.LastError = ""
 	})
 	writeHelperJSON(writer, http.StatusOK, daemon.currentStatus())
 }
@@ -272,7 +295,6 @@ func (daemon *Daemon) recordCatalogResult(result CatalogResult) {
 		// An unchanged (304) catalog is not evidence that Codex reloaded the
 		// last changed file. Keep the reminder until the user acknowledges it.
 		status.RestartRequired = status.RestartRequired || result.RestartRequired
-		status.LastError = ""
 	})
 }
 

@@ -464,24 +464,35 @@
   window.addEventListener("scroll", hideTooltip, true);
   window.addEventListener("resize", hideTooltip);
 
-  function modelKey(point) {
+  function seriesKey(point, grouping) {
+    if (grouping === "provider") return point.provider || "unknown";
+    if (grouping === "routing") return point.routing === "routed" ? "routed" : "native";
     return point.model;
   }
 
-  function modelLabel(key) {
+  function seriesLabel(key, grouping) {
+    if (grouping === "routing") return key === "routed" ? "Routed" : "Native";
+    if (grouping === "provider") {
+      return { openai: "OpenAI", openrouter: "OpenRouter", ollama: "Ollama" }[key] || key;
+    }
     return key;
   }
 
-  const chartPalette = ["#4e79a7", "#f28e2b", "#e15759", "#b07aa1", "#edc948", "#9c755f", "#ff9da7", "#59a14f", "#bab0ac", "#3366cc", "#dc3912", "#9467bd"];
-  const modelColors = new Map();
+  function groupingLabel(grouping) {
+    return { model: "Model", provider: "Provider", routing: "Routing" }[grouping] || "Model";
+  }
 
-  function prepareModelColors(report) {
-    const labels = Array.from(new Set(report.usage.map((point) => point.model))).sort((left, right) => left.localeCompare(right));
-    labels.forEach((label, index) => modelColors.set(label, chartPalette[index % chartPalette.length]));
+  const chartPalette = ["#4e79a7", "#f28e2b", "#e15759", "#b07aa1", "#edc948", "#9c755f", "#ff9da7", "#59a14f", "#bab0ac", "#3366cc", "#dc3912", "#9467bd"];
+  const seriesColors = new Map();
+
+  function prepareSeriesColors(points, grouping) {
+    seriesColors.clear();
+    const labels = Array.from(new Set(points.map((point) => seriesKey(point, grouping)))).sort((left, right) => left.localeCompare(right));
+    labels.forEach((label, index) => seriesColors.set(label, chartPalette[index % chartPalette.length]));
   }
 
   function colorFor(key) {
-    return modelColors.get(modelLabel(key)) || chartPalette[0];
+    return seriesColors.get(key) || chartPalette[0];
   }
 
   function pointsForRange(report, range) {
@@ -491,7 +502,7 @@
   }
 
   function setMetrics(points) {
-    const models = new Set(points.map(modelKey));
+    const models = new Set(points.map((point) => point.model));
     const totals = points.reduce((sum, point) => {
       sum.requests += point.requests;
       sum.tokens += point.input_tokens + point.output_tokens;
@@ -502,18 +513,20 @@
     telemetryRoot.querySelector('[data-metric="models"]').textContent = formatCount(models.size);
   }
 
-  function renderModelBreakdown(points, mode) {
+  function renderBreakdown(points, mode, grouping) {
     const host = telemetryRoot.querySelector("[data-model-breakdown]");
     const totalLabel = telemetryRoot.querySelector("[data-breakdown-total]");
+    const title = telemetryRoot.querySelector("[data-breakdown-title]");
     const values = new Map();
     points.forEach((point) => {
       const value = mode === "requests" ? point.requests : point.input_tokens + point.output_tokens;
-      const key = modelKey(point);
+      const key = seriesKey(point, grouping);
       values.set(key, (values.get(key) || 0) + value);
     });
     const ordered = Array.from(values.entries()).sort((left, right) => right[1] - left[1]);
     const total = ordered.reduce((sum, [, value]) => sum + value, 0);
     host.textContent = "";
+    title.textContent = `${groupingLabel(grouping)} breakdown`;
     totalLabel.textContent = `${formatCount(total)} ${mode}`;
     if (!ordered.length || total === 0) {
       const empty = document.createElement("li");
@@ -523,7 +536,7 @@
       return;
     }
 
-    const visible = ordered.map(([key, value]) => ({ key, label: modelLabel(key), value }));
+    const visible = ordered.map(([key, value]) => ({ key, label: seriesLabel(key, grouping), value }));
     visible.forEach((item) => {
       const row = document.createElement("li");
       const label = document.createElement("span");
@@ -543,16 +556,16 @@
     });
   }
 
-  function updateChartMeta(range, mode) {
+  function updateChartMeta(range, mode, grouping) {
     const date = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
     const start = date.format(range.start);
     const end = date.format(range.end);
-    telemetryRoot.querySelector("[data-chart-title]").textContent = `Model usage by ${mode}`;
-    telemetryRoot.querySelector("[data-chart-meta]").textContent = `${start === end ? start : `${start}–${end}`} · ${mode === "tokens" ? "input and output combined" : "routed inference calls"}`;
+    telemetryRoot.querySelector("[data-chart-title]").textContent = `${groupingLabel(grouping)} usage by ${mode}`;
+    telemetryRoot.querySelector("[data-chart-meta]").textContent = `${start === end ? start : `${start}–${end}`} · ${mode === "tokens" ? "input and output combined" : "inference calls"}`;
   }
 
   function exportTelemetry(points, range) {
-    const columns = ["date", "provider", "model", "requests", "input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens", "reasoning_output_tokens"];
+    const columns = ["date", "provider", "model", "source", "routing", "requests", "input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens", "reasoning_output_tokens"];
     const escapeCell = (value) => {
       const text = String(value ?? "");
       return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
@@ -612,11 +625,11 @@
         if (date > today) cell.classList.add("future");
         const level = requests === 0 || maximum === 0 ? 0 : Math.max(1, Math.ceil((Math.log1p(requests) / Math.log1p(maximum)) * 4));
         cell.dataset.level = String(level);
-        const description = `${fullDate.format(date)}: ${formatNumber(requests)} routed request${requests === 1 ? "" : "s"}`;
+        const description = `${fullDate.format(date)}: ${formatNumber(requests)} inference request${requests === 1 ? "" : "s"}`;
         cell.setAttribute("role", "img");
         cell.setAttribute("aria-label", description);
         if (date <= today) {
-          const rows = [{ value: `${formatNumber(requests)} routed request${requests === 1 ? "" : "s"}` }];
+          const rows = [{ value: `${formatNumber(requests)} inference request${requests === 1 ? "" : "s"}` }];
           cell.addEventListener("pointerenter", (event) => showTooltip(fullDate.format(date), rows, "", event.clientX, event.clientY));
           cell.addEventListener("pointermove", (event) => positionTooltip(event.clientX, event.clientY));
           cell.addEventListener("pointerleave", hideTooltip);
@@ -676,7 +689,7 @@
     return element;
   }
 
-  function renderUsageChart(range, report, mode) {
+  function renderUsageChart(range, report, mode, grouping) {
     const host = telemetryRoot.querySelector('[data-usage-chart="tokens"]');
     host.textContent = "";
     const points = pointsForRange(report, range);
@@ -684,30 +697,30 @@
     const buckets = new Map();
     for (let date = range.start; date <= range.end; date = addDays(date, 1)) {
       const bucket = bucketDetails(date, spanDays);
-      if (!buckets.has(bucket.key)) buckets.set(bucket.key, { ...bucket, models: new Map(), cached: new Map() });
+      if (!buckets.has(bucket.key)) buckets.set(bucket.key, { ...bucket, series: new Map(), cached: new Map() });
     }
-    const modelTotals = new Map();
+    const seriesTotals = new Map();
     points.forEach((point) => {
-      const key = modelKey(point);
+      const key = seriesKey(point, grouping);
       const bucket = bucketDetails(utcDate(point.date), spanDays);
       const value = mode === "requests" ? point.requests : point.input_tokens + point.output_tokens;
       const target = buckets.get(bucket.key);
       if (!target) return;
-      target.models.set(key, (target.models.get(key) || 0) + value);
+      target.series.set(key, (target.series.get(key) || 0) + value);
       if (mode === "tokens") target.cached.set(key, (target.cached.get(key) || 0) + point.cached_input_tokens);
-      modelTotals.set(key, (modelTotals.get(key) || 0) + value);
+      seriesTotals.set(key, (seriesTotals.get(key) || 0) + value);
     });
-    const orderedModels = Array.from(modelTotals.keys()).sort((left, right) => {
-      const valueDifference = (modelTotals.get(right) || 0) - (modelTotals.get(left) || 0);
+    const orderedSeries = Array.from(seriesTotals.keys()).sort((left, right) => {
+      const valueDifference = (seriesTotals.get(right) || 0) - (seriesTotals.get(left) || 0);
       if (valueDifference !== 0) return valueDifference;
-      return modelLabel(left).localeCompare(modelLabel(right));
+      return seriesLabel(left, grouping).localeCompare(seriesLabel(right, grouping));
     });
     const bucketList = Array.from(buckets.values());
-    const maximum = niceMaximum(Math.max(0, ...bucketList.map((bucket) => Array.from(bucket.models.values()).reduce((sum, value) => sum + value, 0))));
-    if (orderedModels.length === 0 || maximum === 0) {
+    const maximum = niceMaximum(Math.max(0, ...bucketList.map((bucket) => Array.from(bucket.series.values()).reduce((sum, value) => sum + value, 0))));
+    if (orderedSeries.length === 0 || maximum === 0) {
       const empty = document.createElement("div");
       empty.className = "telemetry-empty";
-      empty.textContent = orderedModels.length === 0 ? "No routed usage in this period." : `No ${mode} were reported in this period.`;
+      empty.textContent = orderedSeries.length === 0 ? "No usage in this period." : `No ${mode} were reported in this period.`;
       host.appendChild(empty);
       return;
     }
@@ -720,7 +733,7 @@
     const bottom = 58;
     const plotWidth = width - left - right;
     const plotHeight = height - top - bottom;
-    const svg = svgElement("svg", { viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": `Stacked model ${mode} usage chart` });
+    const svg = svgElement("svg", { viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": `Stacked ${grouping} ${mode} usage chart` });
     for (let tick = 0; tick <= 4; tick += 1) {
       const value = (maximum / 4) * tick;
       const y = top + plotHeight - (plotHeight * tick) / 4;
@@ -736,20 +749,20 @@
     bucketList.forEach((bucket, index) => {
       const x = left + index * slot + (slot - barWidth) / 2;
       let stacked = 0;
-      orderedModels.forEach((key) => {
-        const value = bucket.models.get(key) || 0;
+      orderedSeries.forEach((key) => {
+        const value = bucket.series.get(key) || 0;
         if (value <= 0) return;
         const segmentHeight = (value / maximum) * plotHeight;
         const y = top + plotHeight - stacked - segmentHeight;
         svg.appendChild(svgElement("rect", { x, y, width: barWidth, height: Math.max(segmentHeight, 0.6), fill: colorFor(key) }));
         stacked += segmentHeight;
       });
-      const values = orderedModels.filter((key) => bucket.models.has(key)).map((key) => {
-        const value = bucket.models.get(key) || 0;
+      const values = orderedSeries.filter((key) => bucket.series.has(key)).map((key) => {
+        const value = bucket.series.get(key) || 0;
         const cached = bucket.cached.get(key) || 0;
         return {
           color: colorFor(key),
-          label: modelLabel(key),
+          label: seriesLabel(key, grouping),
           numeric: value,
           cached,
         };
@@ -770,7 +783,7 @@
           const remainderCached = remainder.reduce((sum, row) => sum + row.cached, 0);
           tooltipRows.push({
             color: "#8f96a3",
-            label: `Other · ${remainder.length} model${remainder.length === 1 ? "" : "s"}`,
+            label: `Other · ${remainder.length} group${remainder.length === 1 ? "" : "s"}`,
             value: `${formatNumber(remainderValue)} ${mode}`,
             secondary: mode === "tokens" && remainderCached > 0 ? `${formatNumber(remainderCached)} cached` : "",
           });
@@ -849,7 +862,6 @@
       startInput.max = dateKey(generatedDay(report));
       endInput.min = dateKey(earliestUsageDay(report));
       endInput.max = dateKey(generatedDay(report));
-      prepareModelColors(report);
       renderHeatmap(report);
 
       const syncPresetButtons = (active = select.value) => {
@@ -881,11 +893,13 @@
         const points = pointsForRange(report, range);
         currentPoints = points;
         currentRange = range;
-        const mode = telemetryRoot.querySelector("[data-breakdown-mode]")?.value || "tokens";
+        const mode = telemetryRoot.querySelector("[data-metric-mode]")?.value || "tokens";
+        const grouping = telemetryRoot.querySelector("[data-group-mode]")?.value || "model";
+        prepareSeriesColors(report.usage, grouping);
         setMetrics(points);
-        renderUsageChart(range, report, mode);
-        renderModelBreakdown(points, mode);
-        updateChartMeta(range, mode);
+        renderUsageChart(range, report, mode, grouping);
+        renderBreakdown(points, mode, grouping);
+        updateChartMeta(range, mode, grouping);
         exportButton.disabled = false;
         return true;
       };
@@ -905,7 +919,8 @@
         closeCustomRange();
         render(selection);
       }));
-      telemetryRoot.querySelector("[data-breakdown-mode]")?.addEventListener("change", () => render());
+      telemetryRoot.querySelector("[data-metric-mode]")?.addEventListener("change", () => render());
+      telemetryRoot.querySelector("[data-group-mode]")?.addEventListener("change", () => render());
       exportButton.addEventListener("click", () => {
         if (currentRange) exportTelemetry(currentPoints, currentRange);
       });
