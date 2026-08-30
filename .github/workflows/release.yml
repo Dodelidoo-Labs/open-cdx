@@ -133,6 +133,10 @@ jobs:
           ./scripts/build-macos-app.sh
           lipo "dist/OpenCDX Router.app/Contents/MacOS/OpenCDX Router" -verify_arch arm64 x86_64
           lipo "dist/OpenCDX Router.app/Contents/Resources/router-helper" -verify_arch arm64 x86_64
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "OpenCDXRouter.icns"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "AppIcon"
+          test -s "dist/OpenCDX Router.app/Contents/Resources/OpenCDXRouter.icns"
+          test -s "dist/OpenCDX Router.app/Contents/Resources/Assets.car"
           codesign --verify --deep --strict --verbose=2 "dist/OpenCDX Router.app"
       - name: Notarize and staple
         env:

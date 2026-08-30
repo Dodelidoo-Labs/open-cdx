@@ -319,6 +319,9 @@ func TestDashboardPresentationAssetsAreServed(t *testing.T) {
 		{path: "/assets/dashboard.css", contentType: "text/css", marker: "--activity-4: #56d364"},
 		{path: "/assets/material-symbols-outlined.woff2", contentType: "font/woff2"},
 		{path: "/assets/opencdx-router-logo.png", contentType: "image/png"},
+		{path: "/assets/favicon-32x32.png", contentType: "image/png"},
+		{path: "/assets/favicon-16x16.png", contentType: "image/png"},
+		{path: "/assets/apple-touch-icon.png", contentType: "image/png"},
 	} {
 		request := httptest.NewRequest(http.MethodGet, test.path, nil)
 		response := httptest.NewRecorder()

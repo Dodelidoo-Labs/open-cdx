@@ -47,6 +47,10 @@ jobs:
           ./scripts/build-macos-app.sh
           codesign --verify --deep --strict --verbose=2 "dist/OpenCDX Router.app"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "$(cat VERSION)"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "OpenCDXRouter.icns"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "AppIcon"
+          test -s "dist/OpenCDX Router.app/Contents/Resources/OpenCDXRouter.icns"
+          test -s "dist/OpenCDX Router.app/Contents/Resources/Assets.car"
           "dist/OpenCDX Router.app/Contents/Resources/router-helper" version
 
   docker:

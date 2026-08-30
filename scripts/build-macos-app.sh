@@ -61,6 +61,7 @@ fi
 STAGED_APP="$STAGING_DIR/OpenCDX Router.app"
 STAGED_HELPER="$STAGED_APP/Contents/Resources/router-helper"
 STAGED_MENU="$STAGED_APP/Contents/MacOS/OpenCDX Router"
+STAGED_ICON="$STAGED_APP/Contents/Resources/OpenCDXRouter.icns"
 mkdir -p "$REPO_ROOT/dist" "$STAGED_APP/Contents/MacOS" "$STAGED_APP/Contents/Resources"
 
 build_helper() {
@@ -115,6 +116,7 @@ build_menu_app() {
 
 build_helper
 build_menu_app
+"$REPO_ROOT/scripts/generate-icon-assets.sh" icns "$STAGED_ICON"
 cp "$REPO_ROOT/mac/RouterMenu/Info.plist" "$STAGED_APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$STAGED_APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$STAGED_APP/Contents/Info.plist"
