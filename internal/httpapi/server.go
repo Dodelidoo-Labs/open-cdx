@@ -103,6 +103,21 @@ func formatInteger(value int) string {
 	return formatted.String()
 }
 
+func assetVersion() string {
+	return assetVersionFor(appversion.Display(), appversion.Commit)
+}
+
+func assetVersionFor(version, commit string) string {
+	commit = strings.TrimSpace(commit)
+	if commit == "" || commit == "unknown" {
+		return version
+	}
+	if len(commit) > 12 {
+		commit = commit[:12]
+	}
+	return version + "-" + commit
+}
+
 func (server *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	server.securityHeaders(writer, request)
 	server.handler.ServeHTTP(writer, request)
@@ -498,7 +513,9 @@ func (server *Server) loginPage(writer http.ResponseWriter, request *http.Reques
 		http.Redirect(writer, request, "/admin", http.StatusSeeOther)
 		return
 	}
-	_ = server.templates.ExecuteTemplate(writer, "login.html", map[string]string{"Error": request.URL.Query().Get("error")})
+	_ = server.templates.ExecuteTemplate(writer, "login.html", map[string]string{
+		"Error": request.URL.Query().Get("error"), "AssetVersion": assetVersion(),
+	})
 }
 
 func (server *Server) login(writer http.ResponseWriter, request *http.Request) {
@@ -716,6 +733,7 @@ func (server *Server) adminProviderRemoveSecret(writer http.ResponseWriter, requ
 
 type dashboardPage struct {
 	CSRF                    string
+	AssetVersion            string
 	Message                 string
 	MessageError            bool
 	RepositoryURL           string
@@ -774,6 +792,7 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 	}
 	page := dashboardPage{
 		CSRF: csrf, AccountsHealthy: true, RepositoryURL: appversion.RepositoryURL,
+		AssetVersion:   assetVersion(),
 		CurrentVersion: update.Current, LatestVersion: update.Latest, UpdateAvailable: update.Available,
 	}
 	accounts, err := server.store.Accounts(ctx, false)

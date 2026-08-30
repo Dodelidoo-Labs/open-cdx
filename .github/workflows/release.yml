@@ -137,6 +137,7 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "AppIcon"
           test -s "dist/OpenCDX Router.app/Contents/Resources/OpenCDXRouter.icns"
           test -s "dist/OpenCDX Router.app/Contents/Resources/Assets.car"
+          test -s "dist/OpenCDX Router.app/Contents/Resources/OpenCDXMenuBarTemplate.png"
           codesign --verify --deep --strict --verbose=2 "dist/OpenCDX Router.app"
       - name: Notarize and staple
         env:

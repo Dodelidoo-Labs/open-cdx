@@ -30,6 +30,12 @@ generate_web_assets() {
   echo "Generated OpenCDX web icon assets in $WEB_DIR"
 }
 
+generate_menu_bar_asset() {
+  menu_bar_destination=$1
+  mkdir -p "$(dirname -- "$menu_bar_destination")"
+  resize_png 72 "$menu_bar_destination"
+}
+
 generate_icns() {
   icns_destination=$1
   if ! command -v xcrun >/dev/null 2>&1; then
@@ -78,8 +84,15 @@ case "${1:-web}" in
     fi
     generate_icns "$2"
     ;;
+  menubar)
+    if [ "$#" -ne 2 ]; then
+      echo "Usage: $0 menubar OUTPUT_PATH" >&2
+      exit 1
+    fi
+    generate_menu_bar_asset "$2"
+    ;;
   *)
-    echo "Usage: $0 [web | icns OUTPUT_PATH]" >&2
+    echo "Usage: $0 [web | icns OUTPUT_PATH | menubar OUTPUT_PATH]" >&2
     exit 1
     ;;
 esac

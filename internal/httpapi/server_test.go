@@ -158,6 +158,12 @@ func TestFormatIntegerUsesApostropheGrouping(t *testing.T) {
 	}
 }
 
+func TestAssetVersionIncludesBuildCommit(t *testing.T) {
+	if got := assetVersionFor("1.2.3", "0123456789abcdef"); got != "1.2.3-0123456789ab" {
+		t.Fatalf("asset version = %q", got)
+	}
+}
+
 func TestBrowserTimestampUsesUTCISO8601(t *testing.T) {
 	zone := time.FixedZone("test", -3*60*60)
 	value := time.Date(2026, time.August, 29, 23, 31, 0, 0, zone)
@@ -176,6 +182,7 @@ func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
 	}
 	page := dashboardPage{
 		Message: "Settings saved", RepositoryURL: "https://github.com/Dodelidoo-Labs/open-cdx",
+		AssetVersion:   "1.0.0-test",
 		CurrentVersion: "1.0.0", LatestVersion: "1.1.0", UpdateAvailable: true,
 		NearestResetDate: "Aug 30", NearestResetTime: "02:31", NearestResetAt: "2026-08-30T02:31:00Z",
 		ProvidersChecked: "Aug 30 02:31", ProvidersCheckedAt: "2026-08-30T02:31:00Z",
@@ -209,6 +216,7 @@ func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
 		`account-order-controls`, `account-primary-star`, `material-symbols-filled`, `/admin/accounts/fallback/primary`,
 		`data-account-list`, `data-account-drag`, `/admin/accounts/reorder`,
 		`class="project-version"`, `href="https://github.com/Dodelidoo-Labs/open-cdx"`, `class="update-current">v1.0.0`, `class="update-latest"> → v1.1.0`,
+		`/assets/opencdx-router-logo.png?v=1.0.0-test`, `/assets/favicon-32x32.png?v=1.0.0-test`,
 		`/admin/devices/device/revoke`, `/admin/devices/retired/delete`,
 		`datetime="2026-08-30T02:31:00Z"`, `data-local-datetime`, `data-local-date`, `data-local-clock`,
 		"[hidden]{display:none!important}", "Codex Spark", "gpt-test-2", `data-sort="provider"`, `data-sort="model"`, `data-sort="state"`,

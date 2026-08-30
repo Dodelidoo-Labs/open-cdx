@@ -10,7 +10,10 @@ struct OpenCDXRouterMenuApp: App {
             RouterMenuView(model: model)
                 .onAppear { model.refreshStatus() }
         } label: {
-            Image(systemName: model.menuIcon)
+            Image(nsImage: OpenCDXMenuBarIcon.image)
+                .renderingMode(.template)
+                .frame(width: 18, height: 18)
+                .opacity(model.inferenceActive && !model.activityPulsePhase ? 0.55 : 1)
                 .accessibilityLabel("OpenCDX Router: \(model.routerStatusLabel)")
                 .onAppear {
                     appDelegate.openURLHandler = { [weak model] url in model?.handle(url: url) }

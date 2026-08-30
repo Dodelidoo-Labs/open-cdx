@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#0e1217">
   <title>OpenCDX Router</title>
-  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png">
-  <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png">
-  <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png">
-  <link rel="stylesheet" href="/assets/dashboard.css">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png?v={{.AssetVersion}}">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png?v={{.AssetVersion}}">
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png?v={{.AssetVersion}}">
+  <link rel="stylesheet" href="/assets/dashboard.css?v={{.AssetVersion}}">
   <style>[hidden]{display:none!important}</style>
 </head>
 <body data-page="home">
@@ -19,7 +19,7 @@
         <span class="material-symbols-outlined" aria-hidden="true">menu</span>
       </button>
       <button class="brand" type="button" data-tab-shortcut="home" aria-label="Open Telemetry">
-        <span class="brand-mark" aria-hidden="true"><img src="/assets/opencdx-router-logo.png" alt=""></span>
+        <span class="brand-mark" aria-hidden="true"><img src="/assets/opencdx-router-logo.png?v={{.AssetVersion}}" alt=""></span>
         <span>OpenCDX Router</span>
       </button>
     </div>
@@ -288,6 +288,6 @@
     </div>
   </main>
 </div>
-<script src="/assets/dashboard.js" defer></script>
+<script src="/assets/dashboard.js?v={{.AssetVersion}}" defer></script>
 </body>
 </html>

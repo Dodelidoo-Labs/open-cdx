@@ -51,6 +51,7 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "AppIcon"
           test -s "dist/OpenCDX Router.app/Contents/Resources/OpenCDXRouter.icns"
           test -s "dist/OpenCDX Router.app/Contents/Resources/Assets.car"
+          test -s "dist/OpenCDX Router.app/Contents/Resources/OpenCDXMenuBarTemplate.png"
           "dist/OpenCDX Router.app/Contents/Resources/router-helper" version
 
   docker:

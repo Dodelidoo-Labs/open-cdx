@@ -173,17 +173,6 @@ final class HelperModel: ObservableObject {
 
     var inferenceActive: Bool { status.activeRequests > 0 }
 
-    var menuIcon: String {
-        if !configured { return "gearshape.fill" }
-        if inferenceActive { return activityPulsePhase ? "waveform.circle.fill" : "waveform" }
-        switch status.state {
-        case "connected": return "arrow.triangle.branch"
-        case "connecting": return "arrow.clockwise.circle"
-        case "degraded": return "exclamationmark.triangle.fill"
-        default: return "exclamationmark.circle"
-        }
-    }
-
     var routerStatusLabel: String {
         if !configured { return "Setup Required" }
         if inferenceActive { return "Responding" }
