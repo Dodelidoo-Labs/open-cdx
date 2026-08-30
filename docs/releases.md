@@ -18,7 +18,7 @@ Configure these Actions secrets before creating a release tag:
 |---|---|
 | `MACOS_CERTIFICATE_P12` | Base64-encoded Developer ID Application certificate and private key in PKCS#12 format |
 | `MACOS_CERTIFICATE_PASSWORD` | Password protecting that PKCS#12 file |
-| `MACOS_SIGNING_IDENTITY` | Exact identity, for example `Developer ID Application: DodeliDoo Labs (TEAMID)` |
+| `MACOS_SIGNING_IDENTITY` | Exact identity, for example `Developer ID Application: TUKUTOI LLC (TEAMID)` |
 | `APPLE_ID` | Apple ID used for notarization |
 | `APPLE_TEAM_ID` | Apple Developer team identifier |
 | `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password for `notarytool` |
