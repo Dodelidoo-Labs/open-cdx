@@ -726,11 +726,13 @@ type dashboardPage struct {
 	PrimaryAccountPlan      string
 	NearestResetDate        string
 	NearestResetTime        string
+	NearestResetAt          string
 	Providers               []providerView
 	ConfiguredProviderCount int
 	HealthyProviderCount    int
 	ProviderModelCount      int
 	ProvidersChecked        string
+	ProvidersCheckedAt      string
 	Devices                 []deviceView
 	Models                  []modelView
 	Conflicts               []conflictView
@@ -747,17 +749,17 @@ type accountView struct {
 }
 
 type quotaView struct {
-	Name, Reset string
-	Remaining   float64
-	Spark       bool
+	Name, Reset, ResetAt string
+	Remaining            float64
+	Spark                bool
 }
 type deviceView struct {
-	ID, Name, Status, LastSeen, CatalogSynced string
-	Laptop                                    bool
+	ID, Name, Status, LastSeen, LastSeenAt, CatalogSynced, CatalogSyncedAt string
+	Laptop                                                                 bool
 }
 type providerView struct {
-	Name, DisplayName, Description, BaseURL, Health, LastError, Updated string
-	Enabled, HasCredential                                              bool
+	Name, DisplayName, Description, BaseURL, Health, LastError, Updated, UpdatedAt string
+	Enabled, HasCredential                                                         bool
 }
 type conflictView struct{ Model, Detail string }
 type modelView struct{ Provider, Model, State, Detail string }
@@ -791,6 +793,7 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 		primaryQuota := quotaView{Name: "Codex", Remaining: remaining}
 		if !account.QuotaResetAt.IsZero() {
 			primaryQuota.Reset = account.QuotaResetAt.Local().Format("Jan 2 · 15:04")
+			primaryQuota.ResetAt = browserTimestamp(account.QuotaResetAt)
 			considerReset(account.QuotaResetAt)
 		}
 		view.Quotas = append(view.Quotas, primaryQuota)
@@ -803,6 +806,7 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 				spark := quotaView{Name: "Codex Spark", Remaining: maxFloat(0, 100-quota.UsedPercent), Spark: true}
 				if !quota.ResetAt.IsZero() {
 					spark.Reset = quota.ResetAt.Local().Format("Jan 2 · 15:04")
+					spark.ResetAt = browserTimestamp(quota.ResetAt)
 					considerReset(quota.ResetAt)
 				}
 				view.Quotas = append(view.Quotas, spark)
@@ -834,6 +838,7 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 	if !nearestReset.IsZero() {
 		page.NearestResetDate = nearestReset.Local().Format("Jan 2")
 		page.NearestResetTime = nearestReset.Local().Format("15:04")
+		page.NearestResetAt = browserTimestamp(nearestReset)
 	}
 	providerConfigs, err := server.store.Providers(ctx)
 	if err != nil {
@@ -843,7 +848,7 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 	for _, provider := range providerConfigs {
 		view := providerView{
 			Name: provider.Name, BaseURL: provider.BaseURL, Enabled: provider.Enabled, Health: provider.Health,
-			LastError: provider.LastError, Updated: friendlyTime(provider.UpdatedAt),
+			LastError: provider.LastError, Updated: friendlyTime(provider.UpdatedAt), UpdatedAt: browserTimestamp(provider.UpdatedAt),
 		}
 		switch provider.Name {
 		case "ollama":
@@ -869,6 +874,7 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 	}
 	if !latestProviderCheck.IsZero() {
 		page.ProvidersChecked = friendlyTime(latestProviderCheck)
+		page.ProvidersCheckedAt = browserTimestamp(latestProviderCheck)
 	}
 	devices, err := server.store.Devices(ctx)
 	if err != nil {
@@ -877,8 +883,10 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 	for _, device := range devices {
 		name := strings.ToLower(device.Name)
 		page.Devices = append(page.Devices, deviceView{
-			ID: device.ID, Name: device.Name, Status: device.Status, LastSeen: friendlyTime(device.LastSeenAt),
-			CatalogSynced: friendlyTime(device.CatalogSynced), Laptop: strings.Contains(name, "book") || strings.Contains(name, "laptop"),
+			ID: device.ID, Name: device.Name, Status: device.Status,
+			LastSeen: friendlyTime(device.LastSeenAt), LastSeenAt: browserTimestamp(device.LastSeenAt),
+			CatalogSynced: friendlyTime(device.CatalogSynced), CatalogSyncedAt: browserTimestamp(device.CatalogSynced),
+			Laptop: strings.Contains(name, "book") || strings.Contains(name, "laptop"),
 		})
 	}
 	exclusions, err := server.store.Exclusions(ctx)
@@ -1069,6 +1077,13 @@ func friendlyTime(value time.Time) string {
 		return "never"
 	}
 	return value.Local().Format("Jan 2 15:04")
+}
+
+func browserTimestamp(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339)
 }
 
 func maxFloat(left, right float64) float64 {

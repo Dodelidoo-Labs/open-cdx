@@ -24,7 +24,7 @@ struct RouterMenuView: View {
                 MenuActionButton(model.accountLoginInProgress ? "OpenAI Login in Progress…" : "Add OpenAI Account…", systemImage: "person.badge.plus") {
                     model.addOpenAIAccount()
                 }
-                .disabled(!model.configured || model.accountLoginInProgress)
+                .disabled(!remoteActionsAvailable || model.accountLoginInProgress)
             }
             .padding(8)
 
@@ -35,12 +35,12 @@ struct RouterMenuView: View {
                 MenuActionButton("Refresh Allowances", systemImage: "arrow.clockwise") {
                     model.refreshQuotas()
                 }
-                .disabled(!model.configured)
+                .disabled(!remoteActionsAvailable)
 
                 MenuActionButton("Refresh Model Catalog", systemImage: "square.stack.3d.up") {
                     model.refreshCatalog()
                 }
-                .disabled(!model.configured)
+                .disabled(!remoteActionsAvailable)
 
                 if model.configured && !model.status.connected {
                     MenuActionButton("Retry Connection", systemImage: "network") {
@@ -51,7 +51,7 @@ struct RouterMenuView: View {
                 MenuActionButton("Copy Codex Configuration", systemImage: "doc.on.doc") {
                     model.copyConfiguration()
                 }
-                .disabled(!model.configured)
+                .disabled(!remoteActionsAvailable)
 
                 MenuActionButton("Reconcile Usage History…", systemImage: "clock.arrow.circlepath") {
                     model.requestUsageReconciliation()
@@ -75,8 +75,8 @@ struct RouterMenuView: View {
                     }
                 }
 
-                HStack(spacing: 10) {
-                    Label("Launch at Login", systemImage: "power")
+                HStack(spacing: 0) {
+                    MenuIconTitle("Launch at Login", systemImage: "play")
                     Spacer(minLength: 12)
                     Toggle("Launch at Login", isOn: Binding(
                         get: { model.launchAtLogin },
@@ -86,10 +86,10 @@ struct RouterMenuView: View {
                     .toggleStyle(.switch)
                     .controlSize(.mini)
                 }
-                .padding(.horizontal, 10)
-                .frame(height: 30)
+                .padding(.horizontal, 8)
+                .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
 
-                MenuActionButton("Quit OpenCDX Router", systemImage: "xmark.circle") {
+                MenuActionButton("Quit OpenCDX Router", systemImage: "power") {
                     model.quit()
                 }
             }
@@ -97,6 +97,10 @@ struct RouterMenuView: View {
         }
         .frame(width: 360)
         .padding(.vertical, 6)
+    }
+
+    private var remoteActionsAvailable: Bool {
+        routerOperationsAvailable(configured: model.configured, connected: model.status.connected)
     }
 
     private var statusSection: some View {
@@ -375,10 +379,8 @@ private struct MenuActionLabel: View {
     }
 
     var body: some View {
-        HStack(spacing: 9) {
-            Image(systemName: systemImage)
-                .frame(width: 16)
-            Text(title)
+        HStack(spacing: 0) {
+            MenuIconTitle(title, systemImage: systemImage)
             Spacer(minLength: 8)
         }
         .foregroundStyle(Color.primary)
@@ -391,5 +393,25 @@ private struct MenuActionLabel: View {
         .contentShape(Rectangle())
         .opacity(isEnabled ? 1 : 0.42)
         .onHover { isHovering = $0 }
+    }
+}
+
+private struct MenuIconTitle: View {
+    let title: String
+    let systemImage: String
+
+    init(_ title: String, systemImage: String) {
+        self.title = title
+        self.systemImage = systemImage
+    }
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .regular))
+                .symbolRenderingMode(.monochrome)
+                .frame(width: 18, height: 18, alignment: .center)
+            Text(title)
+        }
     }
 }

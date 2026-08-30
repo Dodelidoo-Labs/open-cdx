@@ -13,6 +13,24 @@
     ? requestedTheme
     : ["light", "dark"].includes(storedTheme) ? storedTheme : preferredTheme;
 
+  const localDateTime = new Intl.DateTimeFormat(undefined, {
+    month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  });
+  const localDate = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+  const localClock = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+  const localDateTimeTitle = new Intl.DateTimeFormat(undefined, {
+    dateStyle: "full", timeStyle: "long",
+  });
+  const localizeTime = (element, formatter) => {
+    const value = new Date(element.dateTime);
+    if (Number.isNaN(value.getTime())) return;
+    element.textContent = formatter.format(value);
+    element.title = localDateTimeTitle.format(value);
+  };
+  document.querySelectorAll("time[data-local-datetime]").forEach((element) => localizeTime(element, localDateTime));
+  document.querySelectorAll("time[data-local-date]").forEach((element) => localizeTime(element, localDate));
+  document.querySelectorAll("time[data-local-clock]").forEach((element) => localizeTime(element, localClock));
+
   const tabNames = ["home", "accounts", "providers", "devices", "catalog"];
   const tabTitles = {
     home: "Telemetry",

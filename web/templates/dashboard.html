@@ -172,7 +172,7 @@
         <section class="metric-strip">
           <div class="metric"><div class="metric-label">Connected</div><div class="metric-value num">{{number (len .Accounts)}}</div><div class="metric-note">{{number .ReadyAccountCount}} ready to route</div></div>
           <div class="metric"><div class="metric-label">Primary route</div><div class="metric-value metric-value-display">{{if .PrimaryAccountPlan}}{{.PrimaryAccountPlan}}{{else}}—{{end}}</div><div class="metric-note">{{if .PrimaryAccountEmail}}{{.PrimaryAccountEmail}}{{else}}No primary account{{end}}</div></div>
-          <div class="metric"><div class="metric-label">Nearest reset</div><div class="metric-value num">{{if .NearestResetDate}}{{.NearestResetDate}}{{else}}—{{end}}</div><div class="metric-note">{{if .NearestResetTime}}{{.NearestResetTime}} local time{{else}}No reset reported{{end}}</div></div>
+          <div class="metric"><div class="metric-label">Nearest reset</div><div class="metric-value num">{{if .NearestResetAt}}<time datetime="{{.NearestResetAt}}" data-local-date>{{.NearestResetDate}}</time>{{else}}—{{end}}</div><div class="metric-note">{{if .NearestResetAt}}<time datetime="{{.NearestResetAt}}" data-local-clock>{{.NearestResetTime}}</time> local time{{else}}No reset reported{{end}}</div></div>
           <div class="metric"><div class="metric-label">Credential health</div><div class="metric-value"><span class="state {{if .AccountsHealthy}}good{{else}}warn{{end}}">{{if .AccountsHealthy}}Ready{{else}}Needs attention{{end}}</span></div><div class="metric-note">Current account state</div></div>
         </section>
 
@@ -190,7 +190,7 @@
               </div>
               <div class="account-summary">
                 <div class="account-identity"><div class="account-name">{{.MaskedEmail}}</div><div class="account-sub">{{if .Primary}}Primary{{else}}Fallback{{end}} · {{.Plan}} plan{{if gt .ResetCredits 0}} · {{number .ResetCredits}} reset credits{{end}}</div></div>
-                <div class="account-reset"><div class="state {{if .Paused}}warn{{else if eq .Status "ready"}}good{{else}}bad{{end}}">{{if .Paused}}Paused{{else}}{{.Status}}{{end}}</div>{{range .Quotas}}{{if eq .Name "Codex"}}<div class="account-sub">{{if .Reset}}Codex resets {{.Reset}}{{else}}Reset time unavailable{{end}}</div>{{end}}{{end}}</div>
+                <div class="account-reset"><div class="state {{if .Paused}}warn{{else if eq .Status "ready"}}good{{else}}bad{{end}}">{{if .Paused}}Paused{{else}}{{.Status}}{{end}}</div>{{range .Quotas}}{{if eq .Name "Codex"}}<div class="account-sub">{{if .ResetAt}}Codex resets <time datetime="{{.ResetAt}}" data-local-datetime>{{.Reset}}</time>{{else}}Reset time unavailable{{end}}</div>{{end}}{{end}}</div>
                 <div class="detail-actions">
                   <form class="inline" method="post" action="/admin/accounts/{{.ID}}/{{if .Paused}}resume{{else}}pause{{end}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="accounts"><button class="icon-btn btn-secondary" type="submit" aria-label="{{if .Paused}}Resume routing{{else}}Pause routing{{end}}" title="{{if .Paused}}Resume routing{{else}}Pause routing{{end}}"><span class="material-symbols-outlined" aria-hidden="true">{{if .Paused}}play_arrow{{else}}pause{{end}}</span></button></form>
                   <form class="inline" method="post" action="/admin/accounts/{{.ID}}/delete" data-confirm="Remove credentials for {{.MaskedEmail}}? This account will no longer be available for routing."><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="accounts"><button class="icon-btn btn-danger" type="submit" aria-label="Delete account {{.MaskedEmail}}" title="Delete account"><span class="material-symbols-outlined" aria-hidden="true">delete</span></button></form>
@@ -198,7 +198,7 @@
               </div>
               <div class="account-body">
                 <div class="account-quotas">
-                  {{range .Quotas}}<div class="quota-item" title="{{if .Reset}}{{.Name}} resets {{.Reset}}{{end}}"><div class="quota-head"><span>{{.Name}}</span><span class="quota-value">{{printf "%.0f" .Remaining}}%</span></div><div class="quota-track" role="progressbar" aria-label="{{.Name}} allowance remaining" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{printf "%.0f" .Remaining}}"><span style="width:{{printf "%.2f" .Remaining}}%"></span></div></div>{{else}}<span class="muted">No quota windows reported.</span>{{end}}
+                  {{range .Quotas}}<div class="quota-item"><div class="quota-head"><span>{{.Name}}</span><span class="quota-value">{{printf "%.0f" .Remaining}}%</span></div><div class="quota-track" role="progressbar" aria-label="{{.Name}} allowance remaining" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{printf "%.0f" .Remaining}}"><span style="width:{{printf "%.2f" .Remaining}}%"></span></div></div>{{else}}<span class="muted">No quota windows reported.</span>{{end}}
                 </div>
                 <div class="model-list" data-model-list>{{range .VisibleModels}}<code>{{.}}</code>{{end}}{{range .MoreModels}}<code data-extra-model hidden>{{.}}</code>{{end}}{{if .MoreModels}}<button class="btn btn-ghost btn-small" type="button" data-show-models>+{{number (len .MoreModels)}} more</button>{{end}}{{if not .VisibleModels}}<span class="muted">No entitled models reported.</span>{{end}}</div>
                 {{if .LastError}}<p class="account-error">{{.LastError}}</p>{{end}}
@@ -218,7 +218,7 @@
 
         <section class="metric-strip">
           <div class="metric"><div class="metric-label">Configured</div><div class="metric-value num">{{number .ConfiguredProviderCount}}</div><div class="metric-note">Enabled provider routes</div></div>
-          <div class="metric"><div class="metric-label">Healthy</div><div class="metric-value num">{{number .HealthyProviderCount}}</div><div class="metric-note">{{if .ProvidersChecked}}Checked {{.ProvidersChecked}}{{else}}Not checked yet{{end}}</div></div>
+          <div class="metric"><div class="metric-label">Healthy</div><div class="metric-value num">{{number .HealthyProviderCount}}</div><div class="metric-note">{{if .ProvidersCheckedAt}}Checked <time datetime="{{.ProvidersCheckedAt}}" data-local-datetime>{{.ProvidersChecked}}</time>{{else}}Not checked yet{{end}}</div></div>
           <div class="metric"><div class="metric-label">Discovered models</div><div class="metric-value num">{{number .ProviderModelCount}}</div><div class="metric-note">Provider catalog only</div></div>
           <div class="metric"><div class="metric-label">Connections</div><div class="metric-value num">{{number (len .Providers)}}</div><div class="metric-note">Available to configure</div></div>
         </section>
@@ -230,7 +230,7 @@
               <div class="provider-row">
                 <div><div class="provider-name">{{.DisplayName}}</div><div class="account-sub">{{.Description}}</div></div>
                 <div class="endpoint">{{.BaseURL}}{{if and (eq .Name "openrouter") .HasCredential}} · key stored securely{{end}}</div>
-                <div class="provider-check"><span class="state {{if eq .Health "healthy"}}good{{else if eq .Health "error"}}bad{{else}}warn{{end}}">{{.Health}}</span><div class="account-sub">Checked {{.Updated}}</div></div>
+                <div class="provider-check"><span class="state {{if eq .Health "healthy"}}good{{else if eq .Health "error"}}bad{{else}}warn{{end}}">{{.Health}}</span><div class="account-sub">Checked {{if .UpdatedAt}}<time datetime="{{.UpdatedAt}}" data-local-datetime>{{.Updated}}</time>{{else}}{{.Updated}}{{end}}</div></div>
                 <div class="row-actions"><button class="btn btn-ghost" type="submit" form="provider-{{.Name}}">Test</button><button class="icon-btn btn-secondary provider-config-trigger" type="button" data-provider-toggle="provider-config-{{.Name}}" aria-controls="provider-{{.Name}}" aria-expanded="false" aria-label="Configure provider" data-tooltip="Configure provider"><span class="material-symbols-outlined" aria-hidden="true">settings</span></button></div>
               </div>
               <form class="provider-config" id="provider-{{.Name}}" method="post" action="/admin/providers/{{.Name}}" data-provider-config="provider-config-{{.Name}}" hidden>
@@ -257,8 +257,8 @@
           {{if .Devices}}<div class="device-list">
             {{range .Devices}}<article class="device-row">
               <div><div class="account-name">{{.Name}}</div><div class="account-sub">{{if .Laptop}}Desktop helper{{else}}Router helper{{end}}</div></div>
-              <div class="device-seen"><span class="state {{if eq .Status "approved"}}good{{else if eq .Status "rejected"}}bad{{else}}warn{{end}}">{{.Status}}</span><div class="account-sub">Last seen {{.LastSeen}}</div></div>
-              <div class="device-sync"><div class="muted">Catalog synced</div><div class="account-sub num">{{.CatalogSynced}}</div></div>
+              <div class="device-seen"><span class="state {{if eq .Status "approved"}}good{{else if eq .Status "rejected"}}bad{{else}}warn{{end}}">{{.Status}}</span><div class="account-sub">Last seen {{if .LastSeenAt}}<time datetime="{{.LastSeenAt}}" data-local-datetime>{{.LastSeen}}</time>{{else}}{{.LastSeen}}{{end}}</div></div>
+              <div class="device-sync"><div class="muted">Catalog synced</div><div class="account-sub num">{{if .CatalogSyncedAt}}<time datetime="{{.CatalogSyncedAt}}" data-local-datetime>{{.CatalogSynced}}</time>{{else}}{{.CatalogSynced}}{{end}}</div></div>
               <div class="row-actions">{{if eq .Status "pending"}}<form class="inline" method="post" action="/admin/devices/{{.ID}}/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="devices"><button class="btn btn-primary" type="submit">Approve</button></form><form class="inline" method="post" action="/admin/devices/{{.ID}}/reject" data-confirm="Reject enrollment for {{.Name}}?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="devices"><button class="btn btn-danger" type="submit">Reject</button></form>{{end}}{{if eq .Status "approved"}}<form class="inline" method="post" action="/admin/devices/{{.ID}}/revoke" data-confirm="Permanently remove {{.Name}}? The helper must enroll again to regain access."><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="devices"><button class="btn btn-danger" type="submit">Remove</button></form>{{end}}{{if eq .Status "rejected"}}<form class="inline" method="post" action="/admin/devices/{{.ID}}/delete" data-confirm="Permanently delete {{.Name}} from the device list?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="devices"><button class="btn btn-danger" type="submit">Delete</button></form>{{end}}</div>
             </article>{{end}}
           </div>{{else}}<p class="empty">No helper has requested enrollment.</p>{{end}}

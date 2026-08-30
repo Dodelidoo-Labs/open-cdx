@@ -20,4 +20,10 @@ final class HelperModelTests: XCTestCase {
             "Device approved. Connecting…"
         )
     }
+
+    func testRouterOperationsRequireConfigurationAndConnection() {
+        XCTAssertTrue(routerOperationsAvailable(configured: true, connected: true))
+        XCTAssertFalse(routerOperationsAvailable(configured: true, connected: false))
+        XCTAssertFalse(routerOperationsAvailable(configured: false, connected: true))
+    }
 }

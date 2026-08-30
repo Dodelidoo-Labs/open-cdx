@@ -98,6 +98,10 @@ func operationAfterApplyingStatus(_ operation: String, status: HelperStatus) -> 
     return operation
 }
 
+func routerOperationsAvailable(configured: Bool, connected: Bool) -> Bool {
+    configured && connected
+}
+
 @MainActor
 final class HelperModel: ObservableObject {
     @Published var status = HelperStatus()

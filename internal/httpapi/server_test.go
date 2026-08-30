@@ -158,6 +158,17 @@ func TestFormatIntegerUsesApostropheGrouping(t *testing.T) {
 	}
 }
 
+func TestBrowserTimestampUsesUTCISO8601(t *testing.T) {
+	zone := time.FixedZone("test", -3*60*60)
+	value := time.Date(2026, time.August, 29, 23, 31, 0, 0, zone)
+	if got := browserTimestamp(value); got != "2026-08-30T02:31:00Z" {
+		t.Fatalf("browser timestamp = %q", got)
+	}
+	if got := browserTimestamp(time.Time{}); got != "" {
+		t.Fatalf("zero browser timestamp = %q", got)
+	}
+}
+
 func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
 	templates, err := template.New("site").Funcs(template.FuncMap{"number": formatInteger}).ParseFS(site.Templates, "templates/*.html")
 	if err != nil {
@@ -166,17 +177,19 @@ func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
 	page := dashboardPage{
 		Message: "Settings saved", RepositoryURL: "https://github.com/Dodelidoo-Labs/open-cdx",
 		CurrentVersion: "1.0.0", LatestVersion: "1.1.0", UpdateAvailable: true,
+		NearestResetDate: "Aug 30", NearestResetTime: "02:31", NearestResetAt: "2026-08-30T02:31:00Z",
+		ProvidersChecked: "Aug 30 02:31", ProvidersCheckedAt: "2026-08-30T02:31:00Z",
 		Accounts: []accountView{
 			{
 				ID: "account", MaskedEmail: "a***@example.com", Plan: "pro", Status: "ready", Primary: true,
 				VisibleModels: []string{"gpt-test"}, MoreModels: []string{"gpt-test-2"},
-				Quotas: []quotaView{{Name: "Codex", Remaining: 80}, {Name: "Codex Spark", Remaining: 60, Spark: true}},
+				Quotas: []quotaView{{Name: "Codex", Reset: "Aug 30 · 02:31", ResetAt: "2026-08-30T02:31:00Z", Remaining: 80}, {Name: "Codex Spark", Remaining: 60, Spark: true}},
 			},
 			{ID: "fallback", MaskedEmail: "b***@example.com", Plan: "plus", Status: "ready"},
 		},
-		Providers: []providerView{{Name: "openrouter", DisplayName: "OpenRouter", Description: "OpenRouter API", Health: "healthy", HasCredential: true}},
+		Providers: []providerView{{Name: "openrouter", DisplayName: "OpenRouter", Description: "OpenRouter API", Health: "healthy", HasCredential: true, Updated: "Aug 30 02:31", UpdatedAt: "2026-08-30T02:31:00Z"}},
 		Devices: []deviceView{
-			{ID: "device", Name: "MacBook Pro", Status: "approved", Laptop: true},
+			{ID: "device", Name: "MacBook Pro", Status: "approved", LastSeen: "Aug 30 02:31", LastSeenAt: "2026-08-30T02:31:00Z", Laptop: true},
 			{ID: "retired", Name: "Old Mac", Status: "rejected"},
 		},
 		Models:              []modelView{{Provider: "openrouter", Model: "example/model", State: "available"}},
@@ -197,6 +210,7 @@ func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
 		`data-account-list`, `data-account-drag`, `/admin/accounts/reorder`,
 		`class="project-version"`, `href="https://github.com/Dodelidoo-Labs/open-cdx"`, `class="update-current">v1.0.0`, `class="update-latest"> → v1.1.0`,
 		`/admin/devices/device/revoke`, `/admin/devices/retired/delete`,
+		`datetime="2026-08-30T02:31:00Z"`, `data-local-datetime`, `data-local-date`, `data-local-clock`,
 		"[hidden]{display:none!important}", "Codex Spark", "gpt-test-2", `data-sort="provider"`, `data-sort="model"`, `data-sort="state"`,
 	} {
 		if !strings.Contains(output.String(), marker) {
@@ -238,7 +252,7 @@ func TestDashboardJavaScriptIsServed(t *testing.T) {
 		t.Fatalf("dashboard asset content type = %q", contentType)
 	}
 	bundle := response.Body.String()
-	for _, marker := range []string{"data-sort-table", "pill.hidden = false", "formatNumber", "renderUsageChart(range, report, mode, grouping)", "data-flash-dismiss", "prepareSeriesColors", "data-group-mode", "const visible = ordered.map", "moveRowAtY", "data-account-order-form"} {
+	for _, marker := range []string{"data-sort-table", "pill.hidden = false", "formatNumber", "renderUsageChart(range, report, mode, grouping)", "data-flash-dismiss", "prepareSeriesColors", "data-group-mode", "const visible = ordered.map", "moveRowAtY", "data-account-order-form", `time[data-local-datetime]`, `time[data-local-date]`, `time[data-local-clock]`} {
 		if !strings.Contains(bundle, marker) {
 			t.Fatalf("dashboard behavior bundle is missing %q", marker)
 		}
