@@ -1,158 +1,186 @@
-# OpenCDX Router
+<p align="center">
+  <img src="assets/branding/opencdx-logo.png" width="96" alt="OpenCDX Router logo">
+</p>
 
-[GitHub](https://github.com/Dodelidoo-Labs/open-cdx) · [Releases](https://github.com/Dodelidoo-Labs/open-cdx/releases) · `ghcr.io/dodelidoo-labs/open-cdx`
+<h1 align="center">OpenCDX Router</h1>
 
-OpenCDX Router is a credential-isolating provider router for Codex. A central Go service owns OpenAI OAuth grants, OpenRouter credentials, catalogs, quota state, and routing. Each Mac runs a small loopback helper and a native SwiftUI menu-bar app.
+<p align="center">
+  A self-hosted provider router for Codex with multi-account routing, quota-aware failover, provider catalogs, and private aggregate telemetry.
+</p>
+
+<p align="center">
+  <a href="https://github.com/Dodelidoo-Labs/open-cdx/releases/latest">Download the macOS app</a>
+  ·
+  <a href="https://github.com/Dodelidoo-Labs/open-cdx/pkgs/container/open-cdx">Get the router container</a>
+  ·
+  <a href="docs/">Documentation</a>
+</p>
+
+OpenCDX gives Codex one local endpoint while a central router manages OpenAI accounts, provider credentials, model catalogs, quotas, and routing. Each Mac uses a native menu-bar app and a bundled loopback helper to reach the router securely.
 
 ```text
-Codex → 127.0.0.1 helper → HTTPS → router → OpenAI / OpenRouter / Ollama
+Codex → local helper → HTTPS → OpenCDX Router → OpenAI / OpenRouter / Ollama
 ```
 
-The project does not replace Codex, read an existing Codex or ChatGPT login, import browser cookies, or edit `~/.codex/config.toml`. Every OpenAI account performs a fresh browser PKCE login, and only the router ever receives or refreshes its access and refresh tokens.
+OpenCDX does not replace Codex or reuse an existing Codex, ChatGPT, or browser login. Each OpenAI account is connected through a fresh browser sign-in, and OpenCDX never edits `~/.codex/config.toml` for you.
 
-## What is implemented
+## What to download
 
-- Encrypted SQLite account, provider, catalog, device, affinity, and aggregate-usage storage
-- Explicit browser authorization-code login with PKCE, five-minute state, duplicate detection, and replace flow
-- Per-account identity, plan, quota, reset-credit, and entitled-model validation before an account becomes ready
-- Exact native OpenAI catalog-entry preservation, union routing by entitlement, primary-account conflict resolution, and visible conflicts
-- Conservative OpenRouter discovery/translation and visible exclusions; remote-router Ollama support with an explicit LAN HTTP opt-in
-- Sticky thread/session affinity, primary-first operator-ordered account selection, quota failover, refresh-token single-flight, and stream-safe retry rules
-- Per-device enrollment, administrator approval, one-time credential delivery, acknowledgement, and revocation
-- Loopback helper with short-lived command authentication, Keychain storage on macOS, atomic catalogs, browser callbacks, and no inference-body inspection
-- Native `MenuBarExtra` application with no Dock icon and normal macOS login-item registration
-- Administration dashboard with Home telemetry, OpenAI account quotas, provider health, devices, sortable catalog diagnostics, and credential removal
-- One-year aggregate activity plus per-model token charts without storing prompts or responses, with a telemetry-only reset
-- Optional one-time Codex history reconciliation from local rollout files, with cumulative-counter deduplication and a strict aggregate-only wire format
-- HTTP-only loopback development Compose stack and a production Caddy stack that exposes clients only over HTTPS
+OpenCDX has two separately distributed parts:
 
-## Development quick start
+| Component | Download location | What it contains |
+|---|---|---|
+| Router service | [GitHub Packages](https://github.com/Dodelidoo-Labs/open-cdx/pkgs/container/open-cdx) | The multi-architecture Docker image at `ghcr.io/dodelidoo-labs/open-cdx` |
+| macOS companion | [GitHub Releases](https://github.com/Dodelidoo-Labs/open-cdx/releases/latest) | The signed and notarized universal macOS app, including its bundled helper |
 
-Docker validation for this repository was performed in the `opencdx-docker-test` Multipass VM. To reproduce that isolation:
+**GitHub Releases do not contain the Docker image.** The runnable release download is the macOS companion app; Docker pulls the router from GitHub Packages. Release pages also carry checksum and update-feed metadata for the Mac app.
 
-```sh
-multipass launch 24.04 --name opencdx-docker-test --cpus 2 --memory 4G --disk 20G
-multipass exec opencdx-docker-test -- sudo apt-get update
-multipass exec opencdx-docker-test -- sudo apt-get install -y docker.io docker-compose-v2 docker-buildx
-multipass mount "$PWD" opencdx-docker-test:/home/ubuntu/opencdx
-./scripts/generate-docker-secrets.sh
-VM_IP=$(multipass exec opencdx-docker-test -- hostname -I | awk '{print $1}')
-printf 'VM_IP=%s\n' "$VM_IP"
-multipass exec opencdx-docker-test -- sh -lc "cd /home/ubuntu/opencdx && sudo env OPENCODEX_DEV_BIND=0.0.0.0 OPENCODEX_PUBLIC_URL=http://$VM_IP:8080 docker compose -f docker/compose.dev.yml up -d --build --force-recreate"
-```
+## Highlights
 
-From the Mac, open `http://$VM_IP:8080/admin`. The administrator token is in
-`docker/secrets/admin_token`. The non-loopback bind is an explicit insecure
-development choice for the private Multipass network; the Compose default stays
-bound to loopback when `OPENCODEX_DEV_BIND` is omitted. Assigning `VM_IP` is
-silent; the following `printf` confirms the value. `--force-recreate` replaces
-any loopback-bound container that Multipass restarted from an earlier run.
+- Route across multiple OpenAI accounts with an operator-selected primary account, sticky sessions, quota tracking, and automatic fallback.
+- Add compatible OpenRouter and Ollama models without losing the native OpenAI catalog.
+- Inspect model availability, exclusions, provider health, devices, account allowances, and reset windows from the web dashboard.
+- See router health and account quota at a glance from the macOS menu bar.
+- Keep OpenAI and provider credentials in encrypted router storage; paired Macs receive only revocable device credentials.
+- Track daily request and token totals without storing prompts or responses.
+- Reconcile aggregate usage from an existing local Codex history without sending conversation content to the router.
 
-For normal local development with Go installed:
+## Screenshots
 
-```sh
-go test ./...
-go build ./cmd/routerd ./cmd/router-helper
-```
+Click any screenshot to open it at full size.
 
-## macOS app
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/screenshots/telemetry.png"><img src="docs/assets/screenshots/telemetry.png" width="100%" alt="OpenCDX telemetry dashboard"></a><br>
+      <sub>Telemetry and model usage</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/screenshots/openai-accounts.png"><img src="docs/assets/screenshots/openai-accounts.png" width="100%" alt="OpenCDX OpenAI accounts dashboard"></a><br>
+      <sub>OpenAI account routing and allowances</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/screenshots/providers.png"><img src="docs/assets/screenshots/providers.png" width="100%" alt="OpenCDX provider health dashboard"></a><br>
+      <sub>Provider health and endpoints</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/screenshots/catalog.png"><img src="docs/assets/screenshots/catalog.png" width="100%" alt="OpenCDX model catalog"></a><br>
+      <sub>Searchable model catalog and exclusions</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/screenshots/devices.png"><img src="docs/assets/screenshots/devices.png" width="100%" alt="OpenCDX paired devices dashboard"></a><br>
+      <sub>Paired and revocable devices</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/screenshots/admin-sign-in.png"><img src="docs/assets/screenshots/admin-sign-in.png" width="100%" alt="OpenCDX administrator sign-in"></a><br>
+      <sub>Administrator sign-in</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <a href="docs/assets/screenshots/macos-menu.png"><img src="docs/assets/screenshots/macos-menu.png" height="460" alt="OpenCDX Router macOS menu"></a><br>
+      <sub>Native macOS menu-bar companion</sub>
+    </td>
+    <td width="50%" align="center">
+      <a href="docs/assets/screenshots/macos-settings.png"><img src="docs/assets/screenshots/macos-settings.png" height="460" alt="OpenCDX Router macOS settings"></a><br>
+      <sub>Router enrollment and usage-history settings</sub>
+    </td>
+  </tr>
+</table>
 
-Build and install without administrator privileges:
+## Install OpenCDX
 
-```sh
-./scripts/build-macos-app.sh
-./scripts/install-macos-app.sh
-```
+You need:
 
-For stable macOS privacy identity across local rebuilds, configure an Apple-issued
-development certificate by placing its SHA-1 fingerprint in the ignored
-`.opencdx-codesign-identity` file, or set `OPENCODEX_CODESIGN_IDENTITY` for one
-build. When exactly one Apple identity is available, the script selects it. With
-none or more than one, it fails instead of silently changing identity. Explicit
-`OPENCODEX_CODESIGN_IDENTITY=-` remains available for non-installed CI artifacts;
-the installer refuses ad-hoc builds and unintentional signer changes.
+- A host with Docker Engine and Docker Compose v2 for the router.
+- A DNS name for that host, with ports 80 and 443 reachable so the included Caddy service can provide HTTPS.
+- A Mac running macOS 13 or newer for the companion app. Both Apple silicon and Intel Macs are supported.
+- Codex installed separately on the Mac.
 
-Go must be available for every app build so a stale bundled helper can never be
-reused. If Go is not on `PATH`, set `OPENCODEX_GO_BINARY` or put its absolute path
-in the ignored `.opencdx-go-binary` file.
+### 1. Deploy the router
 
-The built artifact is `dist/OpenCDX Router.app`. The install script atomically
-moves that bundle to `~/Applications` rather than leaving a second copy behind;
-[Apple documents](https://developer.apple.com/documentation/Technotes/tn3179-understanding-local-network-privacy)
-that multiple app copies can produce unexpected Local Network privacy entries.
-The same technote notes that macOS has no supported per-app reset, so these
-safeguards prevent new duplicate entries but cannot erase historical entries.
-The application uses the stable bundle identifier `com.dodelidoo.opencdx`; its
-embedded helper and Keychain service use `com.dodelidoo.opencdx.helper`. Local
-helper state lives under
-`~/Library/Application Support/com.dodelidoo.opencdx`.
-On first launch, open Settings, enter the router's HTTPS address and a device
-name, request enrollment, then approve the pending Mac in the dashboard. The app
-detects approval and starts the bundled helper.
-
-End users can download the signed, notarized universal macOS ZIP from the
-[latest GitHub release](https://github.com/Dodelidoo-Labs/open-cdx/releases/latest).
-Release builds support both Apple silicon and Intel Macs on macOS 13 or newer.
-
-Use **Add OpenAI Account…** for each account. The browser is forced through a fresh login, and duplicate accounts are rejected without replacing stored credentials. Account allowance changes appear in the menu within about 30 seconds; catalog changes are checked every minute or immediately with **Refresh Model Catalog**.
-
-After the first catalog sync, choose **Copy Codex Configuration** and paste the snippet into `~/.codex/config.toml` yourself. Restart Codex whenever the menu reports that the catalog changed, then choose **Done** beside the reminder; Codex loads `model_catalog_json` at startup.
-
-After pairing, the app asks once whether to import existing Codex usage history. The menu app explicitly scans the default Codex home at `~/.codex`, then shows the resolved source path plus file and routed/native request counts before asking whether to replace telemetry. The scan stays on the Mac and extracts only the UTC day, provider, model, routing classification, request count, and input/cached/cache-write/output/reasoning token counters from `sessions` and `archived_sessions`. Prompt and response records are ignored and the server rejects fields outside the aggregate schema. Reconciliation transactionally replaces existing telemetry and records the import instant. Telemetry keeps ingestion source (`reconciled` or live proxy `routed`) separate from routing classification (`routed` or `native`). The latter is derived from Codex's durable `model_provider = "opencdx"` rollout metadata, so the dashboard's **Group by → Routed / native** view remains accurate after any later full reconciliation. Running reconciliation again replaces both the aggregates and that boundary. Run it at any time with **Reconcile Usage History…** in the menu or:
+Clone this repository to the Docker host and create the production configuration:
 
 ```sh
-router-helper reconcile-usage
-```
-
-For a custom Codex data directory, select that single history root explicitly from the CLI:
-
-```sh
-router-helper reconcile-usage --codex-home /absolute/path/to/codex-home --dry-run
-# Review the routed/native counts, then replace telemetry:
-router-helper reconcile-usage --codex-home /absolute/path/to/codex-home
-```
-
-OpenCDX does not discover or combine multiple Codex homes automatically. Each reconciliation is a complete replacement from the one selected root, which avoids silently mixing histories that may represent different configuration or authentication contexts.
-
-Choose **Reset Telemetry…** in either the dashboard or menu app to return all request and token counters to zero. Resetting deletes only the router's aggregate telemetry and reconciliation metadata. It does not change providers, devices, accounts, catalogs, or routing configuration, and it never reads or deletes anything under `~/.codex`. New routed usage begins accumulating immediately, or you can reconcile local history again later. The same operation is available from the helper:
-
-```sh
-router-helper reset-telemetry
-```
-
-See [helper and Codex setup](docs/helper-and-codex.md) and [deployment](docs/deployment.md) for the complete runbook.
-
-## Production
-
-Production clients must never use plaintext LAN HTTP. Set a real DNS name and ACME email, keep router port 8080 off the LAN, and run:
-
-```sh
+git clone https://github.com/Dodelidoo-Labs/open-cdx.git
+cd open-cdx
 cp docker/.env.example docker/.env
-# Edit docker/.env.
+```
+
+Edit `docker/.env` with your router's DNS name and ACME email:
+
+```dotenv
+OPENCODEX_DOMAIN=router.example.com
+ACME_EMAIL=you@example.com
+OPENCODEX_VERSION=latest
+```
+
+Use `latest` to follow the newest stable container, or pin `OPENCODEX_VERSION` to a published version from [GitHub Packages](https://github.com/Dodelidoo-Labs/open-cdx/pkgs/container/open-cdx).
+
+Generate the router secrets and start the HTTPS stack:
+
+```sh
 ./scripts/generate-docker-secrets.sh
 docker compose --env-file docker/.env -f docker/compose.production.yml pull
 docker compose --env-file docker/.env -f docker/compose.production.yml up -d
+docker compose --env-file docker/.env -f docker/compose.production.yml ps
 ```
 
-The production Compose file pulls `ghcr.io/dodelidoo-labs/open-cdx`; set
-`OPENCODEX_VERSION` to a release such as `1.0.0`, or use `latest`. Caddy is the
-only published service and terminates HTTPS. Back up the named SQLite volume
-and `docker/secrets/master_key` together; neither is useful alone.
+Open `https://router.example.com/admin` and sign in with the administrator token from `docker/secrets/admin_token`.
 
-That HTTPS requirement applies to Mac-to-router traffic. If the router reaches
-an Ollama server elsewhere on a trusted LAN, its provider settings offer
-**Allow HTTP**, off by default. Enable it only for that deliberate plaintext
-upstream connection; loopback HTTP remains allowed without the option.
+Keep `docker/secrets/master_key` backed up separately from the Docker data volume. The database cannot recover encrypted provider credentials without that key. See the [deployment guide](docs/deployment.md) for DNS, firewall, backup, Tailscale, verification, and upgrade details.
 
-Maintainers: see [release automation](docs/releases.md) for tag, signing, and
-notarization setup.
+### 2. Install the macOS companion
 
-## Verification status
+1. Open the [latest GitHub Release](https://github.com/Dodelidoo-Labs/open-cdx/releases/latest).
+2. Download `OpenCDX-Router-<version>-macOS-universal.zip`. This is the Mac app, not the Docker router.
+3. Expand the ZIP and move **OpenCDX Router.app** to `/Applications` or `~/Applications`.
+4. Launch the app. It is Developer ID signed and notarized by Apple.
 
-Automated Go tests, a real signed-out Codex command-auth integration, the Swift release build, and Docker/Compose restart recovery have been run. A human must still complete the account-dependent acceptance steps with two real OpenAI accounts and an OpenRouter key; no credentials were available or inferred for that test. The exact checklist is in [verification](docs/verification.md), and the evidence/remaining gate is recorded in [research gates](docs/research-gates.md).
+The app includes the correct helper binary for both Apple silicon and Intel Macs; there is no separate helper download.
 
-## Security boundary
+### 3. Pair the Mac
 
-Prompts and responses are streamed and never logged. The router retains only daily request/token aggregates. Stable ChatGPT account IDs are hashed outside encrypted credential envelopes; display uses masked email. OAuth codes, bearer tokens, refresh tokens, provider keys, and device credentials are never written to logs.
+1. Open **OpenCDX Router Settings** from the menu-bar app.
+2. Enter the router's HTTPS address and a recognizable device name.
+3. Choose **Request Enrollment**.
+4. Open **Devices** in the web dashboard and approve the pending Mac.
+5. Wait for the menu to show **Router — Responding** and **Catalog — Synchronized**.
 
-See [security](docs/security.md) for secrets, backup, revocation, and uninstall behavior.
+Each paired Mac has its own revocable device credential. Removing a device in the dashboard immediately ends that Mac's router access.
+
+### 4. Connect accounts and configure Codex
+
+1. Choose **Add OpenAI Account…** in the menu app and complete the fresh browser login. Repeat for each account you want in the routing pool.
+2. Optionally configure OpenRouter or Ollama from **Providers** in the dashboard.
+3. Choose **Copy Codex Configuration** after the first catalog sync.
+4. Paste the generated snippet into `~/.codex/config.toml` and restart Codex.
+
+The configuration points Codex at the local helper. Codex receives a short-lived local credential; it never receives the router's stored OpenAI refresh tokens or provider API keys.
+
+See [Helper and Codex setup](docs/helper-and-codex.md) for advanced pairing, custom Codex homes, usage reconciliation, reset behavior, helper commands, and uninstall steps.
+
+## Updating
+
+- **macOS companion:** choose **Check for Updates…** in the menu. Signed updates are delivered from GitHub Releases through Sparkle.
+- **Router:** set `OPENCODEX_VERSION` to the desired tag, then run the production Compose `pull` and `up -d` commands again. Router images come from GitHub Packages.
+
+Back up the router database volume and `docker/secrets/master_key` together before an upgrade. Full instructions are in [Deployment](docs/deployment.md#upgrades).
+
+## Privacy and security
+
+- OpenAI access and refresh tokens and provider API keys exist only in encrypted router storage and transient router memory.
+- The helper binds only to the Mac's loopback interface and keeps its device credential in Keychain.
+- Prompts and responses are streamed and are not logged or stored by OpenCDX.
+- Telemetry contains aggregate request and token counts, not conversation content.
+- Production Mac-to-router traffic must use HTTPS. Plain HTTP on a LAN is available only through an explicit development override.
+
+Read the complete [security model](docs/security.md) for credential ownership, network boundaries, header filtering, retry rules, backup, and revocation.
+
+## Documentation
+
+The [documentation index](docs/README.md) separates operator, advanced-user, contributor, verification, security, and release-maintainer guides.

@@ -1,107 +1,114 @@
-# Deployment
+# Router deployment
 
-## Development
+This guide is the production operator runbook for the OpenCDX router service. The router is distributed as a multi-architecture container through [GitHub Packages](https://github.com/Dodelidoo-Labs/open-cdx/pkgs/container/open-cdx):
 
-The development stack is intentionally loopback-only and HTTP:
-
-```sh
-./scripts/generate-docker-secrets.sh
-docker compose -f docker/compose.dev.yml up -d --build
-curl --fail http://127.0.0.1:8080/readyz
+```text
+ghcr.io/dodelidoo-labs/open-cdx
 ```
 
-Do not change the port binding to `0.0.0.0` on a shared LAN. A helper may use a plaintext non-loopback URL only when both the router and helper were explicitly started in insecure development mode.
+GitHub Releases contains the signed macOS companion app, its checksum, and its Sparkle update feed. It does not contain a Docker image.
 
-### Access from the macOS host through Multipass
+## Requirements
 
-The safe Compose default publishes only on the VM's loopback interface, so
-`http://VM_IP:8080` will not answer. Explicitly expose the development port on
-the private Multipass interface and make that address the router's public URL:
-
-```sh
-VM_IP=$(multipass exec opencdx-docker-test -- hostname -I | awk '{print $1}')
-printf 'VM_IP=%s\n' "$VM_IP"
-multipass exec opencdx-docker-test -- sh -lc "cd /home/ubuntu/opencdx && sudo env OPENCODEX_DEV_BIND=0.0.0.0 OPENCODEX_PUBLIC_URL=http://$VM_IP:8080 docker compose -f docker/compose.dev.yml up -d --build --force-recreate"
-curl --fail "http://$VM_IP:8080/readyz"
-```
-
-The variable assignment itself prints nothing; the `printf` line confirms the
-detected address. Recreating is necessary when `restart: unless-stopped` has
-already brought back a container with the default loopback-only port mapping.
-
-Open `http://$VM_IP:8080/admin` on the Mac. In the menu app, use the same base
-URL and enable **Allow plaintext LAN router for development**. Do not use this
-mode on a bridged or otherwise untrusted network.
-
-## Internet or LAN production
-
-Requirements:
-
-- A DNS name resolving to the deployment host
-- TCP 80 and TCP/UDP 443 reachable by Caddy
-- Router port 8080 not published by another Compose override or host firewall rule
+- A host with Docker Engine and Docker Compose v2
+- A DNS name resolving to that host
+- TCP 80 and TCP/UDP 443 reachable by the included Caddy service
+- Router port 8080 kept off the LAN and internet
 - Persistent Docker volumes
-- Separately backed-up Docker secret files
+- An independent backup location for the generated secret files
 
-Create `docker/.env`:
+Production helpers require HTTPS. Do not point a helper at a plaintext LAN address.
+
+## Install
+
+Clone the repository on the Docker host:
+
+```sh
+git clone https://github.com/Dodelidoo-Labs/open-cdx.git
+cd open-cdx
+cp docker/.env.example docker/.env
+```
+
+Set the public DNS name, ACME contact address, and image version in `docker/.env`:
 
 ```dotenv
 OPENCODEX_DOMAIN=router.example.com
 ACME_EMAIL=admin@example.com
+OPENCODEX_VERSION=latest
 ```
 
-Then start the HTTPS stack:
+`OPENCODEX_VERSION` selects an image tag from GitHub Packages. Use `latest` for the newest stable image, or pin a complete version such as `1.0.0`. For a pinned deployment, check out the matching Git tag so the Compose and Caddy configuration comes from the same version:
+
+```sh
+git checkout v1.0.0
+```
+
+Generate the encryption key and administrator token, then start the stack:
 
 ```sh
 ./scripts/generate-docker-secrets.sh
 docker compose --env-file docker/.env -f docker/compose.production.yml pull
 docker compose --env-file docker/.env -f docker/compose.production.yml up -d
 docker compose --env-file docker/.env -f docker/compose.production.yml ps
+```
+
+The production Compose stack pulls `ghcr.io/dodelidoo-labs/open-cdx`. It does not build the application from the checkout.
+
+Verify the public endpoint:
+
+```sh
 curl --fail "https://router.example.com/readyz"
 ```
 
-The router listens over HTTP only on its private Docker network. Caddy is the sole published ingress and streams Responses without buffering. HSTS is emitted by both the application and Caddy.
+Then open `https://router.example.com/admin` and sign in with the value in `docker/secrets/admin_token`. Protect that token like a password.
 
-For Tailscale, use a certificate-backed Tailscale DNS name or put Caddy on the tailnet. Do not point helpers at `http://100.x.y.z:8080` in production.
+## Network and TLS
+
+Caddy is the only published service. It listens on ports 80 and 443, obtains and renews the public certificate, and forwards requests to the router over the private Docker network. The router's port 8080 must not be published by another Compose override or firewall rule.
+
+For Tailscale, use a certificate-backed Tailscale DNS name or place Caddy on the tailnet. Do not point production helpers at `http://100.x.y.z:8080`.
+
+The HTTPS requirement applies to Mac-to-router traffic. If the router connects to an Ollama server elsewhere on a trusted LAN, that provider has a separate **Allow HTTP** option. It is off by default and should be enabled only for that deliberate upstream connection. Loopback HTTP remains allowed without the option.
 
 ## Persistence and backup
 
-The `router_data` named volume contains SQLite metadata, encrypted credentials, catalog snapshots, quota state, devices, and affinities. `docker/secrets/master_key` decrypts credential envelopes. Back up both, store them separately, and protect the administrator token independently.
+The `router_data` named volume contains SQLite metadata, encrypted credentials, catalogs, quota state, devices, routing affinity, and aggregate telemetry. `docker/secrets/master_key` decrypts the stored credential envelopes.
 
-Restoring only the database intentionally leaves credentials unreadable. Changing the master key without re-encrypting the database has the same effect.
+Back up the data volume and master key together, but store the backup copies separately. Protect `docker/secrets/admin_token` independently. A database backup without the matching master key cannot recover provider credentials; changing the key without a planned re-encryption has the same effect.
 
-Container recreation without volume deletion is safe:
-
-```sh
-docker compose -f docker/compose.dev.yml down
-docker compose -f docker/compose.dev.yml up -d
-```
-
-Never add `-v` unless deleting all router data is explicitly intended.
+Container recreation without volume deletion is safe. Never add `-v` to a Compose `down` command unless deleting all router data is explicitly intended.
 
 ## Upgrades
 
-Back up the database volume and master key, set `OPENCODEX_VERSION` in
-`docker/.env` to the desired [GitHub release](https://github.com/Dodelidoo-Labs/open-cdx/releases),
-then pull and recreate the service. Check `/readyz`, the dashboard provider
-health, and one helper status before retiring the old image. The small version
-link below the dashboard logout control turns red when GitHub reports a newer
-stable release.
+1. Back up the `router_data` volume and `docker/secrets/master_key`.
+2. Choose a version published in [GitHub Packages](https://github.com/Dodelidoo-Labs/open-cdx/pkgs/container/open-cdx).
+3. For a pinned deployment, fetch and check out the matching repository tag and set the same version in `docker/.env`.
+4. Pull and recreate the services:
+
+   ```sh
+   docker compose --env-file docker/.env -f docker/compose.production.yml pull
+   docker compose --env-file docker/.env -f docker/compose.production.yml up -d
+   ```
+
+5. Check `/readyz`, provider health in the dashboard, and one paired Mac before retiring the backup.
+
+The version link below the dashboard logout control turns red when GitHub reports a newer stable release. The macOS companion updates separately through GitHub Releases and Sparkle.
 
 ## Environment reference
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `OPENCODEX_LISTEN` | `:8080` | Router listen address |
-| `OPENCODEX_PUBLIC_URL` | loopback development URL | Browser/dashboard URL; non-loopback production requires HTTPS |
+| `OPENCODEX_PUBLIC_URL` | Loopback development URL | Browser/dashboard URL; non-loopback production requires HTTPS |
 | `OPENCODEX_DATABASE` | `/var/lib/opencdx/router.db` | SQLite path |
-| `OPENCODEX_MASTER_KEY_FILE` | `/run/secrets/master_key` | 32-byte raw/base64/hex encryption key |
+| `OPENCODEX_MASTER_KEY_FILE` | `/run/secrets/master_key` | 32-byte raw, base64, or hex encryption key |
 | `OPENCODEX_ADMIN_TOKEN_FILE` | `/run/secrets/admin_token` | Dashboard administrator token |
 | `OPENCODEX_INSECURE_DEV` | `false` | Explicit plaintext development override |
 | `OPENCODEX_CATALOG_REFRESH_INTERVAL` | `15m` | Provider catalog refresh interval |
 | `OPENCODEX_QUOTA_REFRESH_INTERVAL` | `5m` | Account quota refresh interval |
 
-`OPENCODEX_VERSION` is a Docker Compose substitution used to select
-`ghcr.io/dodelidoo-labs/open-cdx`; it is not read by the router process.
+`OPENCODEX_VERSION` is a Docker Compose substitution that selects the container tag. It is not read by the router process.
 
-The OpenAI auth, ChatGPT API, and Codex Responses endpoints are always required to be absolute HTTPS URLs, including in development.
+The OpenAI authorization, ChatGPT API, and Codex Responses endpoints must always be absolute HTTPS URLs, including during development.
+
+For the source-built HTTP stack and the isolated Multipass workflow, see [Development](development.md).

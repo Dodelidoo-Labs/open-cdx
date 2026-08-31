@@ -1,8 +1,10 @@
 # Helper and Codex setup
 
+The signed macOS companion from [GitHub Releases](https://github.com/Dodelidoo-Labs/open-cdx/releases/latest) is the normal interface. It includes the helper; users do not download or install `router-helper` separately. The commands below document the equivalent or advanced flows.
+
 ## Pair a Mac
 
-The menu app is the normal interface. The equivalent CLI flow is:
+The equivalent CLI flow is:
 
 ```sh
 router-helper enroll --router https://router.example.com --name "Work Mac" --no-wait
@@ -73,6 +75,12 @@ The menu app previews and imports only the default Codex home at `~/.codex`.
 Before replacement it shows the resolved directory plus scanned-file and
 routed/native request counts. It never discovers or combines other Codex homes.
 
+The local scan extracts only UTC day, provider, model, routing classification,
+request count, and input/cached/cache-write/output/reasoning token totals from
+`sessions` and `archived_sessions`. Prompts, responses, credentials, paths,
+and account identifiers are ignored. Routed/native classification comes from
+Codex's durable `model_provider = "opencdx"` rollout metadata.
+
 Use the helper directly when Codex runs with a custom `CODEX_HOME`:
 
 ```sh
@@ -83,8 +91,10 @@ router-helper reconcile-usage --codex-home /absolute/path/to/codex-home
 
 The chosen directory is the complete reconciliation source. A successful run
 replaces existing telemetry rather than merging it, so importing a different
-home later also replaces the previous snapshot. Prompts, responses, paths,
-credentials, and account identifiers are never sent to the router.
+home later also replaces the previous snapshot. The router keeps ingestion
+source (reconciled or live proxy) separate from routing classification (routed
+or native), so later reconciliations preserve the dashboard's routed/native
+view.
 
 To start the dashboard counters over without changing the local history, use
 **Reset Telemetry…** in the menu app or run:

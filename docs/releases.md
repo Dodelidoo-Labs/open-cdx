@@ -11,6 +11,17 @@ The repository has two GitHub Actions workflows:
   Sparkle appcast with a signed enclosure, and creates a GitHub Release with
   generated notes.
 
+The release workflow publishes two separate distributions:
+
+| Destination | Published artifact |
+|---|---|
+| [GitHub Packages](https://github.com/Dodelidoo-Labs/open-cdx/pkgs/container/open-cdx) | Multi-architecture router image with semantic-version and `latest` tags |
+| [GitHub Releases](https://github.com/Dodelidoo-Labs/open-cdx/releases) | `OpenCDX-Router-X.Y.Z-macOS-universal.zip`, `SHA256SUMS.txt`, and `appcast.xml` |
+
+Do not attach a Docker archive to the GitHub Release. Users deploy the router by
+pulling the GHCR package; the Release's runnable download is only the macOS
+companion app and its bundled helper.
+
 The macOS app uses the official open-source Sparkle 2 Swift package, pinned to
 reviewed stable version `2.9.6`. Sparkle is an embedded application dependency,
 not an update hosting service. Both the appcast and update archive continue to
