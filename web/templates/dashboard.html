@@ -175,17 +175,18 @@
           <div class="page-actions"><a class="btn btn-secondary" href="opencdx://oauth/openai/start">Connect account</a></div>
         </section>
 
-        <section class="metric-strip">
-          <div class="metric"><div class="metric-label">Connected</div><div class="metric-value num">{{number (len .Accounts)}}</div><div class="metric-note">{{number .ReadyAccountCount}} ready to route</div></div>
-          <div class="metric"><div class="metric-label">Primary route</div><div class="metric-value metric-value-display">{{if .PrimaryAccountPlan}}{{.PrimaryAccountPlan}}{{else}}—{{end}}</div><div class="metric-note">{{if .PrimaryAccountEmail}}{{.PrimaryAccountEmail}}{{else}}No primary account{{end}}</div></div>
-          <div class="metric"><div class="metric-label">Nearest reset</div><div class="metric-value num">{{if .NearestResetAt}}<time datetime="{{.NearestResetAt}}" data-local-date>{{.NearestResetDate}}</time>{{else}}—{{end}}</div><div class="metric-note">{{if .NearestResetAt}}<time datetime="{{.NearestResetAt}}" data-local-clock>{{.NearestResetTime}}</time> local time{{else}}No reset reported{{end}}</div></div>
-          <div class="metric"><div class="metric-label">Credential health</div><div class="metric-value"><span class="state {{if .AccountsHealthy}}good{{else}}warn{{end}}">{{if .AccountsHealthy}}Ready{{else}}Needs attention{{end}}</span></div><div class="metric-note">Current account state</div></div>
-        </section>
+        <div data-accounts-live>
+          <section class="metric-strip">
+            <div class="metric"><div class="metric-label">Connected</div><div class="metric-value num" data-account-connected>{{number (len .Accounts)}}</div><div class="metric-note"><span data-account-ready>{{number .ReadyAccountCount}}</span> ready to route</div></div>
+            <div class="metric"><div class="metric-label">Primary route</div><div class="metric-value metric-value-display" data-account-primary-plan>{{if .PrimaryAccountPlan}}{{.PrimaryAccountPlan}}{{else}}—{{end}}</div><div class="metric-note" data-account-primary-email>{{if .PrimaryAccountEmail}}{{.PrimaryAccountEmail}}{{else}}No primary account{{end}}</div></div>
+            <div class="metric"><div class="metric-label">Nearest reset</div><div class="metric-value num" data-account-nearest-date>{{if .NearestResetAt}}<time datetime="{{.NearestResetAt}}" data-local-date>{{.NearestResetDate}}</time>{{else}}—{{end}}</div><div class="metric-note" data-account-nearest-note>{{if .NearestResetAt}}<time datetime="{{.NearestResetAt}}" data-local-clock>{{.NearestResetTime}}</time> local time{{else}}No reset reported{{end}}</div></div>
+            <div class="metric"><div class="metric-label">Credential health</div><div class="metric-value"><span class="state {{if .AccountsHealthy}}good{{else}}warn{{end}}" data-account-health>{{if .AccountsHealthy}}Ready{{else}}Needs attention{{end}}</span></div><div class="metric-note">Current account state</div></div>
+          </section>
 
-        <section class="section">
-          <div class="account-list" data-account-list role="list">
+          <section class="section">
+            <div class="account-list" data-account-list role="list">
             {{range .Accounts}}
-            <article class="account-row" data-account-id="{{.ID}}" data-account-primary="{{if .Primary}}true{{else}}false{{end}}" role="listitem">
+            <article class="account-row" data-account-id="{{.ID}}" data-account-email="{{.MaskedEmail}}" data-account-primary="{{if .Primary}}true{{else}}false{{end}}" role="listitem">
               <div class="account-order-controls">
                 <button class="drag-handle" type="button" data-account-drag aria-label="Reorder {{.MaskedEmail}}" data-tooltip="Drag to change routing priority" aria-keyshortcuts="ArrowUp ArrowDown"><span class="material-symbols-outlined" aria-hidden="true">drag_indicator</span></button>
                 {{if .Primary}}
@@ -195,25 +196,26 @@
                 {{end}}
               </div>
               <div class="account-summary">
-                <div class="account-identity"><div class="account-name">{{.MaskedEmail}}</div><div class="account-sub">{{if .Primary}}Primary{{else}}Fallback{{end}} · {{.Plan}} plan{{if gt .ResetCredits 0}} · {{number .ResetCredits}} reset credits{{end}}</div></div>
-                <div class="account-reset"><div class="state {{if .Paused}}warn{{else if eq .Status "ready"}}good{{else}}bad{{end}}">{{if .Paused}}Paused{{else}}{{.Status}}{{end}}</div>{{range .Quotas}}{{if eq .Name "Codex"}}<div class="account-sub">{{if .ResetAt}}Codex resets <time datetime="{{.ResetAt}}" data-local-datetime>{{.Reset}}</time>{{else}}Reset time unavailable{{end}}</div>{{end}}{{end}}</div>
+                <div class="account-identity"><div class="account-name" data-account-name>{{.MaskedEmail}}</div><div class="account-sub" data-account-summary>{{if .Primary}}Primary{{else}}Fallback{{end}} · {{.Plan}} plan{{if gt .ResetCredits 0}} · {{number .ResetCredits}} reset credits{{end}}</div></div>
+                <div class="account-reset"><div class="state {{if .Paused}}warn{{else if eq .Status "ready"}}good{{else}}bad{{end}}" data-account-status>{{if .Paused}}Paused{{else}}{{.Status}}{{end}}</div>{{range .Quotas}}{{if eq .Name "Codex"}}<div class="account-sub" data-account-reset>{{if .ResetAt}}Codex resets <time datetime="{{.ResetAt}}" data-local-datetime>{{.Reset}}</time>{{else}}Reset time unavailable{{end}}</div>{{end}}{{end}}</div>
                 <div class="detail-actions">
-                  <form class="inline" method="post" action="/admin/accounts/{{.ID}}/{{if .Paused}}resume{{else}}pause{{end}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="accounts"><button class="icon-btn btn-secondary" type="submit" aria-label="{{if .Paused}}Resume routing{{else}}Pause routing{{end}}" title="{{if .Paused}}Resume routing{{else}}Pause routing{{end}}"><span class="material-symbols-outlined" aria-hidden="true">{{if .Paused}}play_arrow{{else}}pause{{end}}</span></button></form>
+                  <form class="inline" method="post" action="/admin/accounts/{{.ID}}/{{if .Paused}}resume{{else}}pause{{end}}" data-account-pause-form><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="accounts"><button class="icon-btn btn-secondary" type="submit" aria-label="{{if .Paused}}Resume routing{{else}}Pause routing{{end}}" title="{{if .Paused}}Resume routing{{else}}Pause routing{{end}}" data-account-pause-button><span class="material-symbols-outlined" aria-hidden="true">{{if .Paused}}play_arrow{{else}}pause{{end}}</span></button></form>
                   <form class="inline" method="post" action="/admin/accounts/{{.ID}}/delete" data-confirm="Remove credentials for {{.MaskedEmail}}? This account will no longer be available for routing."><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="accounts"><button class="icon-btn btn-danger" type="submit" aria-label="Delete account {{.MaskedEmail}}" title="Delete account"><span class="material-symbols-outlined" aria-hidden="true">delete</span></button></form>
                 </div>
               </div>
               <div class="account-body">
-                <div class="account-quotas">
+                <div class="account-quotas" data-account-quotas>
                   {{range .Quotas}}<div class="quota-item"><div class="quota-head"><span>{{.Name}}</span><span class="quota-value">{{printf "%.0f" .Remaining}}%</span></div><div class="quota-track" role="progressbar" aria-label="{{.Name}} allowance remaining" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{printf "%.0f" .Remaining}}"><span style="width:{{printf "%.2f" .Remaining}}%"></span></div></div>{{else}}<span class="muted">No quota windows reported.</span>{{end}}
                 </div>
                 <div class="model-list" data-model-list>{{range .VisibleModels}}<code>{{.}}</code>{{end}}{{range .MoreModels}}<code data-extra-model hidden>{{.}}</code>{{end}}{{if .MoreModels}}<button class="btn btn-ghost btn-small" type="button" data-show-models>+{{number (len .MoreModels)}} more</button>{{end}}{{if not .VisibleModels}}<span class="muted">No entitled models reported.</span>{{end}}</div>
-                {{if .LastError}}<p class="account-error">{{.LastError}}</p>{{end}}
+                <p class="account-error" data-account-error {{if not .LastError}}hidden{{end}}>{{.LastError}}</p>
               </div>
             </article>
             {{else}}<p class="empty">No account has completed router-owned browser login yet.</p>{{end}}
-          </div>
-          <form method="post" action="/admin/accounts/reorder" data-account-order-form hidden><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="return_tab" value="accounts"><span data-account-order-fields></span></form>
-        </section>
+            </div>
+            <form method="post" action="/admin/accounts/reorder" data-account-order-form hidden><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="return_tab" value="accounts"><span data-account-order-fields></span></form>
+          </section>
+        </div>
       </div>
 
       <div id="providers" role="tabpanel" aria-labelledby="providers-tab" data-tab-panel="providers" hidden>
@@ -261,14 +263,7 @@
       <div id="devices" role="tabpanel" aria-labelledby="devices-tab" data-tab-panel="devices" hidden>
         <section class="page-head"><div><h1 class="page-title">Devices</h1><p class="page-dek">Review helpers with access to this router and remove anything you no longer recognize.</p></div></section>
         <section class="section">
-          {{if .Devices}}<div class="device-list">
-            {{range .Devices}}<article class="device-row">
-              <div><div class="account-name">{{.Name}}</div><div class="account-sub">{{if .Laptop}}Desktop helper{{else}}Router helper{{end}}</div></div>
-              <div class="device-seen"><span class="state {{if eq .Status "approved"}}good{{else if eq .Status "rejected"}}bad{{else}}warn{{end}}">{{.Status}}</span><div class="account-sub">Last seen {{if .LastSeenAt}}<time datetime="{{.LastSeenAt}}" data-local-datetime>{{.LastSeen}}</time>{{else}}{{.LastSeen}}{{end}}</div></div>
-              <div class="device-sync"><div class="muted">Catalog synced</div><div class="account-sub num">{{if .CatalogSyncedAt}}<time datetime="{{.CatalogSyncedAt}}" data-local-datetime>{{.CatalogSynced}}</time>{{else}}{{.CatalogSynced}}{{end}}</div></div>
-              <div class="row-actions">{{if eq .Status "pending"}}<form class="inline" method="post" action="/admin/devices/{{.ID}}/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="devices"><button class="btn btn-primary" type="submit">Approve</button></form><form class="inline" method="post" action="/admin/devices/{{.ID}}/reject" data-confirm="Reject enrollment for {{.Name}}?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="devices"><button class="btn btn-danger" type="submit">Reject</button></form>{{end}}{{if eq .Status "approved"}}<form class="inline" method="post" action="/admin/devices/{{.ID}}/revoke" data-confirm="Permanently remove {{.Name}}? The helper must enroll again to regain access."><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="devices"><button class="btn btn-danger" type="submit">Remove</button></form>{{end}}{{if eq .Status "rejected"}}<form class="inline" method="post" action="/admin/devices/{{.ID}}/delete" data-confirm="Permanently delete {{.Name}} from the device list?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="devices"><button class="btn btn-danger" type="submit">Delete</button></form>{{end}}</div>
-            </article>{{end}}
-          </div>{{else}}<p class="empty">No helper has requested enrollment.</p>{{end}}
+          <div data-devices-live>{{template "devices-live" .}}</div>
           <p class="section-note">Removing an approved helper ends its session and deletes its device row immediately. Reconnecting requires a fresh enrollment.</p>
         </section>
       </div>

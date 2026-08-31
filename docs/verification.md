@@ -81,3 +81,19 @@ This checklist requires credentials and deliberate browser choices, so it must b
 20. Run the uninstall script and confirm the Codex executable, native auth, and `~/.codex` content are untouched.
 
 Record account labels only as masked values. Never paste tokens, OAuth codes, raw account IDs, prompts, or responses into a test log.
+
+## Operator-only live dashboard verification
+
+These checks require the installed app, a real browser, and normal router activity. They must be performed manually by the operator and are not part of the hermetic automated suite:
+
+1. Leave Telemetry visible and make normal routed calls; confirm data updates within the polling interval.
+2. Reconcile from the macOS app while Telemetry is visible; confirm routed/native results update without reloading.
+3. Export CSV immediately afterward; confirm it contains the current reconciled data.
+4. Request enrollment from a client while Devices is visible; confirm it appears within a few seconds.
+5. Approve, reject, remove, and delete devices after dynamic list replacement; confirm every form still works.
+6. Leave Accounts visible through a background quota update; confirm allowance and status change without reloading.
+7. Switch to Providers and Catalog; confirm neither panel creates background polling traffic.
+8. Hide the browser tab; confirm all live polling stops.
+9. Return to the tab; confirm the selected live panel performs one immediate refresh.
+10. Inspect browser Network activity; confirm unchanged live requests return `304` with empty bodies.
+11. Switch repeatedly among live and non-live tabs; confirm duplicate polling loops do not accumulate.

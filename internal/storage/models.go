@@ -48,6 +48,27 @@ type Account struct {
 	RawCatalogSnapshot json.RawMessage
 }
 
+// AccountDisplayState is the lightweight, privacy-minimal account projection
+// used by the live administrator dashboard. It deliberately excludes account
+// credentials, entitlements, and catalog snapshots. RawQuota is decrypted only
+// so the HTTP layer can derive the displayable quota windows; it must never be
+// serialized directly.
+type AccountDisplayState struct {
+	ID               string
+	MaskedEmail      string
+	Plan             string
+	Status           string
+	Paused           bool
+	Primary          bool
+	RouteOrder       int
+	QuotaUsedPercent float64
+	QuotaResetAt     time.Time
+	ResetCredits     int
+	LastError        string
+	UpdatedAt        time.Time
+	RawQuota         json.RawMessage
+}
+
 func (account Account) QuotaAvailable(now time.Time) bool {
 	if account.Paused || account.Status != "ready" {
 		return false

@@ -15,7 +15,16 @@ func (store *Store) RecordUsage(ctx context.Context, provider, modelID, accountI
 		ON CONFLICT(day,provider,model_id,account_id,routing) DO UPDATE SET requests=requests+1,
 		input_tokens=input_tokens+excluded.input_tokens, output_tokens=output_tokens+excluded.output_tokens`,
 		day, provider, modelID, accountID, UsageSourceRouted, UsageRoutingRouted, inputTokens, outputTokens)
+	if err == nil {
+		store.telemetryRevision.Add(1)
+	}
 	return err
+}
+
+// TelemetryRevision returns the process-scoped seed and current successful
+// mutation revision used to build opaque conditional response validators.
+func (store *Store) TelemetryRevision() (string, uint64) {
+	return store.telemetrySeed, store.telemetryRevision.Load()
 }
 
 // ResetTelemetry transactionally removes only aggregate usage and its
@@ -33,7 +42,11 @@ func (store *Store) ResetTelemetry(ctx context.Context) error {
 	if _, err = transaction.ExecContext(ctx, `DELETE FROM usage_reconciliation`); err != nil {
 		return err
 	}
-	return transaction.Commit()
+	if err = transaction.Commit(); err != nil {
+		return err
+	}
+	store.telemetryRevision.Add(1)
+	return nil
 }
 
 // ReplaceUsage transactionally replaces all telemetry with a local history
@@ -76,7 +89,11 @@ func (store *Store) ReplaceUsage(ctx context.Context, usage []UsageAggregate, re
 		reconciliation.EventsImported, reconciliation.RowsImported); err != nil {
 		return err
 	}
-	return transaction.Commit()
+	if err = transaction.Commit(); err != nil {
+		return err
+	}
+	store.telemetryRevision.Add(1)
+	return nil
 }
 
 func (store *Store) UsageReconciliation(ctx context.Context) (UsageReconciliation, error) {

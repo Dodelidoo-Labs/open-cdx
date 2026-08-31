@@ -27,9 +27,12 @@
     element.textContent = formatter.format(value);
     element.title = localDateTimeTitle.format(value);
   };
-  document.querySelectorAll("time[data-local-datetime]").forEach((element) => localizeTime(element, localDateTime));
-  document.querySelectorAll("time[data-local-date]").forEach((element) => localizeTime(element, localDate));
-  document.querySelectorAll("time[data-local-clock]").forEach((element) => localizeTime(element, localClock));
+  const localizeTimes = (scope = document) => {
+    scope.querySelectorAll("time[data-local-datetime]").forEach((element) => localizeTime(element, localDateTime));
+    scope.querySelectorAll("time[data-local-date]").forEach((element) => localizeTime(element, localDate));
+    scope.querySelectorAll("time[data-local-clock]").forEach((element) => localizeTime(element, localClock));
+  };
+  localizeTimes();
 
   const tabNames = ["home", "accounts", "providers", "devices", "catalog"];
   const tabTitles = {
@@ -41,6 +44,8 @@
   };
   const tabs = Array.from(document.querySelectorAll("[data-tab]"));
   const panels = Array.from(document.querySelectorAll("[data-tab-panel]"));
+  let selectedTab = "home";
+  let refreshCoordinator = () => {};
   if (tabs.length && "scrollRestoration" in window.history) window.history.scrollRestoration = "manual";
 
   function rememberedTab() {
@@ -57,6 +62,8 @@
 
   function selectTab(name, focus = false) {
     if (!tabNames.includes(name)) name = "home";
+    const changed = selectedTab !== name;
+    selectedTab = name;
     tabs.forEach((tab) => {
       const selected = tab.dataset.tab === name;
       tab.setAttribute("aria-selected", String(selected));
@@ -79,6 +86,7 @@
       // Tabs still function when storage or history mutation is restricted.
     }
     window.requestAnimationFrame(() => window.scrollTo(0, 0));
+    refreshCoordinator(changed);
   }
 
   tabs.forEach((tab, index) => {
@@ -126,10 +134,9 @@
     if (event.key === "Escape") document.body.classList.remove("nav-open");
   });
 
-  document.querySelectorAll("form[data-confirm]").forEach((form) => {
-    form.addEventListener("submit", (event) => {
-      if (!window.confirm(form.dataset.confirm)) event.preventDefault();
-    });
+  document.addEventListener("submit", (event) => {
+    const form = event.target.closest("form[data-confirm]");
+    if (form && !window.confirm(form.dataset.confirm)) event.preventDefault();
   });
 
   document.addEventListener("click", (event) => {
@@ -858,106 +865,396 @@
     if (breakdown) breakdown.innerHTML = '<li class="breakdown-empty">Telemetry could not be loaded.</li>';
   }
 
-  fetch("/admin/telemetry", { credentials: "same-origin", headers: { Accept: "application/json" } })
-    .then((response) => {
-      if (!response.ok || !response.headers.get("Content-Type")?.includes("application/json")) throw new Error("telemetry unavailable");
-      return response.json();
-    })
-    .then((report) => {
-      const select = telemetryRoot.querySelector("[data-telemetry-range]");
-      const custom = telemetryRoot.querySelector("[data-custom-range]");
-      const startInput = telemetryRoot.querySelector("[data-range-start]");
-      const endInput = telemetryRoot.querySelector("[data-range-end]");
-      const rangeError = telemetryRoot.querySelector("[data-range-error]");
-      const exportButton = telemetryRoot.querySelector("[data-export-telemetry]");
-      const presets = Array.from(telemetryRoot.querySelectorAll("[data-range-preset]"));
-      const customButton = telemetryRoot.querySelector('[data-range-preset="custom"]');
-      let currentPoints = [];
-      let currentRange = null;
-      startInput.value = dateKey(earliestUsageDay(report));
-      endInput.value = dateKey(generatedDay(report));
-      startInput.min = dateKey(earliestUsageDay(report));
-      startInput.max = dateKey(generatedDay(report));
-      endInput.min = dateKey(earliestUsageDay(report));
-      endInput.max = dateKey(generatedDay(report));
-      renderHeatmap(report);
+  const select = telemetryRoot.querySelector("[data-telemetry-range]");
+  const custom = telemetryRoot.querySelector("[data-custom-range]");
+  const startInput = telemetryRoot.querySelector("[data-range-start]");
+  const endInput = telemetryRoot.querySelector("[data-range-end]");
+  const rangeError = telemetryRoot.querySelector("[data-range-error]");
+  const exportButton = telemetryRoot.querySelector("[data-export-telemetry]");
+  const presets = Array.from(telemetryRoot.querySelectorAll("[data-range-preset]"));
+  const customButton = telemetryRoot.querySelector('[data-range-preset="custom"]');
+  const telemetryState = {
+    report: null,
+    currentPoints: [],
+    currentRange: null,
+    boundsInitialized: false,
+    exporting: false,
+  };
 
-      const syncPresetButtons = (active = select.value) => {
-        presets.forEach((button) => button.classList.toggle("active", button.dataset.rangePreset === active));
-      };
-      const closeCustomRange = (restoreFocus = false) => {
-        custom.hidden = true;
-        rangeError.hidden = true;
-        customButton.setAttribute("aria-expanded", "false");
-        syncPresetButtons();
-        if (restoreFocus) customButton.focus();
-      };
-      const openCustomRange = () => {
-        custom.hidden = false;
-        customButton.setAttribute("aria-expanded", "true");
-        syncPresetButtons("custom");
-        window.requestAnimationFrame(() => startInput.focus());
-      };
-      const render = (selection = select.value) => {
-        const range = selectedRange(report, selection);
-        if (!range) {
-          rangeError.textContent = "Choose a valid start and end date.";
-          rangeError.hidden = false;
-          return false;
+  const syncPresetButtons = (active = select.value) => {
+    presets.forEach((button) => button.classList.toggle("active", button.dataset.rangePreset === active));
+  };
+  const closeCustomRange = (restoreFocus = false) => {
+    custom.hidden = true;
+    rangeError.hidden = true;
+    customButton.setAttribute("aria-expanded", "false");
+    syncPresetButtons();
+    if (restoreFocus) customButton.focus();
+  };
+  const openCustomRange = () => {
+    custom.hidden = false;
+    customButton.setAttribute("aria-expanded", "true");
+    syncPresetButtons("custom");
+    window.requestAnimationFrame(() => startInput.focus());
+  };
+
+  function updateTelemetryBounds(report) {
+    const earliest = dateKey(earliestUsageDay(report));
+    const latest = dateKey(generatedDay(report));
+    startInput.min = earliest;
+    startInput.max = latest;
+    endInput.min = earliest;
+    endInput.max = latest;
+    if (!telemetryState.boundsInitialized) {
+      startInput.value = earliest;
+      endInput.value = latest;
+      telemetryState.boundsInitialized = true;
+    }
+  }
+
+  function renderTelemetry(selection = select.value, includeHeatmap = false) {
+    const report = telemetryState.report;
+    if (!report) return false;
+    const range = selectedRange(report, selection);
+    if (!range) {
+      rangeError.textContent = "Choose a valid start and end date.";
+      rangeError.hidden = false;
+      return false;
+    }
+    const pageScroll = { x: window.scrollX, y: window.scrollY };
+    const heatmapScroll = telemetryRoot.querySelector(".heatmap-scroll")?.scrollLeft || 0;
+    rangeError.hidden = true;
+    select.value = selection;
+    syncPresetButtons();
+    const points = pointsForRange(report, range);
+    telemetryState.currentPoints = points;
+    telemetryState.currentRange = range;
+    const mode = telemetryRoot.querySelector("[data-metric-mode]")?.value || "tokens";
+    const grouping = telemetryRoot.querySelector("[data-group-mode]")?.value || "model";
+    prepareSeriesColors(report.usage, grouping);
+    if (includeHeatmap) renderHeatmap(report);
+    setMetrics(points);
+    renderUsageChart(range, report, mode, grouping);
+    renderBreakdown(points, mode, grouping);
+    updateChartMeta(range, mode, grouping);
+    const nextHeatmap = telemetryRoot.querySelector(".heatmap-scroll");
+    if (nextHeatmap) nextHeatmap.scrollLeft = heatmapScroll;
+    exportButton.disabled = telemetryState.exporting;
+    window.requestAnimationFrame(() => window.scrollTo(pageScroll.x, pageScroll.y));
+    return true;
+  }
+
+  select.addEventListener("change", () => {
+    if (select.value === "custom") openCustomRange();
+    else {
+      closeCustomRange();
+      renderTelemetry();
+    }
+  });
+  presets.forEach((button) => button.addEventListener("click", () => {
+    const selection = button.dataset.rangePreset;
+    if (selection === "custom") {
+      openCustomRange();
+      return;
+    }
+    closeCustomRange();
+    renderTelemetry(selection);
+  }));
+  telemetryRoot.querySelector("[data-metric-mode]")?.addEventListener("change", () => renderTelemetry());
+  telemetryRoot.querySelector("[data-group-mode]")?.addEventListener("change", () => renderTelemetry());
+  telemetryRoot.querySelector("[data-apply-range]").addEventListener("click", () => {
+    if (renderTelemetry("custom")) closeCustomRange();
+  });
+  telemetryRoot.querySelectorAll("[data-close-custom-range]").forEach((button) => {
+    button.addEventListener("click", () => closeCustomRange(true));
+  });
+  [startInput, endInput].forEach((input) => input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && renderTelemetry("custom")) closeCustomRange();
+  }));
+  document.addEventListener("pointerdown", (event) => {
+    if (!custom.hidden && !custom.contains(event.target) && !customButton.contains(event.target)) closeCustomRange();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !custom.hidden) closeCustomRange(true);
+  });
+
+  const conditionalHeaders = (accept, etag) => {
+    const headers = { Accept: accept };
+    if (etag) headers["If-None-Match"] = etag;
+    return headers;
+  };
+  const throwIfAborted = (signal) => {
+    if (!signal.aborted) return;
+    const error = new Error("request aborted");
+    error.name = "AbortError";
+    throw error;
+  };
+
+  async function refreshTelemetry(signal, etag) {
+    const response = await fetch("/admin/telemetry", {
+      credentials: "same-origin",
+      headers: conditionalHeaders("application/json", etag),
+      signal,
+    });
+    if (response.status === 304) return { etag: response.headers.get("ETag") || etag };
+    if (!response.ok || !response.headers.get("Content-Type")?.includes("application/json")) {
+      throw new Error("telemetry unavailable");
+    }
+    const report = await response.json();
+    throwIfAborted(signal);
+    telemetryState.report = report;
+    updateTelemetryBounds(report);
+    renderTelemetry(select.value, true);
+    return { etag: response.headers.get("ETag") || "" };
+  }
+
+  const devicesLive = document.querySelector("[data-devices-live]");
+  let pendingDevicesHTML = null;
+  let devicesPointerActive = false;
+  const devicesBusy = () => devicesPointerActive || (devicesLive?.contains(document.activeElement) ?? false);
+  const applyPendingDevices = () => {
+    if (pendingDevicesHTML === null || !devicesLive || devicesBusy()) return;
+    devicesLive.innerHTML = pendingDevicesHTML;
+    pendingDevicesHTML = null;
+    localizeTimes(devicesLive);
+  };
+  async function refreshDevices(signal, etag) {
+    const response = await fetch("/admin/devices/live", {
+      credentials: "same-origin",
+      headers: conditionalHeaders("text/html", etag),
+      signal,
+    });
+    if (response.status === 304) return { etag: response.headers.get("ETag") || etag };
+    if (!response.ok || !response.headers.get("Content-Type")?.includes("text/html")) {
+      throw new Error("device state unavailable");
+    }
+    const html = await response.text();
+    throwIfAborted(signal);
+    pendingDevicesHTML = html;
+    applyPendingDevices();
+    return { etag: response.headers.get("ETag") || "" };
+  }
+  devicesLive?.addEventListener("pointerdown", () => { devicesPointerActive = true; });
+  document.addEventListener("pointerup", () => {
+    devicesPointerActive = false;
+    applyPendingDevices();
+  });
+  devicesLive?.addEventListener("focusout", () => window.requestAnimationFrame(applyPendingDevices));
+
+  const accountsLive = document.querySelector("[data-accounts-live]");
+  let pendingAccounts = null;
+  let accountsPointerActive = false;
+  const accountsBusy = () => accountsPointerActive
+    || accountList?.classList.contains("is-reordering")
+    || accountList?.classList.contains("is-saving")
+    || (accountsLive?.contains(document.activeElement) ?? false);
+  const createLocalizedTime = (value, kind) => {
+    const element = document.createElement("time");
+    element.dateTime = value;
+    if (kind === "date") element.dataset.localDate = "";
+    else if (kind === "clock") element.dataset.localClock = "";
+    else element.dataset.localDatetime = "";
+    localizeTime(element, kind === "date" ? localDate : kind === "clock" ? localClock : localDateTime);
+    return element;
+  };
+
+  function updateAccountMetrics(report) {
+    accountsLive.querySelector("[data-account-connected]").textContent = formatNumber(report.accounts.length);
+    accountsLive.querySelector("[data-account-ready]").textContent = formatNumber(report.ready_count);
+    accountsLive.querySelector("[data-account-primary-plan]").textContent = report.primary_account_plan || "—";
+    accountsLive.querySelector("[data-account-primary-email]").textContent = report.primary_account_email || "No primary account";
+    const nearestDate = accountsLive.querySelector("[data-account-nearest-date]");
+    const nearestNote = accountsLive.querySelector("[data-account-nearest-note]");
+    if (report.nearest_reset_at) {
+      nearestDate.replaceChildren(createLocalizedTime(report.nearest_reset_at, "date"));
+      nearestNote.replaceChildren(createLocalizedTime(report.nearest_reset_at, "clock"), " local time");
+    } else {
+      nearestDate.textContent = "—";
+      nearestNote.textContent = "No reset reported";
+    }
+    const health = accountsLive.querySelector("[data-account-health]");
+    health.className = `state ${report.healthy ? "good" : "warn"}`;
+    health.textContent = report.healthy ? "Ready" : "Needs attention";
+  }
+
+  function updateAccountRow(row, account) {
+    row.querySelector("[data-account-name]").textContent = account.masked_email;
+    const summary = `${account.primary ? "Primary" : "Fallback"} · ${account.plan} plan${account.reset_credits > 0 ? ` · ${formatNumber(account.reset_credits)} reset credits` : ""}`;
+    row.querySelector("[data-account-summary]").textContent = summary;
+    const status = row.querySelector("[data-account-status]");
+    status.className = `state ${account.paused ? "warn" : account.status === "ready" ? "good" : "bad"}`;
+    status.textContent = account.paused ? "Paused" : account.status;
+    const codex = account.quotas.find((quota) => quota.name === "Codex");
+    const reset = row.querySelector("[data-account-reset]");
+    if (reset && codex?.reset_at) reset.replaceChildren("Codex resets ", createLocalizedTime(codex.reset_at, "datetime"));
+    else if (reset) reset.textContent = "Reset time unavailable";
+    const quotaHost = row.querySelector("[data-account-quotas]");
+    const quotaItems = account.quotas.map((quota) => {
+      const item = document.createElement("div");
+      item.className = "quota-item";
+      const head = document.createElement("div");
+      head.className = "quota-head";
+      const name = document.createElement("span");
+      name.textContent = quota.name;
+      const value = document.createElement("span");
+      value.className = "quota-value";
+      value.textContent = `${formatNumber(quota.remaining)}%`;
+      head.append(name, value);
+      const track = document.createElement("div");
+      track.className = "quota-track";
+      track.setAttribute("role", "progressbar");
+      track.setAttribute("aria-label", `${quota.name} allowance remaining`);
+      track.setAttribute("aria-valuemin", "0");
+      track.setAttribute("aria-valuemax", "100");
+      track.setAttribute("aria-valuenow", String(Math.round(quota.remaining)));
+      const fill = document.createElement("span");
+      fill.style.width = `${Math.max(0, Math.min(100, quota.remaining))}%`;
+      track.appendChild(fill);
+      item.append(head, track);
+      return item;
+    });
+    quotaHost.replaceChildren(...quotaItems);
+    const error = row.querySelector("[data-account-error]");
+    error.textContent = account.last_error || "";
+    error.hidden = !account.last_error;
+    const pauseForm = row.querySelector("[data-account-pause-form]");
+    const pauseButton = row.querySelector("[data-account-pause-button]");
+    const pauseAction = account.paused ? "resume" : "pause";
+    const pauseLabel = account.paused ? "Resume routing" : "Pause routing";
+    pauseForm.action = `/admin/accounts/${encodeURIComponent(account.id)}/${pauseAction}`;
+    pauseButton.setAttribute("aria-label", pauseLabel);
+    pauseButton.title = pauseLabel;
+    pauseButton.querySelector(".material-symbols-outlined").textContent = account.paused ? "play_arrow" : "pause";
+  }
+
+  function applyPendingAccounts() {
+    if (!pendingAccounts || !accountsLive || accountsBusy()) return;
+    const report = pendingAccounts;
+    const rows = Array.from(accountsLive.querySelectorAll("[data-account-id]"));
+    const structureChanged = rows.length !== report.accounts.length || rows.some((row, index) => {
+      const account = report.accounts[index];
+      return !account || row.dataset.accountId !== account.id || row.dataset.accountEmail !== account.masked_email
+        || (row.dataset.accountPrimary === "true") !== account.primary;
+    });
+    pendingAccounts = null;
+    if (structureChanged) {
+      window.location.reload();
+      return;
+    }
+    updateAccountMetrics(report);
+    rows.forEach((row, index) => updateAccountRow(row, report.accounts[index]));
+  }
+
+  async function refreshAccounts(signal, etag) {
+    const response = await fetch("/admin/accounts/live", {
+      credentials: "same-origin",
+      headers: conditionalHeaders("application/json", etag),
+      signal,
+    });
+    if (response.status === 304) return { etag: response.headers.get("ETag") || etag };
+    if (!response.ok || !response.headers.get("Content-Type")?.includes("application/json")) {
+      throw new Error("account state unavailable");
+    }
+    const report = await response.json();
+    throwIfAborted(signal);
+    pendingAccounts = report;
+    applyPendingAccounts();
+    return { etag: response.headers.get("ETag") || "" };
+  }
+  accountsLive?.addEventListener("pointerdown", () => { accountsPointerActive = true; });
+  document.addEventListener("pointerup", () => {
+    accountsPointerActive = false;
+    applyPendingAccounts();
+  });
+  accountsLive?.addEventListener("focusout", () => window.requestAnimationFrame(applyPendingAccounts));
+  accountList?.addEventListener("dragend", () => window.requestAnimationFrame(applyPendingAccounts));
+
+  const liveStates = {
+    home: { interval: 5000, maxDelay: 30000, etag: "", failures: 0, timer: null, controller: null, promise: null, succeeded: false, refresh: refreshTelemetry, initialError: telemetryFailed },
+    devices: { interval: 2500, maxDelay: 20000, etag: "", failures: 0, timer: null, controller: null, promise: null, succeeded: false, refresh: refreshDevices },
+    accounts: { interval: 20000, maxDelay: 120000, etag: "", failures: 0, timer: null, controller: null, promise: null, succeeded: false, refresh: refreshAccounts },
+  };
+  let windowFocused = document.hasFocus?.() ?? true;
+  const liveStateActive = (name) => selectedTab === name && document.visibilityState !== "hidden" && windowFocused;
+
+  function scheduleLiveRefresh(name, state, delay) {
+    window.clearTimeout(state.timer);
+    state.timer = window.setTimeout(() => {
+      state.timer = null;
+      if (liveStateActive(name)) runLiveRefresh(name, state);
+    }, delay);
+  }
+
+  function runLiveRefresh(name, state) {
+    if (state.promise) return state.promise;
+    window.clearTimeout(state.timer);
+    state.timer = null;
+    const controller = new AbortController();
+    state.controller = controller;
+    const operation = (async () => {
+      try {
+        const result = await state.refresh(controller.signal, state.etag);
+        if (result?.etag) state.etag = result.etag;
+        state.failures = 0;
+        state.succeeded = true;
+      } catch (error) {
+        if (error?.name !== "AbortError") {
+          state.failures += 1;
+          if (!state.succeeded) state.initialError?.();
         }
-        rangeError.hidden = true;
-        select.value = selection;
-        syncPresetButtons();
-        const points = pointsForRange(report, range);
-        currentPoints = points;
-        currentRange = range;
-        const mode = telemetryRoot.querySelector("[data-metric-mode]")?.value || "tokens";
-        const grouping = telemetryRoot.querySelector("[data-group-mode]")?.value || "model";
-        prepareSeriesColors(report.usage, grouping);
-        setMetrics(points);
-        renderUsageChart(range, report, mode, grouping);
-        renderBreakdown(points, mode, grouping);
-        updateChartMeta(range, mode, grouping);
-        exportButton.disabled = false;
-        return true;
-      };
-      select.addEventListener("change", () => {
-        if (select.value === "custom") openCustomRange();
-        else {
-          closeCustomRange();
-          render();
+      } finally {
+        if (state.promise === operation) state.promise = null;
+        if (state.controller === controller) state.controller = null;
+        if (liveStateActive(name)) {
+          const backoff = Math.min(state.maxDelay, state.interval * (2 ** Math.min(state.failures, 4)));
+          scheduleLiveRefresh(name, state, controller.signal.aborted ? 0 : backoff);
         }
-      });
-      presets.forEach((button) => button.addEventListener("click", () => {
-        const selection = button.dataset.rangePreset;
-        if (selection === "custom") {
-          openCustomRange();
-          return;
-        }
-        closeCustomRange();
-        render(selection);
-      }));
-      telemetryRoot.querySelector("[data-metric-mode]")?.addEventListener("change", () => render());
-      telemetryRoot.querySelector("[data-group-mode]")?.addEventListener("change", () => render());
-      exportButton.addEventListener("click", () => {
-        if (currentRange) exportTelemetry(currentPoints, currentRange);
-      });
-      telemetryRoot.querySelector("[data-apply-range]").addEventListener("click", () => {
-        if (render("custom")) closeCustomRange();
-      });
-      telemetryRoot.querySelectorAll("[data-close-custom-range]").forEach((button) => {
-        button.addEventListener("click", () => closeCustomRange(true));
-      });
-      [startInput, endInput].forEach((input) => input.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" && render("custom")) closeCustomRange();
-      }));
-      document.addEventListener("pointerdown", (event) => {
-        if (!custom.hidden && !custom.contains(event.target) && !customButton.contains(event.target)) closeCustomRange();
-      });
-      document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape" && !custom.hidden) closeCustomRange(true);
-      });
-      render();
-    })
-    .catch(telemetryFailed);
+      }
+    })();
+    state.promise = operation;
+    return operation;
+  }
+
+  function syncLiveRefresh(immediate = false) {
+    Object.entries(liveStates).forEach(([name, state]) => {
+      if (!liveStateActive(name)) {
+        window.clearTimeout(state.timer);
+        state.timer = null;
+        state.controller?.abort();
+        return;
+      }
+      if (immediate) {
+        window.clearTimeout(state.timer);
+        state.timer = null;
+      }
+      if (!state.promise && (immediate || state.timer === null)) runLiveRefresh(name, state);
+    });
+  }
+
+  exportButton.addEventListener("click", async () => {
+    telemetryState.exporting = true;
+    exportButton.disabled = true;
+    try {
+      await runLiveRefresh("home", liveStates.home);
+      if (telemetryState.currentRange) exportTelemetry(telemetryState.currentPoints, telemetryState.currentRange);
+    } finally {
+      telemetryState.exporting = false;
+      exportButton.disabled = !telemetryState.report;
+    }
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    windowFocused = document.visibilityState !== "hidden" && (document.hasFocus?.() ?? true);
+    syncLiveRefresh(windowFocused);
+  });
+  window.addEventListener("focus", () => {
+    windowFocused = true;
+    syncLiveRefresh(true);
+  });
+  window.addEventListener("blur", () => {
+    windowFocused = false;
+    syncLiveRefresh(false);
+  });
+  refreshCoordinator = syncLiveRefresh;
+  syncLiveRefresh(true);
 })();

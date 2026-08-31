@@ -165,6 +165,45 @@ func (store *Store) Accounts(ctx context.Context, includeCredentials bool) ([]Ac
 	return accounts, nil
 }
 
+// AccountDisplayStates reads only account and quota state required by the live
+// dashboard. Unlike Accounts, it does not load entitlements or catalog
+// snapshots and never decrypts credentials.
+func (store *Store) AccountDisplayStates(ctx context.Context) ([]AccountDisplayState, error) {
+	rows, err := store.db.QueryContext(ctx, `
+		SELECT id, masked_email, plan, status, paused, primary_account, route_order,
+		quota_used_percent, quota_reset_at, reset_credits, raw_quota_blob, last_error, updated_at
+		FROM accounts ORDER BY primary_account DESC, route_order ASC, created_at ASC, id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []AccountDisplayState
+	for rows.Next() {
+		var state AccountDisplayState
+		var paused, primary int
+		var quotaReset, updated int64
+		var quotaBlob []byte
+		if err = rows.Scan(&state.ID, &state.MaskedEmail, &state.Plan, &state.Status, &paused, &primary,
+			&state.RouteOrder, &state.QuotaUsedPercent, &quotaReset, &state.ResetCredits, &quotaBlob,
+			&state.LastError, &updated); err != nil {
+			return nil, err
+		}
+		state.Paused = paused != 0
+		state.Primary = primary != 0
+		state.QuotaResetAt = fromUnix(quotaReset)
+		state.UpdatedAt = fromUnix(updated)
+		if len(quotaBlob) > 0 {
+			plaintext, openErr := store.box.Open(quotaBlob, []byte("quota:"+state.ID))
+			if openErr != nil {
+				return nil, fmt.Errorf("decrypt account quota: %w", openErr)
+			}
+			state.RawQuota = plaintext
+		}
+		result = append(result, state)
+	}
+	return result, rows.Err()
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }

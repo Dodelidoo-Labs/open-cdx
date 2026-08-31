@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -16,8 +17,10 @@ import (
 )
 
 type Store struct {
-	db  *sql.DB
-	box *secure.Box
+	db                *sql.DB
+	box               *secure.Box
+	telemetrySeed     string
+	telemetryRevision atomic.Uint64
 }
 
 func Open(path string, box *secure.Box) (*Store, error) {
@@ -39,7 +42,12 @@ func Open(path string, box *secure.Box) (*Store, error) {
 	}
 	database.SetMaxOpenConns(1)
 	database.SetConnMaxLifetime(0)
-	store := &Store{db: database, box: box}
+	telemetrySeed, err := secure.RandomURLSafe(18)
+	if err != nil {
+		_ = database.Close()
+		return nil, fmt.Errorf("initialize telemetry revision: %w", err)
+	}
+	store := &Store{db: database, box: box, telemetrySeed: telemetrySeed}
 	if err := store.migrate(context.Background()); err != nil {
 		_ = database.Close()
 		return nil, err

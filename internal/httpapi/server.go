@@ -164,6 +164,8 @@ func (server *Server) routes() http.Handler {
 	mux.Handle("POST /admin/logout", server.admin(http.HandlerFunc(server.logout)))
 	mux.Handle("GET /admin", server.admin(http.HandlerFunc(server.dashboard)))
 	mux.Handle("GET /admin/telemetry", server.admin(http.HandlerFunc(server.adminTelemetry)))
+	mux.Handle("GET /admin/accounts/live", server.admin(http.HandlerFunc(server.adminAccountsLive)))
+	mux.Handle("GET /admin/devices/live", server.admin(http.HandlerFunc(server.adminDevicesLive)))
 	mux.Handle("POST /admin/telemetry/reset", server.admin(http.HandlerFunc(server.adminResetTelemetry)))
 	mux.Handle("POST /admin/refresh", server.admin(http.HandlerFunc(server.adminRefresh)))
 	mux.Handle("POST /admin/accounts/reorder", server.admin(http.HandlerFunc(server.adminAccountOrder)))
@@ -614,6 +616,13 @@ func (server *Server) dashboard(writer http.ResponseWriter, request *http.Reques
 
 func (server *Server) adminTelemetry(writer http.ResponseWriter, request *http.Request) {
 	now := time.Now().UTC()
+	seed, revision := server.store.TelemetryRevision()
+	etag := telemetryETag(seed, revision, now)
+	if requestETagMatches(request, etag) {
+		writer.Header().Set("ETag", etag)
+		writer.WriteHeader(http.StatusNotModified)
+		return
+	}
 	usage, err := server.store.Usage(request.Context(), time.Time{})
 	if err != nil {
 		writeAPIError(writer, http.StatusInternalServerError, "telemetry_unavailable", "aggregate telemetry is unavailable")
@@ -627,7 +636,107 @@ func (server *Server) adminTelemetry(writer http.ResponseWriter, request *http.R
 		writeAPIError(writer, http.StatusInternalServerError, "telemetry_unavailable", "reconciliation metadata is unavailable")
 		return
 	}
+	writer.Header().Set("ETag", etag)
 	writeJSON(writer, http.StatusOK, telemetry.Build(usage, reconciliation, now))
+}
+
+func (server *Server) adminDevicesLive(writer http.ResponseWriter, request *http.Request) {
+	devices, err := server.deviceViews(request.Context())
+	if err != nil {
+		http.Error(writer, "device state unavailable", http.StatusInternalServerError)
+		return
+	}
+	session, _ := server.session(request)
+	var rendered bytes.Buffer
+	if err = server.templates.ExecuteTemplate(&rendered, "devices-live", struct {
+		CSRF    string
+		Devices []deviceView
+	}{CSRF: session.CSRF, Devices: devices}); err != nil {
+		http.Error(writer, "device state rendering failed", http.StatusInternalServerError)
+		return
+	}
+	writeConditionalPayload(writer, request, "text/html; charset=utf-8", rendered.Bytes())
+}
+
+type accountLiveQuota struct {
+	Name      string  `json:"name"`
+	Remaining float64 `json:"remaining"`
+	ResetAt   string  `json:"reset_at,omitempty"`
+}
+
+type accountLiveView struct {
+	ID           string             `json:"id"`
+	MaskedEmail  string             `json:"masked_email"`
+	Plan         string             `json:"plan"`
+	Status       string             `json:"status"`
+	LastError    string             `json:"last_error,omitempty"`
+	Paused       bool               `json:"paused"`
+	Primary      bool               `json:"primary"`
+	ResetCredits int                `json:"reset_credits"`
+	Quotas       []accountLiveQuota `json:"quotas"`
+}
+
+type accountsLiveResponse struct {
+	Accounts            []accountLiveView `json:"accounts"`
+	ReadyCount          int               `json:"ready_count"`
+	Healthy             bool              `json:"healthy"`
+	PrimaryAccountEmail string            `json:"primary_account_email,omitempty"`
+	PrimaryAccountPlan  string            `json:"primary_account_plan,omitempty"`
+	NearestResetAt      string            `json:"nearest_reset_at,omitempty"`
+}
+
+func (server *Server) adminAccountsLive(writer http.ResponseWriter, request *http.Request) {
+	states, err := server.store.AccountDisplayStates(request.Context())
+	if err != nil {
+		writeAPIError(writer, http.StatusInternalServerError, "accounts_unavailable", "account state is unavailable")
+		return
+	}
+	response := accountsLiveResponse{Accounts: make([]accountLiveView, 0, len(states)), Healthy: len(states) > 0}
+	var nearestReset time.Time
+	considerReset := func(candidate time.Time) {
+		if candidate.IsZero() || (!nearestReset.IsZero() && !candidate.Before(nearestReset)) {
+			return
+		}
+		nearestReset = candidate
+	}
+	for _, state := range states {
+		view := accountLiveView{
+			ID: state.ID, MaskedEmail: state.MaskedEmail, Plan: state.Plan, Status: state.Status,
+			LastError: state.LastError, Paused: state.Paused, Primary: state.Primary, ResetCredits: state.ResetCredits,
+			Quotas: []accountLiveQuota{{Name: "Codex", Remaining: maxFloat(0, 100-state.QuotaUsedPercent), ResetAt: browserTimestamp(state.QuotaResetAt)}},
+		}
+		considerReset(state.QuotaResetAt)
+		if additional, parseErr := openai.ParseAdditionalQuotas(state.RawQuota); parseErr == nil {
+			for _, quota := range additional {
+				identity := strings.ToLower(quota.Name + " " + quota.MeteredFeature)
+				if !strings.Contains(identity, "spark") {
+					continue
+				}
+				view.Quotas = append(view.Quotas, accountLiveQuota{
+					Name: "Codex Spark", Remaining: maxFloat(0, 100-quota.UsedPercent), ResetAt: browserTimestamp(quota.ResetAt),
+				})
+				considerReset(quota.ResetAt)
+			}
+		}
+		response.Accounts = append(response.Accounts, view)
+		if state.Status == "ready" && !state.Paused {
+			response.ReadyCount++
+		}
+		if state.Status != "ready" {
+			response.Healthy = false
+		}
+		if state.Primary {
+			response.PrimaryAccountEmail = state.MaskedEmail
+			response.PrimaryAccountPlan = state.Plan
+		}
+	}
+	response.NearestResetAt = browserTimestamp(nearestReset)
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		writeAPIError(writer, http.StatusInternalServerError, "accounts_unavailable", "account state is unavailable")
+		return
+	}
+	writeConditionalPayload(writer, request, "application/json", encoded)
 }
 
 func (server *Server) adminResetTelemetry(writer http.ResponseWriter, request *http.Request) {
@@ -923,19 +1032,11 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 		page.ProvidersChecked = friendlyTime(latestProviderCheck)
 		page.ProvidersCheckedAt = browserTimestamp(latestProviderCheck)
 	}
-	devices, err := server.store.Devices(ctx)
+	devices, err := server.deviceViews(ctx)
 	if err != nil {
 		return page, err
 	}
-	for _, device := range devices {
-		name := strings.ToLower(device.Name)
-		page.Devices = append(page.Devices, deviceView{
-			ID: device.ID, Name: device.Name, Status: device.Status,
-			LastSeen: friendlyTime(device.LastSeenAt), LastSeenAt: browserTimestamp(device.LastSeenAt),
-			CatalogSynced: friendlyTime(device.CatalogSynced), CatalogSyncedAt: browserTimestamp(device.CatalogSynced),
-			Laptop: strings.Contains(name, "book") || strings.Contains(name, "laptop"),
-		})
-	}
+	page.Devices = devices
 	exclusions, err := server.store.Exclusions(ctx)
 	if err != nil {
 		return page, err
@@ -960,6 +1061,24 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 	}
 	sort.Slice(page.Conflicts, func(left, right int) bool { return page.Conflicts[left].Model < page.Conflicts[right].Model })
 	return page, nil
+}
+
+func (server *Server) deviceViews(ctx context.Context) ([]deviceView, error) {
+	devices, err := server.store.Devices(ctx)
+	if err != nil {
+		return nil, err
+	}
+	views := make([]deviceView, 0, len(devices))
+	for _, device := range devices {
+		name := strings.ToLower(device.Name)
+		views = append(views, deviceView{
+			ID: device.ID, Name: device.Name, Status: device.Status,
+			LastSeen: friendlyTime(device.LastSeenAt), LastSeenAt: browserTimestamp(device.LastSeenAt),
+			CatalogSynced: friendlyTime(device.CatalogSynced), CatalogSyncedAt: browserTimestamp(device.CatalogSynced),
+			Laptop: strings.Contains(name, "book") || strings.Contains(name, "laptop"),
+		})
+	}
+	return views, nil
 }
 
 func (server *Server) discoveredModels(ctx context.Context, exclusions []storage.CatalogExclusion) []modelView {
@@ -1043,6 +1162,38 @@ func writeJSON(writer http.ResponseWriter, status int, value any) {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(status)
 	_ = json.NewEncoder(writer).Encode(value)
+}
+
+func telemetryETag(seed string, revision uint64, at time.Time) string {
+	digest := sha256.Sum256([]byte(fmt.Sprintf("telemetry\x00%s\x00%d\x00%s", seed, revision, at.UTC().Format("2006-01-02"))))
+	return `"` + hex.EncodeToString(digest[:]) + `"`
+}
+
+func contentETag(content []byte) string {
+	digest := sha256.Sum256(content)
+	return `"` + hex.EncodeToString(digest[:]) + `"`
+}
+
+func requestETagMatches(request *http.Request, etag string) bool {
+	for _, candidate := range strings.Split(request.Header.Get("If-None-Match"), ",") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "*" || candidate == etag || strings.TrimPrefix(candidate, "W/") == etag {
+			return true
+		}
+	}
+	return false
+}
+
+func writeConditionalPayload(writer http.ResponseWriter, request *http.Request, contentType string, content []byte) {
+	etag := contentETag(content)
+	writer.Header().Set("ETag", etag)
+	if requestETagMatches(request, etag) {
+		writer.WriteHeader(http.StatusNotModified)
+		return
+	}
+	writer.Header().Set("Content-Type", contentType)
+	writer.WriteHeader(http.StatusOK)
+	_, _ = writer.Write(content)
 }
 
 func writeAPIError(writer http.ResponseWriter, status int, code, message string) {
