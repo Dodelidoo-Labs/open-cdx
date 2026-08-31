@@ -16,6 +16,19 @@ reviewed stable version `2.9.6`. Sparkle is an embedded application dependency,
 not an update hosting service. Both the appcast and update archive continue to
 come directly from Dodelidoo Labs' GitHub Releases over HTTPS.
 
+The shipped application identifiers are fixed release invariants:
+
+| Component | Identifier |
+|---|---|
+| Main application | `com.dodelidoo.opencdx` |
+| Embedded router helper | `com.dodelidoo.opencdx.helper` |
+| OAuth URL name | `com.dodelidoo.opencdx.oauth` |
+| OAuth URL scheme | `com.dodelidoo.opencdx` |
+
+Future OpenCDX-owned extensions must use
+`com.dodelidoo.opencdx.<component>`. Sparkle's bundled components retain their
+upstream identifiers.
+
 ## Release repository secrets
 
 Configure these Actions secrets before creating a release tag:
@@ -90,10 +103,6 @@ System profiling is explicitly disabled. Update checks contact only the GitHub
 HTTPS feed and do not add router, provider, account, device-profile, telemetry,
 log, or local-network information. There is no update analytics integration.
 
-`v1.1.0` predates Sparkle. Existing `v1.1.0` users must install the first
-Sparkle-enabled release manually; automatic updates can begin only after that
-one-time bootstrap upgrade.
-
 For each tagged release, the workflow:
 
 1. Builds a monotonically increasing `CFBundleVersion` from
@@ -151,18 +160,21 @@ release:
    `Sparkle.framework`, and the outer app. A `codesign --deep --strict` check on
    the finished app is useful verification, but is not a substitute for the
    workflow's explicit inside-out nested signing.
-4. Run `xcrun stapler validate` and `spctl --assess --type execute` on the app.
-5. Parse `appcast.xml` and confirm it has one full-update enclosure containing
+4. Confirm the outer bundle identifier is `com.dodelidoo.opencdx`, its URL
+   scheme is `com.dodelidoo.opencdx`, and the router helper's code-signing
+   identifier is `com.dodelidoo.opencdx.helper`.
+5. Run `xcrun stapler validate` and `spctl --assess --type execute` on the app.
+6. Parse `appcast.xml` and confirm it has one full-update enclosure containing
    the release's semantic version, monotonic bundle build number, byte-exact
    archive length, `13.0` minimum system version, nonempty
    `sparkle:edSignature`, and the exact versioned HTTPS asset URL shown above.
-6. On a trusted release-verification machine with controlled access to the key,
+7. On a trusted release-verification machine with controlled access to the key,
    use the pinned Sparkle `sign_update --verify --ed-key-file` command to verify
    the downloaded ZIP against the enclosure signature. Never place the key on a
    command line or print tool output that could expose it. The release workflow
    already performs this positive check and a negative check against a tampered
    archive with tool output suppressed.
-7. After the release is published, fetch
+8. After the release is published, fetch
    `https://github.com/Dodelidoo-Labs/open-cdx/releases/latest/download/appcast.xml`
    over HTTPS and confirm it resolves to the newly uploaded feed and retains the
    same enclosure URL and signature.

@@ -163,7 +163,7 @@ func openURL(rawURL string, allowInsecureDevelopment bool) error {
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return errors.New("refusing to open an invalid URL")
 	}
-	if parsed.Scheme != "https" && parsed.Scheme != "opencdx" && !(parsed.Scheme == "http" && (isLoopback(parsed.Hostname()) || allowInsecureDevelopment)) {
+	if parsed.Scheme != "https" && parsed.Scheme != URLScheme && !(parsed.Scheme == "http" && (isLoopback(parsed.Hostname()) || allowInsecureDevelopment)) {
 		return errors.New("refusing to open an unsupported URL")
 	}
 	var command *exec.Cmd

@@ -150,7 +150,10 @@ jobs:
           otool -L "dist/OpenCDX Router.app/Contents/MacOS/OpenCDX Router" | grep -F 'Sparkle.framework'
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "OpenCDXRouter.icns"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "AppIcon"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "com.opencdx.router-menu"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "com.dodelidoo.opencdx"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLName' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "com.dodelidoo.opencdx.oauth"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "com.dodelidoo.opencdx"
+          codesign -d --verbose=4 "dist/OpenCDX Router.app/Contents/Resources/router-helper" 2>&1 | grep -Fx 'Identifier=com.dodelidoo.opencdx.helper'
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "$VERSION"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "$BUILD_NUMBER"
           test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "13.0"

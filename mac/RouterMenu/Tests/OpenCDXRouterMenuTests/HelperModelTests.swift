@@ -2,6 +2,13 @@ import XCTest
 @testable import OpenCDXRouterMenu
 
 final class HelperModelTests: XCTestCase {
+    func testProductIdentityAndOAuthURLUseDodelidooNamespace() throws {
+        XCTAssertEqual(openCDXApplicationIdentifier, "com.dodelidoo.opencdx")
+        XCTAssertTrue(isOpenCDXOAuthURL(try XCTUnwrap(URL(string: "com.dodelidoo.opencdx://oauth/openai/start"))))
+        XCTAssertFalse(isOpenCDXOAuthURL(try XCTUnwrap(URL(string: "opencdx://oauth/openai/start"))))
+        XCTAssertFalse(isOpenCDXOAuthURL(try XCTUnwrap(URL(string: "com.dodelidoo.opencdx://oauth/openai/other"))))
+    }
+
     func testConnectedStatusClearsCompletedEnrollmentOperation() {
         var status = HelperStatus()
         status.connected = true

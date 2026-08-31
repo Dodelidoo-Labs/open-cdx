@@ -12,7 +12,12 @@ import (
 	"strings"
 )
 
-const DefaultPort = 17464
+const (
+	DefaultPort           = 17464
+	ApplicationIdentifier = "com.dodelidoo.opencdx"
+	HelperIdentifier      = ApplicationIdentifier + ".helper"
+	URLScheme             = ApplicationIdentifier
+)
 
 type Config struct {
 	RouterURL           string `json:"router_url"`
@@ -29,7 +34,7 @@ func DefaultConfigPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(directory, "OpenCDX Router", "helper.json"), nil
+	return filepath.Join(directory, ApplicationIdentifier, "helper.json"), nil
 }
 
 func DefaultCatalogPath() (string, error) {
@@ -37,7 +42,7 @@ func DefaultCatalogPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(directory, "OpenCDX Router", "catalog.json"), nil
+	return filepath.Join(directory, ApplicationIdentifier, "catalog.json"), nil
 }
 
 func LoadConfig(path string) (Config, error) {

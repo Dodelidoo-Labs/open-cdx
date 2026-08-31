@@ -11,7 +11,7 @@ router-helper pair
 router-helper daemon
 ```
 
-On macOS, the enrollment secret, one-time issued device token, and local token secret are stored through macOS Keychain. The JSON helper config contains the router URL, opaque device ID, loopback port, and catalog path only. It never contains OpenAI or OpenRouter credentials.
+On macOS, the enrollment secret, one-time issued device token, and local token secret are stored through macOS Keychain under service `com.dodelidoo.opencdx.helper`. The JSON helper config contains the router URL, opaque device ID, loopback port, and catalog path only. It never contains OpenAI or OpenRouter credentials.
 
 Each helper has an independently revocable device credential. Approval delivers it exactly once; the helper acknowledges receipt, after which the router removes the encrypted issuance copy.
 
@@ -44,7 +44,7 @@ The generated snippet has this shape:
 
 ```toml
 model_provider = "opencdx"
-model_catalog_json = "/Users/USER/Library/Application Support/OpenCDX Router/catalog.json"
+model_catalog_json = "/Users/USER/Library/Application Support/com.dodelidoo.opencdx/catalog.json"
 
 [model_providers.opencdx]
 name = "OpenCDX Router"

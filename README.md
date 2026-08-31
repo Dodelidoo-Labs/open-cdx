@@ -82,6 +82,10 @@ moves that bundle to `~/Applications` rather than leaving a second copy behind;
 that multiple app copies can produce unexpected Local Network privacy entries.
 The same technote notes that macOS has no supported per-app reset, so these
 safeguards prevent new duplicate entries but cannot erase historical entries.
+The application uses the stable bundle identifier `com.dodelidoo.opencdx`; its
+embedded helper and Keychain service use `com.dodelidoo.opencdx.helper`. Local
+helper state lives under
+`~/Library/Application Support/com.dodelidoo.opencdx`.
 On first launch, open Settings, enter the router's HTTPS address and a device
 name, request enrollment, then approve the pending Mac in the dashboard. The app
 detects approval and starts the bundled helper.
@@ -131,7 +135,7 @@ docker compose --env-file docker/.env -f docker/compose.production.yml up -d
 ```
 
 The production Compose file pulls `ghcr.io/dodelidoo-labs/open-cdx`; set
-`OPENCODEX_VERSION` to a release such as `1.1.0`, or use `latest`. Caddy is the
+`OPENCODEX_VERSION` to a release such as `1.0.0`, or use `latest`. Caddy is the
 only published service and terminates HTTPS. Back up the named SQLite volume
 and `docker/secrets/master_key` together; neither is useful alone.
 

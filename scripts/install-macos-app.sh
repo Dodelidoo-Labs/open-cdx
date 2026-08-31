@@ -3,10 +3,14 @@ set -eu
 
 REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 SOURCE_APP="$REPO_ROOT/dist/OpenCDX Router.app"
+SOURCE_HELPER="$SOURCE_APP/Contents/Resources/router-helper"
 TARGET_PARENT="$HOME/Applications"
 TARGET_APP="$TARGET_PARENT/OpenCDX Router.app"
 TARGET_HELPER="$TARGET_APP/Contents/Resources/router-helper"
-EXPECTED_BUNDLE_ID="com.opencdx.router-menu"
+EXPECTED_BUNDLE_ID="com.dodelidoo.opencdx"
+EXPECTED_URL_NAME="com.dodelidoo.opencdx.oauth"
+EXPECTED_URL_SCHEME="com.dodelidoo.opencdx"
+EXPECTED_HELPER_ID="com.dodelidoo.opencdx.helper"
 
 [ -d "$SOURCE_APP" ] || { echo "Build the app first with scripts/build-macos-app.sh" >&2; exit 1; }
 mkdir -p "$TARGET_PARENT"
@@ -15,6 +19,21 @@ codesign --verify --deep --strict --verbose=2 "$SOURCE_APP"
 BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$SOURCE_APP/Contents/Info.plist")
 if [ "$BUNDLE_ID" != "$EXPECTED_BUNDLE_ID" ]; then
   echo "Refusing to install unexpected bundle identifier: $BUNDLE_ID" >&2
+  exit 1
+fi
+URL_NAME=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLName' "$SOURCE_APP/Contents/Info.plist")
+if [ "$URL_NAME" != "$EXPECTED_URL_NAME" ]; then
+  echo "Refusing to install unexpected OAuth URL name: $URL_NAME" >&2
+  exit 1
+fi
+URL_SCHEME=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$SOURCE_APP/Contents/Info.plist")
+if [ "$URL_SCHEME" != "$EXPECTED_URL_SCHEME" ]; then
+  echo "Refusing to install unexpected OAuth URL scheme: $URL_SCHEME" >&2
+  exit 1
+fi
+HELPER_ID=$(codesign -d --verbose=4 "$SOURCE_HELPER" 2>&1 | sed -n 's/^Identifier=//p')
+if [ "$HELPER_ID" != "$EXPECTED_HELPER_ID" ]; then
+  echo "Refusing to install unexpected helper signing identifier: $HELPER_ID" >&2
   exit 1
 fi
 TEAM_ID=$(codesign -d --verbose=4 "$SOURCE_APP" 2>&1 | sed -n 's/^TeamIdentifier=//p')
@@ -38,7 +57,7 @@ if [ -d "$TARGET_APP" ]; then
 fi
 
 if pgrep -x "OpenCDX Router" >/dev/null 2>&1; then
-  osascript -e 'tell application id "com.opencdx.router-menu" to quit' >/dev/null 2>&1 || true
+  osascript -e 'tell application id "com.dodelidoo.opencdx" to quit' >/dev/null 2>&1 || true
   attempt=0
   while pgrep -x "OpenCDX Router" >/dev/null 2>&1 && [ "$attempt" -lt 30 ]; do
     attempt=$((attempt + 1))

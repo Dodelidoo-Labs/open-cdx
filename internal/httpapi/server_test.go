@@ -443,7 +443,7 @@ func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
 		`class="sidebar"`, `data-telemetry`, `data-telemetry-range`, `data-usage-chart="tokens"`, `model-breakdown-section`,
 		`data-custom-range`, `role="dialog"`, `data-flash-dismiss`,
 		`class="rail-actions"`, `data-theme-toggle`, `aria-label="Sign out"`, `material-symbols-outlined`,
-		`href="opencdx://oauth/openai/start">Connect account`, `provider-config-trigger`, `Refresh catalog`,
+		`href="com.dodelidoo.opencdx://oauth/openai/start">Connect account`, `provider-config-trigger`, `Refresh catalog`,
 		`/admin/telemetry/reset`, `Reset telemetry…`, `name="allow_http" checked`, `HTTP allowed`,
 		`account-order-controls`, `account-primary-star`, `material-symbols-filled`, `/admin/accounts/fallback/primary`,
 		`data-account-list`, `data-account-drag`, `/admin/accounts/reorder`, `data-accounts-live`, `data-devices-live`,

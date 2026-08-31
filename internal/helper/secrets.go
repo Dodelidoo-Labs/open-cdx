@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-const keychainService = "com.opencdx.router-helper"
+const keychainService = HelperIdentifier
 
 type SecretStore interface {
 	Get(account string) (string, error)

@@ -37,6 +37,8 @@ Build the macOS target and app bundle:
 swift test --disable-sandbox -c release --package-path mac/RouterMenu
 OPENCODEX_CODESIGN_IDENTITY=- ./scripts/build-macos-app.sh
 codesign --verify --deep --strict "dist/OpenCDX Router.app"
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' 'dist/OpenCDX Router.app/Contents/Info.plist')" = "com.dodelidoo.opencdx"
+codesign -d --verbose=4 "dist/OpenCDX Router.app/Contents/Resources/router-helper" 2>&1 | grep -Fx 'Identifier=com.dodelidoo.opencdx.helper'
 ```
 
 The explicit ad-hoc identity above is only for build validation. Installed local
@@ -62,6 +64,8 @@ This checklist requires credentials and deliberate browser choices, so it must b
 1. Start with a fresh router volume and back up the generated master key.
 2. Use a Mac whose isolated test Codex home has no native login.
 3. Install the menu app, request enrollment, and approve it in the dashboard.
+   Confirm macOS identifies it as `com.dodelidoo.opencdx` and prompts for the
+   new Local Network permission.
 4. Add OpenAI account A through a fresh explicit browser login.
 5. Confirm masked email, plan, quota/reset windows, credits, and model count appear before inference.
 6. Add OpenAI account B through a separate explicit browser login and confirm a second pool entry.

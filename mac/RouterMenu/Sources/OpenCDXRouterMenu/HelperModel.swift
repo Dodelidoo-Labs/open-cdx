@@ -3,6 +3,12 @@ import Combine
 import Foundation
 import ServiceManagement
 
+let openCDXApplicationIdentifier = "com.dodelidoo.opencdx"
+
+func isOpenCDXOAuthURL(_ url: URL) -> Bool {
+    url.scheme == openCDXApplicationIdentifier && url.host == "oauth" && url.path == "/openai/start"
+}
+
 struct AccountAllowanceStatus: Codable {
     var maskedEmail = ""
     var plan = ""
@@ -357,7 +363,7 @@ final class HelperModel: ObservableObject {
     }
 
     func handle(url: URL) {
-        guard url.scheme == "opencdx", url.host == "oauth", url.path == "/openai/start" else { return }
+        guard isOpenCDXOAuthURL(url) else { return }
         addOpenAIAccount()
     }
 
@@ -633,7 +639,7 @@ final class HelperModel: ObservableObject {
 
     private var helperConfigurationURL: URL? {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("OpenCDX Router", isDirectory: true)
+            .appendingPathComponent(openCDXApplicationIdentifier, isDirectory: true)
             .appendingPathComponent("helper.json", isDirectory: false)
     }
 

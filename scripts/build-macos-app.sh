@@ -5,7 +5,7 @@ REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 APP_DIR="$REPO_ROOT/dist/OpenCDX Router.app"
 SIGNING_IDENTITY_FILE="$REPO_ROOT/.opencdx-codesign-identity"
 GO_BINARY_FILE="$REPO_ROOT/.opencdx-go-binary"
-HELPER_SIGNING_IDENTIFIER="com.opencdx.router-menu.helper"
+HELPER_SIGNING_IDENTIFIER="com.dodelidoo.opencdx.helper"
 STAGING_DIR=$(mktemp -d "${TMPDIR:-/tmp}/opencdx-app.XXXXXX")
 trap 'rm -rf "$STAGING_DIR"' EXIT INT TERM
 

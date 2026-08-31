@@ -58,6 +58,21 @@ func TestConfigSnippetUsesProductSpecificProviderID(t *testing.T) {
 	}
 }
 
+func TestProductIdentifiersUseDodelidooNamespace(t *testing.T) {
+	if ApplicationIdentifier != "com.dodelidoo.opencdx" {
+		t.Fatalf("application identifier = %q", ApplicationIdentifier)
+	}
+	if HelperIdentifier != "com.dodelidoo.opencdx.helper" {
+		t.Fatalf("helper identifier = %q", HelperIdentifier)
+	}
+	if URLScheme != ApplicationIdentifier {
+		t.Fatalf("URL scheme = %q, application identifier = %q", URLScheme, ApplicationIdentifier)
+	}
+	if keychainService != HelperIdentifier {
+		t.Fatalf("Keychain service = %q, helper identifier = %q", keychainService, HelperIdentifier)
+	}
+}
+
 func TestRemoteClientClosesBodyWhenNoOutputIsRequested(t *testing.T) {
 	body := &trackedReadCloser{Reader: bytes.NewBufferString(`{"status":"ok"}`)}
 	client := &RemoteClient{

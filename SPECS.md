@@ -176,7 +176,7 @@ Generate a configuration resembling:
 
 ```toml
 model_provider = "opencdx"
-model_catalog_json = "/Users/USER/Library/Application Support/Router/catalog.json"
+model_catalog_json = "/Users/USER/Library/Application Support/com.dodelidoo.opencdx/catalog.json"
 
 [model_providers.opencdx]
 name = "Router"
