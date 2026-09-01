@@ -133,18 +133,6 @@ struct RouterMenuView: View {
                 )
             }
 
-            if !model.status.model.isEmpty || !model.status.provider.isEmpty {
-                HStack(spacing: 8) {
-                    Text("Active route")
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 12)
-                    Text(activeRouteLabel)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                .font(.caption)
-            }
-
             if !model.status.lastError.isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -201,11 +189,6 @@ struct RouterMenuView: View {
         return model.status.restartRequired ? .orange : .accentColor
     }
 
-    private var activeRouteLabel: String {
-        [model.status.provider.capitalized, model.status.model]
-            .filter { !$0.isEmpty }
-            .joined(separator: " · ")
-    }
 }
 
 struct AccountAllowanceSection: View {
@@ -214,15 +197,6 @@ struct AccountAllowanceSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Accounts")
-                    .font(.subheadline.weight(.semibold))
-                Spacer(minLength: 10)
-                Text("Updates within 30 sec")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
             if accounts.isEmpty {
                 Text(connected ? "No OpenAI accounts connected." : "Account allowances are unavailable while disconnected.")
                     .font(.caption)
@@ -233,7 +207,7 @@ struct AccountAllowanceSection: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 13)
+        .padding(.vertical, 12)
     }
 }
 

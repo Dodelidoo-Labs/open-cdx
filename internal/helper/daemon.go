@@ -68,6 +68,7 @@ type Daemon struct {
 	status         LocalStatus
 	remoteStatusMu sync.Mutex
 	catalogMu      sync.Mutex
+	processInfo    func(context.Context, int) (codexProcessInfo, error)
 	shutdownOnce   sync.Once
 	shutdown       chan struct{}
 	server         *http.Server
@@ -89,7 +90,8 @@ func NewDaemon(configPath string, config Config, secrets SecretStore) (*Daemon, 
 	return &Daemon{
 		configPath: configPath, catalogPath: config.CatalogPath, config: config, secrets: secrets, localSecret: localSecret,
 		deviceToken: deviceToken, remote: remote, shutdown: make(chan struct{}),
-		status: LocalStatus{State: "connecting", RouterURL: config.RouterURL, DeviceName: config.DeviceName, CatalogSynced: CatalogExists(config)},
+		processInfo: inspectCodexProcess,
+		status:      LocalStatus{State: "connecting", RouterURL: config.RouterURL, DeviceName: config.DeviceName, CatalogSynced: CatalogExists(config), CatalogUpdated: config.CatalogUpdatedAt},
 	}, nil
 }
 
@@ -112,6 +114,7 @@ func (daemon *Daemon) Run(ctx context.Context) error {
 	mux.Handle("POST /control/reconnect", daemon.controlAuth(http.HandlerFunc(daemon.controlReconnect)))
 	mux.Handle("POST /control/catalog/refresh", daemon.controlAuth(http.HandlerFunc(daemon.controlCatalogRefresh)))
 	mux.Handle("POST /control/catalog/restart-ack", daemon.controlAuth(http.HandlerFunc(daemon.controlCatalogRestartAck)))
+	mux.Handle("POST /control/catalog/codex-started", daemon.controlAuth(http.HandlerFunc(daemon.controlCodexStarted)))
 	mux.Handle("POST /control/quotas/refresh", daemon.controlAuth(http.HandlerFunc(daemon.controlQuotaRefresh)))
 	mux.Handle("POST /control/quit", daemon.controlAuth(http.HandlerFunc(daemon.controlQuit)))
 	daemon.server = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 0, WriteTimeout: 0, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20}
@@ -214,9 +217,7 @@ func (daemon *Daemon) controlStatus(writer http.ResponseWriter, _ *http.Request)
 	// login-openai runs as a short-lived sibling process and can write the
 	// catalog while this daemon is already running. Reflect the file immediately
 	// instead of leaving the menu at Pending until the next catalog poll.
-	if CatalogExists(Config{CatalogPath: daemon.catalogPath}) {
-		daemon.updateStatus(func(status *LocalStatus) { status.CatalogSynced = true })
-	}
+	daemon.reloadCatalogState()
 	writeHelperJSON(writer, http.StatusOK, daemon.currentStatus())
 }
 
@@ -235,31 +236,72 @@ func (daemon *Daemon) controlCatalogRefresh(writer http.ResponseWriter, request 
 		writeHelperJSON(writer, http.StatusBadGateway, daemon.currentStatus())
 		return
 	}
-	daemon.recordCatalogResult(result)
 	_ = daemon.refreshStatus(request.Context())
-	writeHelperJSON(writer, http.StatusOK, daemon.currentStatus())
+	writeHelperJSON(writer, http.StatusOK, struct {
+		LocalStatus
+		CatalogChanged bool `json:"catalog_changed"`
+	}{LocalStatus: daemon.currentStatus(), CatalogChanged: result.Changed})
 }
 
 func (daemon *Daemon) controlCatalogRestartAck(writer http.ResponseWriter, request *http.Request) {
+	if err := daemon.acknowledgeCatalogRestart(request.Context(), nil); err != nil {
+		writeHelperJSON(writer, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeHelperJSON(writer, http.StatusOK, daemon.currentStatus())
+}
+
+func (daemon *Daemon) controlCodexStarted(writer http.ResponseWriter, request *http.Request) {
+	pid, err := strconv.Atoi(request.URL.Query().Get("pid"))
+	if err != nil || pid <= 0 {
+		http.Error(writer, "invalid process ID", http.StatusBadRequest)
+		return
+	}
+	inspect := daemon.processInfo
+	if inspect == nil {
+		inspect = inspectCodexProcess
+	}
+	process, err := inspect(request.Context(), pid)
+	if err != nil || !process.isCodex() {
+		writer.WriteHeader(http.StatusNoContent)
+		return
+	}
+	writer.WriteHeader(http.StatusAccepted)
+	go func(startedAt time.Time) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = daemon.acknowledgeCatalogRestart(ctx, &startedAt)
+	}(process.StartedAt)
+}
+
+func (daemon *Daemon) acknowledgeCatalogRestart(ctx context.Context, codexStartedAt *time.Time) error {
 	// Serialize acknowledgement with both catalog and status requests so an
 	// older in-flight response cannot immediately restore the reminder.
 	daemon.catalogMu.Lock()
 	defer daemon.catalogMu.Unlock()
 	daemon.remoteStatusMu.Lock()
 	defer daemon.remoteStatusMu.Unlock()
-	_, err := daemon.remote.JSON(request.Context(), http.MethodPost, "/api/v1/catalog/restart-ack", nil, nil, true)
+	status := daemon.currentStatus()
+	if !status.RestartRequired {
+		return nil
+	}
+	if codexStartedAt != nil {
+		if status.CatalogUpdated == nil || codexStartedAt.Truncate(time.Second).Before(status.CatalogUpdated.Truncate(time.Second)) {
+			return nil
+		}
+	}
+	_, err := daemon.remote.JSON(ctx, http.MethodPost, "/api/v1/catalog/restart-ack", nil, nil, true)
 	if err != nil {
-		writeHelperJSON(writer, http.StatusBadGateway, map[string]string{"error": err.Error()})
-		return
+		return err
 	}
 	daemon.updateStatus(func(status *LocalStatus) {
 		status.RestartRequired = false
 	})
-	writeHelperJSON(writer, http.StatusOK, daemon.currentStatus())
+	return nil
 }
 
 func (daemon *Daemon) controlQuotaRefresh(writer http.ResponseWriter, request *http.Request) {
-	_, err := daemon.remote.JSON(request.Context(), http.MethodPost, "/api/v1/quotas/refresh?codex_version="+url.QueryEscape(DetectCodexVersion(request.Context())), nil, nil, true)
+	_, err := daemon.remote.JSON(request.Context(), http.MethodPost, "/api/v1/quotas/refresh", nil, nil, true)
 	if err != nil {
 		writeHelperJSON(writer, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
@@ -275,9 +317,7 @@ func (daemon *Daemon) controlQuit(writer http.ResponseWriter, _ *http.Request) {
 
 func (daemon *Daemon) syncLoop(ctx context.Context) {
 	_ = daemon.refreshStatus(ctx)
-	if result, err := daemon.syncCatalog(ctx, false); err == nil {
-		daemon.recordCatalogResult(result)
-	}
+	_, _ = daemon.syncCatalog(ctx, false)
 	statusTicker := time.NewTicker(15 * time.Second)
 	catalogTicker := time.NewTicker(time.Minute)
 	defer statusTicker.Stop()
@@ -291,10 +331,7 @@ func (daemon *Daemon) syncLoop(ctx context.Context) {
 		case <-statusTicker.C:
 			_ = daemon.refreshStatus(ctx)
 		case <-catalogTicker.C:
-			result, err := daemon.syncCatalog(ctx, false)
-			if err == nil {
-				daemon.recordCatalogResult(result)
-			}
+			_, _ = daemon.syncCatalog(ctx, false)
 		}
 	}
 }
@@ -302,17 +339,53 @@ func (daemon *Daemon) syncLoop(ctx context.Context) {
 func (daemon *Daemon) recordCatalogResult(result CatalogResult) {
 	daemon.updateStatus(func(status *LocalStatus) {
 		status.CatalogSynced = true
-		status.CatalogUpdated = timePointer(time.Now().UTC())
+		if result.Changed {
+			updatedAt := result.UpdatedAt
+			if updatedAt.IsZero() {
+				updatedAt = time.Now().UTC()
+			}
+			status.CatalogUpdated = timePointer(updatedAt)
+		}
 		// An unchanged (304) catalog is not evidence that Codex reloaded the
 		// last changed file. Keep the reminder until the user acknowledges it.
 		status.RestartRequired = status.RestartRequired || result.RestartRequired
 	})
 }
 
+func (daemon *Daemon) reloadCatalogState() {
+	if !CatalogExists(Config{CatalogPath: daemon.catalogPath}) {
+		return
+	}
+	daemon.catalogMu.Lock()
+	defer daemon.catalogMu.Unlock()
+	loaded, err := LoadConfig(daemon.configPath)
+	if err != nil {
+		daemon.updateStatus(func(status *LocalStatus) { status.CatalogSynced = true })
+		return
+	}
+	previousETag := daemon.config.CatalogETag
+	daemon.config.CatalogETag = loaded.CatalogETag
+	daemon.config.CatalogUpdatedAt = loaded.CatalogUpdatedAt
+	daemon.updateStatus(func(status *LocalStatus) {
+		status.CatalogSynced = true
+		if loaded.CatalogUpdatedAt != nil &&
+			(status.CatalogUpdated == nil || loaded.CatalogUpdatedAt.After(*status.CatalogUpdated)) {
+			status.CatalogUpdated = loaded.CatalogUpdatedAt
+		}
+		if previousETag != "" && loaded.CatalogETag != "" && previousETag != loaded.CatalogETag {
+			status.RestartRequired = true
+		}
+	})
+}
+
 func (daemon *Daemon) syncCatalog(ctx context.Context, force bool) (CatalogResult, error) {
 	daemon.catalogMu.Lock()
 	defer daemon.catalogMu.Unlock()
-	return SyncCatalog(ctx, daemon.remote, daemon.configPath, &daemon.config, DetectCodexVersion(ctx), force)
+	result, err := SyncCatalog(ctx, daemon.remote, daemon.configPath, &daemon.config, DetectCodexVersion(ctx), force)
+	if err == nil {
+		daemon.recordCatalogResult(result)
+	}
+	return result, err
 }
 
 func (daemon *Daemon) refreshStatus(ctx context.Context) error {
@@ -347,6 +420,7 @@ func (daemon *Daemon) refreshStatus(ctx context.Context) error {
 			QuotaRemaining  float64   `json:"quota_remaining"`
 			QuotaResetAt    time.Time `json:"quota_reset_at"`
 			RestartRequired bool      `json:"codex_restart_required"`
+			CatalogUpdated  time.Time `json:"catalog_updated_at"`
 			LastRequestAt   time.Time `json:"last_request_at"`
 			LastError       string    `json:"last_error"`
 		} `json:"route"`
@@ -387,6 +461,10 @@ func (daemon *Daemon) refreshStatus(ctx context.Context) error {
 			status.Accounts = append(status.Accounts, allowance)
 		}
 		status.RestartRequired = status.RestartRequired || remoteStatus.Route.RestartRequired
+		if remoteStatus.Route.RestartRequired && !remoteStatus.Route.CatalogUpdated.IsZero() &&
+			(status.CatalogUpdated == nil || remoteStatus.Route.CatalogUpdated.After(*status.CatalogUpdated)) {
+			status.CatalogUpdated = timePointer(remoteStatus.Route.CatalogUpdated)
+		}
 		status.LastRequestAt, status.LastError = nonZeroTimePointer(remoteStatus.Route.LastRequestAt), remoteStatus.Route.LastError
 	})
 	return nil

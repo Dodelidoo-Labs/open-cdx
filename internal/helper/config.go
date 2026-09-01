@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 const (
@@ -20,13 +21,14 @@ const (
 )
 
 type Config struct {
-	RouterURL           string `json:"router_url"`
-	DeviceID            string `json:"device_id,omitempty"`
-	DeviceName          string `json:"device_name,omitempty"`
-	ListenPort          int    `json:"listen_port"`
-	CatalogPath         string `json:"catalog_path"`
-	CatalogETag         string `json:"catalog_etag,omitempty"`
-	InsecureDevelopment bool   `json:"insecure_development,omitempty"`
+	RouterURL           string     `json:"router_url"`
+	DeviceID            string     `json:"device_id,omitempty"`
+	DeviceName          string     `json:"device_name,omitempty"`
+	ListenPort          int        `json:"listen_port"`
+	CatalogPath         string     `json:"catalog_path"`
+	CatalogETag         string     `json:"catalog_etag,omitempty"`
+	CatalogUpdatedAt    *time.Time `json:"catalog_updated_at,omitempty"`
+	InsecureDevelopment bool       `json:"insecure_development,omitempty"`
 }
 
 func DefaultConfigPath() (string, error) {

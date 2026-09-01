@@ -104,7 +104,7 @@ The version link below the dashboard logout control turns red when GitHub report
 | `OPENCODEX_MASTER_KEY_FILE` | `/run/secrets/master_key` | 32-byte raw, base64, or hex encryption key |
 | `OPENCODEX_ADMIN_TOKEN_FILE` | `/run/secrets/admin_token` | Dashboard administrator token |
 | `OPENCODEX_INSECURE_DEV` | `false` | Explicit plaintext development override |
-| `OPENCODEX_CATALOG_REFRESH_INTERVAL` | `15m` | Provider catalog refresh interval |
+| `OPENCODEX_CATALOG_REFRESH_INTERVAL` | `1h` | Provider and account model-catalog refresh interval |
 | `OPENCODEX_QUOTA_REFRESH_INTERVAL` | `5m` | Account quota refresh interval |
 
 `OPENCODEX_VERSION` is a Docker Compose substitution that selects the container tag. It is not read by the router process.

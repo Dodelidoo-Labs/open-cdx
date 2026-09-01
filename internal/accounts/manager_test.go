@@ -132,6 +132,51 @@ func TestRefreshTokenRotationIsSingleFlight(t *testing.T) {
 	}
 }
 
+func TestQuotaAndCatalogRefreshesAreIndependent(t *testing.T) {
+	var quotaCalls, catalogCalls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/wham/usage":
+			quotaCalls.Add(1)
+			_, _ = writer.Write([]byte(`{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":10,"reset_at":2000000000}}}`))
+		case "/models":
+			catalogCalls.Add(1)
+			_, _ = writer.Write([]byte(`{"models":[{"slug":"gpt-test"}]}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	store := accountTestStore(t)
+	_, _, err := store.PutAccount(context.Background(), storage.AccountInput{
+		Credential: storage.OpenAICredential{
+			AccessToken: "access", RefreshToken: "refresh", IDToken: testJWT("account", time.Now().Add(time.Hour)),
+			AccountID: "account", ExpiresAt: time.Now().Add(time.Hour),
+		},
+		MaskedEmail: "a***@example.com", Plan: "plus", Status: "ready",
+		EntitledModels: []string{"gpt-test"}, RawCatalogSnapshot: []byte(`{"models":[{"slug":"gpt-test"}]}`),
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(store, openai.New(server.Client(), server.URL, "client", server.URL, server.URL))
+
+	if err = manager.RefreshQuotas(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if quotaCalls.Load() != 1 || catalogCalls.Load() != 0 {
+		t.Fatalf("quota refresh made quota=%d catalog=%d requests", quotaCalls.Load(), catalogCalls.Load())
+	}
+	if err = manager.RefreshCatalogs(context.Background(), "1.2.3"); err != nil {
+		t.Fatal(err)
+	}
+	if quotaCalls.Load() != 1 || catalogCalls.Load() != 1 {
+		t.Fatalf("catalog refresh made quota=%d catalog=%d requests", quotaCalls.Load(), catalogCalls.Load())
+	}
+}
+
 type unexpectedToken struct{ value string }
 
 func (err *unexpectedToken) Error() string { return "unexpected refreshed token: " + err.value }

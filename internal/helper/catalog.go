@@ -10,12 +10,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type CatalogResult struct {
-	Changed         bool   `json:"changed"`
-	ETag            string `json:"etag"`
-	RestartRequired bool   `json:"restart_required"`
+	Changed         bool      `json:"changed"`
+	ETag            string    `json:"etag"`
+	RestartRequired bool      `json:"restart_required"`
+	UpdatedAt       time.Time `json:"-"`
 }
 
 func SyncCatalog(ctx context.Context, client *RemoteClient, configPath string, config *Config, codexVersion string, force bool) (CatalogResult, error) {
@@ -58,13 +60,15 @@ func SyncCatalog(ctx context.Context, client *RemoteClient, configPath string, c
 	}
 	etag := strings.TrimSpace(response.Header.Get("ETag"))
 	previousETag := config.CatalogETag
+	updatedAt := time.Now().UTC()
 	config.CatalogETag = etag
+	config.CatalogUpdatedAt = &updatedAt
 	if err = SaveConfig(configPath, *config); err != nil {
 		return CatalogResult{}, err
 	}
 	restart := response.Header.Get("X-OpenCDX-Codex-Restart-Required") == "true" ||
 		(previousETag != "" && etag != "" && previousETag != etag)
-	return CatalogResult{Changed: true, ETag: etag, RestartRequired: restart}, nil
+	return CatalogResult{Changed: true, ETag: etag, RestartRequired: restart, UpdatedAt: updatedAt}, nil
 }
 
 func CatalogExists(config Config) bool {

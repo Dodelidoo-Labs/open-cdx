@@ -221,7 +221,7 @@
       <div id="providers" role="tabpanel" aria-labelledby="providers-tab" data-tab-panel="providers" hidden>
         <section class="page-head">
           <div><h1 class="page-title">Providers</h1><p class="page-dek">Connection health and routing endpoints for non-OpenAI models.</p></div>
-          <div class="page-actions"><form class="inline" method="post" action="/admin/refresh" data-refresh><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="return_tab" value="providers"><button class="btn btn-secondary" type="submit">Refresh providers</button></form></div>
+          <div class="page-actions"><form class="inline" method="post" action="/admin/providers/refresh" data-refresh><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="return_tab" value="providers"><button class="btn btn-secondary" type="submit">Refresh providers</button></form></div>
         </section>
 
         <section class="metric-strip">
@@ -271,7 +271,7 @@
       <div id="catalog" role="tabpanel" aria-labelledby="catalog-tab" data-tab-panel="catalog" hidden>
         <section class="page-head">
           <div><h1 class="page-title">Catalog</h1><p class="page-dek">Discovered provider models and the reason each model can—or cannot—route.</p></div>
-          <div class="page-actions"><form class="inline" method="post" action="/admin/refresh" data-refresh><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="return_tab" value="catalog"><button class="btn btn-secondary" type="submit"><span class="material-symbols-outlined action-symbol" aria-hidden="true">refresh</span>Refresh catalog</button></form></div>
+          <div class="page-actions"><form class="inline" method="post" action="/admin/catalog/refresh" data-refresh><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="return_tab" value="catalog"><button class="btn btn-secondary" type="submit"><span class="material-symbols-outlined action-symbol" aria-hidden="true">refresh</span>Refresh catalog</button></form></div>
         </section>
         <section>
           <div class="toolbar">

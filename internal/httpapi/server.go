@@ -167,7 +167,8 @@ func (server *Server) routes() http.Handler {
 	mux.Handle("GET /admin/accounts/live", server.admin(http.HandlerFunc(server.adminAccountsLive)))
 	mux.Handle("GET /admin/devices/live", server.admin(http.HandlerFunc(server.adminDevicesLive)))
 	mux.Handle("POST /admin/telemetry/reset", server.admin(http.HandlerFunc(server.adminResetTelemetry)))
-	mux.Handle("POST /admin/refresh", server.admin(http.HandlerFunc(server.adminRefresh)))
+	mux.Handle("POST /admin/providers/refresh", server.admin(http.HandlerFunc(server.adminRefreshProviders)))
+	mux.Handle("POST /admin/catalog/refresh", server.admin(http.HandlerFunc(server.adminRefreshCatalog)))
 	mux.Handle("POST /admin/accounts/reorder", server.admin(http.HandlerFunc(server.adminAccountOrder)))
 	mux.Handle("POST /admin/accounts/{id}/{action}", server.admin(http.HandlerFunc(server.adminAccount)))
 	mux.Handle("POST /admin/devices/{id}/{action}", server.admin(http.HandlerFunc(server.adminDevice)))
@@ -346,7 +347,7 @@ func (server *Server) catalogResponse(writer http.ResponseWriter, request *http.
 	version := normalizedVersion(request.URL.Query().Get("codex_version"))
 	if refresh {
 		_ = server.RefreshProviders(request.Context())
-		_ = server.accounts.RefreshAll(request.Context(), version)
+		_ = server.accounts.RefreshCatalogs(request.Context(), version)
 	}
 	result, err := server.catalog.BuildForDevice(request.Context(), device.ID, version)
 	if err != nil {
@@ -373,8 +374,7 @@ func (server *Server) catalogResponse(writer http.ResponseWriter, request *http.
 }
 
 func (server *Server) refreshQuotas(writer http.ResponseWriter, request *http.Request) {
-	version := normalizedVersion(request.URL.Query().Get("codex_version"))
-	if err := server.accounts.RefreshAll(request.Context(), version); err != nil {
+	if err := server.accounts.RefreshQuotas(request.Context()); err != nil {
 		writeAPIError(writer, http.StatusBadGateway, "refresh_degraded", safeError(err))
 		return
 	}
@@ -833,14 +833,22 @@ func (server *Server) adminResetTelemetry(writer http.ResponseWriter, request *h
 	redirectMessage(writer, request, message, err != nil)
 }
 
-func (server *Server) adminRefresh(writer http.ResponseWriter, request *http.Request) {
-	providerErr := server.RefreshProviders(request.Context())
-	accountErr := server.accounts.RefreshAll(request.Context(), normalizedVersion(""))
-	if providerErr != nil || accountErr != nil {
-		redirectMessage(writer, request, "Refresh completed with degraded providers or accounts", true)
+func (server *Server) adminRefreshProviders(writer http.ResponseWriter, request *http.Request) {
+	if err := server.RefreshProviders(request.Context()); err != nil {
+		redirectMessage(writer, request, "Provider refresh completed with errors", true)
 		return
 	}
-	redirectMessage(writer, request, "Quotas and provider catalogs refreshed", false)
+	redirectMessage(writer, request, "Providers refreshed", false)
+}
+
+func (server *Server) adminRefreshCatalog(writer http.ResponseWriter, request *http.Request) {
+	providerErr := server.RefreshProviders(request.Context())
+	accountErr := server.accounts.RefreshCatalogs(request.Context(), normalizedVersion(""))
+	if providerErr != nil || accountErr != nil {
+		redirectMessage(writer, request, "Catalog refresh completed with errors", true)
+		return
+	}
+	redirectMessage(writer, request, "Catalog refreshed", false)
 }
 
 func (server *Server) adminAccount(writer http.ResponseWriter, request *http.Request) {

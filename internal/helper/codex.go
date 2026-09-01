@@ -27,6 +27,41 @@ func DetectCodexVersion(ctx context.Context) string {
 	return normalizeCodexVersion(value)
 }
 
+type codexProcessInfo struct {
+	Command   string
+	StartedAt time.Time
+}
+
+func inspectCodexProcess(ctx context.Context, pid int) (codexProcessInfo, error) {
+	if pid <= 0 {
+		return codexProcessInfo{}, errors.New("invalid process ID")
+	}
+	command := exec.CommandContext(ctx, "ps", "-p", strconv.Itoa(pid), "-o", "lstart=", "-o", "comm=")
+	command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
+	output, err := command.Output()
+	if err != nil {
+		return codexProcessInfo{}, err
+	}
+	return parseCodexProcessInfo(string(output))
+}
+
+func parseCodexProcessInfo(output string) (codexProcessInfo, error) {
+	fields := strings.Fields(output)
+	if len(fields) < 6 {
+		return codexProcessInfo{}, errors.New("process details were incomplete")
+	}
+	startedAt, err := time.ParseInLocation("Mon Jan 2 15:04:05 2006", strings.Join(fields[:5], " "), time.Local)
+	if err != nil {
+		return codexProcessInfo{}, err
+	}
+	return codexProcessInfo{Command: strings.Join(fields[5:], " "), StartedAt: startedAt}, nil
+}
+
+func (process codexProcessInfo) isCodex() bool {
+	name := strings.ToLower(filepath.Base(strings.TrimSpace(process.Command)))
+	return name == "codex" || strings.HasPrefix(name, "codex-")
+}
+
 func normalizeCodexVersion(output string) string {
 	for _, field := range strings.Fields(output) {
 		candidate := strings.Trim(strings.TrimPrefix(field, "v"), "(),")

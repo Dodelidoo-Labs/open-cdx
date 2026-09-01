@@ -55,7 +55,7 @@ func RouterFromFlags(args []string) (Router, error) {
 		CredentialStorage:      envBool("OPENCODEX_CREDENTIAL_STORAGE", true),
 		InsecureDevelopment:    envBool("OPENCODEX_INSECURE_DEV", false),
 		TrustProxyHeaders:      envBool("OPENCODEX_TRUST_PROXY_HEADERS", false),
-		CatalogRefreshInterval: envDuration("OPENCODEX_CATALOG_REFRESH_INTERVAL", 15*time.Minute),
+		CatalogRefreshInterval: envDuration("OPENCODEX_CATALOG_REFRESH_INTERVAL", time.Hour),
 		QuotaRefreshInterval:   envDuration("OPENCODEX_QUOTA_REFRESH_INTERVAL", 5*time.Minute),
 		HTTPTimeout:            envDuration("OPENCODEX_HTTP_TIMEOUT", 5*time.Minute),
 	}

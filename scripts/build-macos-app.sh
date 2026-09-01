@@ -101,15 +101,72 @@ build_helper() {
   fi
 }
 
+sparkle_artifact_complete() {
+  SPARKLE_XCFRAMEWORK="$1/artifacts/sparkle/Sparkle/Sparkle.xcframework"
+  [ -f "$SPARKLE_XCFRAMEWORK/Info.plist" ] &&
+    [ -d "$SPARKLE_XCFRAMEWORK/macos-arm64_x86_64/Sparkle.framework" ]
+}
+
+sparkle_artifact_partial() {
+  SWIFT_SCRATCH_TO_CHECK=$1
+  [ -e "$SWIFT_SCRATCH_TO_CHECK/artifacts/sparkle/Sparkle/Sparkle.xcframework" ] ||
+    [ -e "$SWIFT_SCRATCH_TO_CHECK/artifacts/extract/sparkle/Sparkle" ]
+}
+
+reset_swift_scratch() {
+  SWIFT_SCRATCH_TO_RESET=$1
+  case "$SWIFT_SCRATCH_TO_RESET" in
+    "$SWIFT_BUILD_ROOT"/*) ;;
+    *) echo "Refusing to reset an unexpected Swift scratch path: $SWIFT_SCRATCH_TO_RESET" >&2; exit 1 ;;
+  esac
+  echo "Resetting incomplete SwiftPM artifact cache: $SWIFT_SCRATCH_TO_RESET" >&2
+  rm -rf -- "$SWIFT_SCRATCH_TO_RESET"
+}
+
+run_swift_build() {
+  SWIFT_SCRATCH=$1
+  SWIFT_MODULE_CACHE=$2
+  shift 2
+  mkdir -p "$SWIFT_MODULE_CACHE"
+
+  if sparkle_artifact_partial "$SWIFT_SCRATCH" && ! sparkle_artifact_complete "$SWIFT_SCRATCH"; then
+    reset_swift_scratch "$SWIFT_SCRATCH"
+  fi
+
+  if ! (cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH" "$@"); then
+    if ! sparkle_artifact_partial "$SWIFT_SCRATCH" || sparkle_artifact_complete "$SWIFT_SCRATCH"; then
+      return 1
+    fi
+    reset_swift_scratch "$SWIFT_SCRATCH"
+    (cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH" "$@")
+  fi
+
+  if ! sparkle_artifact_complete "$SWIFT_SCRATCH"; then
+    reset_swift_scratch "$SWIFT_SCRATCH"
+    (cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH" "$@")
+  fi
+
+  if ! sparkle_artifact_complete "$SWIFT_SCRATCH"; then
+    echo "SwiftPM did not produce a complete pinned Sparkle XCFramework." >&2
+    return 1
+  fi
+}
+
+swift_bin_path() {
+  SWIFT_SCRATCH=$1
+  SWIFT_MODULE_CACHE=$2
+  shift 2
+  (cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH" "$@" --show-bin-path)
+}
+
 build_menu_app() {
   SWIFT_ROOT="$REPO_ROOT/mac/RouterMenu"
   if [ "$UNIVERSAL_BUILD" = "1" ]; then
     for SWIFT_ARCH in arm64 x86_64; do
       SWIFT_SCRATCH="$SWIFT_BUILD_ROOT/$SWIFT_ARCH"
       SWIFT_MODULE_CACHE="$SWIFT_BUILD_ROOT/ModuleCache-$SWIFT_ARCH"
-      mkdir -p "$SWIFT_MODULE_CACHE"
-      (cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH" --triple "$SWIFT_ARCH-apple-macosx13.0")
-      SWIFT_BIN_DIR=$(cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH" --triple "$SWIFT_ARCH-apple-macosx13.0" --show-bin-path)
+      run_swift_build "$SWIFT_SCRATCH" "$SWIFT_MODULE_CACHE" --triple "$SWIFT_ARCH-apple-macosx13.0"
+      SWIFT_BIN_DIR=$(swift_bin_path "$SWIFT_SCRATCH" "$SWIFT_MODULE_CACHE" --triple "$SWIFT_ARCH-apple-macosx13.0")
       cp "$SWIFT_BIN_DIR/OpenCDXRouterMenu" "$STAGING_DIR/OpenCDXRouterMenu-$SWIFT_ARCH"
     done
     SPARKLE_PACKAGE_ROOT="$SWIFT_BUILD_ROOT/arm64/artifacts/sparkle/Sparkle"
@@ -117,9 +174,8 @@ build_menu_app() {
   else
     SWIFT_SCRATCH="$SWIFT_BUILD_ROOT/native"
     SWIFT_MODULE_CACHE="$SWIFT_BUILD_ROOT/ModuleCache-native"
-    mkdir -p "$SWIFT_MODULE_CACHE"
-    (cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH")
-    SWIFT_BIN_DIR=$(cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH" --show-bin-path)
+    run_swift_build "$SWIFT_SCRATCH" "$SWIFT_MODULE_CACHE"
+    SWIFT_BIN_DIR=$(swift_bin_path "$SWIFT_SCRATCH" "$SWIFT_MODULE_CACHE")
     cp "$SWIFT_BIN_DIR/OpenCDXRouterMenu" "$STAGED_MENU"
     SPARKLE_PACKAGE_ROOT="$SWIFT_BUILD_ROOT/native/artifacts/sparkle/Sparkle"
   fi

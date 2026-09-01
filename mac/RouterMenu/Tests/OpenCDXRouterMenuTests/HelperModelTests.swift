@@ -21,13 +21,48 @@ final class HelperModelTests: XCTestCase {
     func testOtherOperationsAndDisconnectedStatusRemainVisible() {
         var connected = HelperStatus()
         connected.connected = true
-        XCTAssertEqual(operationAfterApplyingStatus("Catalog is up to date.", status: connected), "Catalog is up to date.")
+        XCTAssertEqual(operationAfterApplyingStatus("Catalog refreshed; no changes found.", status: connected), "Catalog refreshed; no changes found.")
 
         let disconnected = HelperStatus()
         XCTAssertEqual(
             operationAfterApplyingStatus("Device approved. Connecting…", status: disconnected),
             "Device approved. Connecting…"
         )
+    }
+
+    func testCatalogRefreshMessagesDescribeThisRefresh() {
+        XCTAssertEqual(
+            catalogRefreshMessage(changed: false, restartRequired: false),
+            "Catalog refreshed; no changes found."
+        )
+        XCTAssertEqual(
+            catalogRefreshMessage(changed: true, restartRequired: true),
+            "Catalog refreshed; changes found. Restart Codex to load them."
+        )
+        XCTAssertEqual(
+            catalogRefreshMessage(changed: false, restartRequired: true),
+            "Catalog refreshed; no new changes found. Restart Codex to load pending changes."
+        )
+    }
+
+    @MainActor
+    func testTerminalOperationClearsAfterDelay() async throws {
+        let model = HelperModel()
+        model.setOperation("Finished.", clearsAfter: 0.02)
+
+        XCTAssertEqual(model.operation, "Finished.")
+        try await Task.sleep(nanoseconds: 80_000_000)
+        XCTAssertEqual(model.operation, "")
+    }
+
+    @MainActor
+    func testOlderDismissalCannotClearNewOperation() async throws {
+        let model = HelperModel()
+        model.setOperation("First", clearsAfter: 0.02)
+        model.setOperation("Second")
+
+        try await Task.sleep(nanoseconds: 80_000_000)
+        XCTAssertEqual(model.operation, "Second")
     }
 
     func testRouterOperationsRequireConfigurationAndConnection() {

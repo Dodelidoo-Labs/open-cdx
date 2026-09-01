@@ -67,7 +67,7 @@ OpenCDX-routed work without confusing it with another custom proxy.
 
 Copy it manually into `~/.codex/config.toml`. Do not add `requires_openai_auth = true`. The command returns a five-minute HMAC-authenticated local token. The loopback daemon removes that token and authenticates remotely with the separate device credential.
 
-Codex must restart after a catalog file changes. The menu app and catalog endpoint report this explicitly.
+Codex must restart after a catalog file changes. The menu app and catalog endpoint report this explicitly. The reminder clears automatically when the helper observes a Codex process that started after the catalog was written; older running instances do not count. It can also be acknowledged manually from the menu.
 
 ## Reconcile usage history
 

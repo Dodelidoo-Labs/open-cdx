@@ -1,6 +1,20 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
+
+func TestDefaultCatalogRefreshIntervalIsHourly(t *testing.T) {
+	t.Setenv("OPENCODEX_CATALOG_REFRESH_INTERVAL", "")
+	config, err := RouterFromFlags(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.CatalogRefreshInterval != time.Hour {
+		t.Fatalf("catalog refresh interval=%s, expected 1h", config.CatalogRefreshInterval)
+	}
+}
 
 func TestRouterRequiresHTTPSForNonLoopbackPublicURL(t *testing.T) {
 	config := Router{

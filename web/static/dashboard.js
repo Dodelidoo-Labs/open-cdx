@@ -184,7 +184,7 @@
       const button = form.querySelector("button");
       button.disabled = true;
       button.classList.add("is-loading");
-      button.setAttribute("aria-label", "Refreshing quotas and catalogs");
+      button.setAttribute("aria-label", `Refreshing ${button.textContent.trim().replace(/^Refresh\s+/i, "").toLowerCase()}`);
     });
   });
 

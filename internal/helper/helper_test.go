@@ -3,6 +3,7 @@ package helper
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -36,6 +37,20 @@ func TestCodexVersionNormalization(t *testing.T) {
 		if actual := normalizeCodexVersion(input); actual != expected {
 			t.Fatalf("normalizeCodexVersion(%q)=%q, expected %q", input, actual, expected)
 		}
+	}
+}
+
+func TestCodexProcessDetailsRecognizeCLIExecutables(t *testing.T) {
+	process, err := parseCodexProcessInfo("Mon Sep 1 15:04:05 2026 /opt/homebrew/bin/codex\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !process.isCodex() || process.StartedAt.Hour() != 15 {
+		t.Fatalf("unexpected Codex process details: %#v", process)
+	}
+	process.Command = "/usr/local/bin/node"
+	if process.isCodex() {
+		t.Fatal("unrelated parent process was identified as Codex")
 	}
 }
 
@@ -172,6 +187,34 @@ func TestDaemonStatusNoticesCatalogWrittenBySiblingLogin(t *testing.T) {
 	}
 }
 
+func TestDaemonStatusLoadsCatalogChangeWrittenBySiblingLogin(t *testing.T) {
+	directory := t.TempDir()
+	catalogPath := filepath.Join(directory, "catalog.json")
+	configPath := filepath.Join(directory, "helper.json")
+	if err := os.WriteFile(catalogPath, []byte(`{"models":[{"slug":"gpt-test"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	updatedAt := time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC)
+	loaded := Config{
+		RouterURL: "https://router.example.com", DeviceID: "device", DeviceName: "Mac", ListenPort: DefaultPort,
+		CatalogPath: catalogPath, CatalogETag: `"new-catalog"`, CatalogUpdatedAt: &updatedAt,
+	}
+	if err := SaveConfig(configPath, loaded); err != nil {
+		t.Fatal(err)
+	}
+	daemon := &Daemon{
+		configPath: configPath, catalogPath: catalogPath,
+		config: Config{CatalogETag: `"old-catalog"`},
+		status: LocalStatus{CatalogSynced: true},
+	}
+	response := httptest.NewRecorder()
+	daemon.controlStatus(response, httptest.NewRequest(http.MethodGet, "/control/status", nil))
+	status := daemon.currentStatus()
+	if response.Code != http.StatusOK || !status.RestartRequired || status.CatalogUpdated == nil || !status.CatalogUpdated.Equal(updatedAt) {
+		t.Fatalf("sibling catalog update was not reflected: code=%d status=%#v", response.Code, status)
+	}
+}
+
 func TestDaemonTracksConcurrentInferenceActivity(t *testing.T) {
 	started := make(chan struct{}, 2)
 	release := make(chan struct{})
@@ -235,13 +278,131 @@ func TestDaemonProxyUpstreamFailureMarksRouterUnreachable(t *testing.T) {
 }
 
 func TestUnchangedCatalogDoesNotClearRestartReminder(t *testing.T) {
-	daemon := &Daemon{status: LocalStatus{RestartRequired: true, LastError: "route failed"}}
+	updatedAt := time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC)
+	daemon := &Daemon{status: LocalStatus{RestartRequired: true, CatalogUpdated: &updatedAt, LastError: "route failed"}}
 	daemon.recordCatalogResult(CatalogResult{Changed: false})
 	if !daemon.currentStatus().RestartRequired {
 		t.Fatal("an unchanged catalog cleared the Codex restart reminder")
 	}
 	if daemon.currentStatus().LastError != "route failed" {
 		t.Fatal("catalog synchronization cleared an unrelated route error")
+	}
+	if !daemon.currentStatus().CatalogUpdated.Equal(updatedAt) {
+		t.Fatal("an unchanged catalog moved the catalog update timestamp")
+	}
+}
+
+func TestCatalogRefreshResponseReportsWhetherThisRefreshChangedCatalog(t *testing.T) {
+	for _, fixture := range []struct {
+		name    string
+		changed bool
+	}{
+		{name: "unchanged", changed: false},
+		{name: "changed", changed: true},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				switch request.URL.Path {
+				case "/api/v1/catalog/refresh":
+					if !fixture.changed {
+						writer.WriteHeader(http.StatusNotModified)
+						return
+					}
+					writer.Header().Set("ETag", `"new-catalog"`)
+					_, _ = writer.Write([]byte(`{"models":[{"slug":"new-model"}]}`))
+				case "/api/v1/device/status":
+					_, _ = writer.Write([]byte(`{"route":{"connected":true,"state":"connected"}}`))
+				default:
+					t.Fatalf("unexpected helper request path: %s", request.URL.Path)
+				}
+			}))
+			defer server.Close()
+
+			directory := t.TempDir()
+			config := Config{
+				RouterURL: server.URL, DeviceID: "device", DeviceName: "Mac", ListenPort: DefaultPort,
+				CatalogPath: filepath.Join(directory, "catalog.json"), CatalogETag: `"old-catalog"`,
+			}
+			daemon := &Daemon{
+				configPath: filepath.Join(directory, "helper.json"), catalogPath: config.CatalogPath,
+				config: config,
+				remote: &RemoteClient{BaseURL: server.URL, DeviceToken: "device-token", HTTP: server.Client()},
+				status: LocalStatus{RestartRequired: true},
+			}
+			response := httptest.NewRecorder()
+			daemon.controlCatalogRefresh(response, httptest.NewRequest(http.MethodPost, "/control/catalog/refresh", nil))
+			if response.Code != http.StatusOK {
+				t.Fatalf("catalog refresh status=%d body=%s", response.Code, response.Body.String())
+			}
+			var payload struct {
+				CatalogChanged bool `json:"catalog_changed"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.CatalogChanged != fixture.changed {
+				t.Fatalf("catalog_changed=%t, expected %t", payload.CatalogChanged, fixture.changed)
+			}
+		})
+	}
+}
+
+func TestNewCodexProcessAcknowledgesCatalogRestart(t *testing.T) {
+	acknowledged := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/v1/catalog/restart-ack" {
+			t.Fatalf("unexpected acknowledgement path: %s", request.URL.Path)
+		}
+		acknowledged <- struct{}{}
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	updatedAt := time.Date(2026, time.September, 1, 12, 0, 0, 500_000_000, time.UTC)
+	daemon := &Daemon{
+		remote: &RemoteClient{BaseURL: server.URL, DeviceToken: "device-token", HTTP: server.Client()},
+		status: LocalStatus{RestartRequired: true, CatalogUpdated: &updatedAt},
+		processInfo: func(context.Context, int) (codexProcessInfo, error) {
+			return codexProcessInfo{Command: "/opt/homebrew/bin/codex", StartedAt: updatedAt.Add(time.Second)}, nil
+		},
+	}
+	response := httptest.NewRecorder()
+	daemon.controlCodexStarted(response, httptest.NewRequest(http.MethodPost, "/control/catalog/codex-started?pid=42", nil))
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("Codex start response=%d, expected %d", response.Code, http.StatusAccepted)
+	}
+	select {
+	case <-acknowledged:
+	case <-time.After(2 * time.Second):
+		t.Fatal("new Codex process did not acknowledge the catalog restart")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for daemon.currentStatus().RestartRequired && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if daemon.currentStatus().RestartRequired {
+		t.Fatal("restart reminder remained after a new Codex process loaded the catalog")
+	}
+}
+
+func TestOlderCodexProcessCannotAcknowledgeCatalogRestart(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		called = true
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	updatedAt := time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC)
+	startedAt := updatedAt.Add(-time.Minute)
+	daemon := &Daemon{
+		remote: &RemoteClient{BaseURL: server.URL, DeviceToken: "device-token", HTTP: server.Client()},
+		status: LocalStatus{RestartRequired: true, CatalogUpdated: &updatedAt},
+	}
+	if err := daemon.acknowledgeCatalogRestart(context.Background(), &startedAt); err != nil {
+		t.Fatal(err)
+	}
+	if called || !daemon.currentStatus().RestartRequired {
+		t.Fatal("an older running Codex instance cleared the restart reminder")
 	}
 }
 

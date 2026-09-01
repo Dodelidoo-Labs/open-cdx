@@ -130,11 +130,11 @@ func refreshLoop(ctx context.Context, api *httpapi.Server, accountManager *accou
 		case <-catalogTicker.C:
 			refreshContext, cancel := context.WithTimeout(ctx, 4*time.Minute)
 			_ = api.RefreshProviders(refreshContext)
-			_ = accountManager.RefreshAll(refreshContext, backgroundClientVersion)
+			_ = accountManager.RefreshCatalogs(refreshContext, backgroundClientVersion)
 			cancel()
 		case <-quotaTicker.C:
 			refreshContext, cancel := context.WithTimeout(ctx, 2*time.Minute)
-			_ = accountManager.RefreshAll(refreshContext, backgroundClientVersion)
+			_ = accountManager.RefreshQuotas(refreshContext)
 			cancel()
 		}
 	}

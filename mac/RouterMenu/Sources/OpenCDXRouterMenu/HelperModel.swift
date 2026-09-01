@@ -108,6 +108,7 @@ struct HelperStatus: Codable {
     var catalogSynced = false
     var catalogUpdated: Date?
     var restartRequired = false
+    var catalogChanged: Bool?
     var lastRequestAt: Date?
     var lastError = ""
 
@@ -121,6 +122,7 @@ struct HelperStatus: Codable {
         case catalogSynced = "catalog_synced"
         case catalogUpdated = "catalog_updated_at"
         case restartRequired = "codex_restart_required"
+        case catalogChanged = "catalog_changed"
         case lastRequestAt = "last_request_at"
         case lastError = "last_error"
     }
@@ -143,6 +145,7 @@ struct HelperStatus: Codable {
         catalogSynced = try container.decodeIfPresent(Bool.self, forKey: .catalogSynced) ?? false
         catalogUpdated = try container.decodeIfPresent(Date.self, forKey: .catalogUpdated)
         restartRequired = try container.decodeIfPresent(Bool.self, forKey: .restartRequired) ?? false
+        catalogChanged = try container.decodeIfPresent(Bool.self, forKey: .catalogChanged)
         lastRequestAt = try container.decodeIfPresent(Date.self, forKey: .lastRequestAt)
         lastError = try container.decodeIfPresent(String.self, forKey: .lastError) ?? ""
     }
@@ -153,6 +156,18 @@ func operationAfterApplyingStatus(_ operation: String, status: HelperStatus) -> 
         return ""
     }
     return operation
+}
+
+func catalogRefreshMessage(changed: Bool?, restartRequired: Bool) -> String {
+    let changed = changed ?? restartRequired
+    if changed {
+        return restartRequired
+            ? "Catalog refreshed; changes found. Restart Codex to load them."
+            : "Catalog refreshed; changes found."
+    }
+    return restartRequired
+        ? "Catalog refreshed; no new changes found. Restart Codex to load pending changes."
+        : "Catalog refreshed; no changes found."
 }
 
 func routerOperationsAvailable(configured: Bool, connected: Bool) -> Bool {
@@ -207,7 +222,7 @@ func usageHistoryPreviewMessage(_ preview: UsageHistoryPreview, codexHome: Strin
 @MainActor
 final class HelperModel: ObservableObject {
     @Published var status = HelperStatus()
-    @Published var operation = ""
+    @Published private(set) var operation = ""
     @Published var routerURL = UserDefaults.standard.string(forKey: "routerURL") ?? "https://router.example.com"
     @Published var deviceName = UserDefaults.standard.string(forKey: "deviceName") ?? (Host.current().localizedName ?? "Codex Mac")
     @Published var insecureDevelopment = UserDefaults.standard.bool(forKey: "insecureDevelopment")
@@ -227,7 +242,11 @@ final class HelperModel: ObservableObject {
     private var restartingDaemon = false
     private var started = false
     private var historyPromptVisible = false
+    private var operationGeneration: UInt = 0
     private let historyImportDecisionKey = "usageHistoryImportDecisionMade"
+
+    private static let confirmationDuration: TimeInterval = 7
+    private static let errorDuration: TimeInterval = 12
 
     var inferenceActive: Bool { status.activeRequests > 0 }
 
@@ -264,14 +283,14 @@ final class HelperModel: ObservableObject {
     func applyPreviewStatus(_ previewStatus: HelperStatus) {
         configured = true
         status = previewStatus
-        operation = ""
+        setOperation("")
     }
 #endif
 
     func requestEnrollment() {
         let trimmed = routerURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            operation = "Enter the remote router URL."
+            setErrorOperation("Enter the remote router URL.")
             return
         }
         UserDefaults.standard.set(trimmed, forKey: "routerURL")
@@ -279,7 +298,7 @@ final class HelperModel: ObservableObject {
         UserDefaults.standard.set(insecureDevelopment, forKey: "insecureDevelopment")
         var arguments = ["enroll", "--router", trimmed, "--name", deviceName, "--no-wait"]
         if insecureDevelopment { arguments.append("--insecure-dev") }
-        operation = "Requesting enrollment…"
+        setOperation("Requesting enrollment…")
         runHelper(arguments) { [weak self] result in
             guard let self else { return }
             if result.success {
@@ -289,12 +308,12 @@ final class HelperModel: ObservableObject {
                 UserDefaults.standard.set(true, forKey: "pairingPending")
                 self.status.state = "connecting"
                 self.status.lastError = ""
-                self.operation = "Pending administrator approval in the dashboard."
+                self.setOperation("Pending administrator approval in the dashboard.")
             } else {
                 if self.insecureDevelopment && result.error.contains("remote router is unreachable") {
-                    self.operation = "Router unreachable. Allow OpenCDX Router in System Settings → Privacy & Security → Local Network, then retry."
+                    self.setErrorOperation("Router unreachable. Allow OpenCDX Router in System Settings → Privacy & Security → Local Network, then retry.")
                 } else {
-                    self.operation = result.error
+                    self.setErrorOperation(result.error)
                 }
             }
         }
@@ -302,12 +321,12 @@ final class HelperModel: ObservableObject {
 
     func addOpenAIAccount() {
         guard !accountLoginInProgress else {
-            operation = "An OpenAI login is already open in your browser."
+            setErrorOperation("An OpenAI login is already open in your browser.")
             return
         }
         let previousAccountCount = status.accounts.count
         accountLoginInProgress = true
-        operation = "Opening an explicit OpenAI login…"
+        setOperation("Opening an explicit OpenAI login…")
         runHelper(["login-openai"], timeout: 6 * 60) { [weak self] result in
             guard let self else { return }
             if result.success {
@@ -319,50 +338,81 @@ final class HelperModel: ObservableObject {
                 self.resolveExpiredAccountLogin(previousAccountCount: previousAccountCount)
             } else {
                 self.accountLoginInProgress = false
-                self.operation = result.error
+                self.setErrorOperation(result.error)
                 self.refreshStatus()
             }
         }
     }
 
-    func openDashboard() { runHelper(["open-dashboard"]) { [weak self] result in if !result.success { self?.operation = result.error } } }
-    func refreshQuotas() { operation = "Refreshing quotas…"; runHelper(["refresh-quotas"]) { [weak self] result in self?.operation = result.success ? "Quotas refreshed." : result.error; self?.refreshStatus() } }
+    func openDashboard() {
+        runHelper(["open-dashboard"]) { [weak self] result in
+            if !result.success { self?.setErrorOperation(result.error) }
+        }
+    }
+
+    func refreshQuotas() {
+        setOperation("Refreshing quotas…")
+        runHelper(["refresh-quotas"]) { [weak self] result in
+            guard let self else { return }
+            if result.success {
+                self.setConfirmationOperation("Quotas refreshed.")
+            } else {
+                self.setErrorOperation(result.error)
+            }
+            self.refreshStatus()
+        }
+    }
+
     func refreshCatalog() {
-        operation = "Refreshing catalog…"
+        setOperation("Refreshing catalog…")
         runHelper(["refresh-catalog"]) { [weak self] result in
             guard let self else { return }
             if result.success {
                 _ = self.applyStatusOutput(result.output)
-                self.operation = self.status.restartRequired ? "Catalog refreshed. Restart Codex to load changes." : "Catalog is up to date."
+                self.setConfirmationOperation(catalogRefreshMessage(
+                    changed: self.status.catalogChanged,
+                    restartRequired: self.status.restartRequired
+                ))
             } else {
-                self.operation = result.error
+                self.setErrorOperation(result.error)
             }
             self.refreshStatus()
         }
     }
 
     func acknowledgeCodexRestart() {
-        operation = "Confirming the catalog restart…"
+        setOperation("Confirming the catalog restart…")
         runHelper(["acknowledge-restart"]) { [weak self] result in
             guard let self else { return }
             if result.success {
                 _ = self.applyStatusOutput(result.output)
-                self.operation = "Catalog restart reminder cleared."
+                self.setConfirmationOperation("Catalog restart reminder cleared.")
             } else {
-                self.operation = result.error
+                self.setErrorOperation(result.error)
             }
             self.refreshStatus()
         }
     }
-    func retryConnection() { operation = "Checking router connection…"; runHelper(["reconnect"]) { [weak self] result in self?.operation = result.success ? "Router connection restored." : result.error; self?.refreshStatus() } }
+    func retryConnection() {
+        setOperation("Checking router connection…")
+        runHelper(["reconnect"]) { [weak self] result in
+            guard let self else { return }
+            if result.success {
+                self.setConfirmationOperation("Router connection restored.")
+            } else {
+                self.setErrorOperation(result.error)
+            }
+            self.refreshStatus()
+        }
+    }
 
     func requestUsageReconciliation() {
         guard status.connected else {
-            operation = "Connect and approve this Mac before reconciling usage history."
+            setErrorOperation("Connect and approve this Mac before reconciling usage history.")
             return
         }
         guard !usageReconciliationInProgress && !telemetryResetInProgress else {
-            operation = "Another telemetry change is already in progress."
+            setErrorOperation("Another telemetry change is already in progress.")
             return
         }
         previewUsageHistory()
@@ -370,11 +420,11 @@ final class HelperModel: ObservableObject {
 
     func requestTelemetryReset() {
         guard status.connected else {
-            operation = "Connect and approve this Mac before resetting telemetry."
+            setErrorOperation("Connect and approve this Mac before resetting telemetry.")
             return
         }
         guard !telemetryResetInProgress && !usageReconciliationInProgress else {
-            operation = "Another telemetry change is already in progress."
+            setErrorOperation("Another telemetry change is already in progress.")
             return
         }
         let alert = NSAlert()
@@ -384,26 +434,28 @@ final class HelperModel: ObservableObject {
         alert.addButton(withTitle: "Reset Telemetry")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else {
-            operation = "Telemetry was not changed."
+            setConfirmationOperation("Telemetry was not changed.")
             return
         }
         telemetryResetInProgress = true
-        operation = "Resetting router telemetry…"
+        setOperation("Resetting router telemetry…")
         runHelper(["reset-telemetry"], timeout: 60) { [weak self] result in
             guard let self else { return }
             self.telemetryResetInProgress = false
-            self.operation = result.success
-                ? "Telemetry reset. Local Codex history was not changed."
-                : result.error
+            if result.success {
+                self.setConfirmationOperation("Telemetry reset. Local Codex history was not changed.")
+            } else {
+                self.setErrorOperation(result.error)
+            }
         }
     }
 
     func copyConfiguration() {
         runHelper(["config"]) { [weak self] result in
-            guard result.success else { self?.operation = result.error; return }
+            guard result.success else { self?.setErrorOperation(result.error); return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(result.output, forType: .string)
-            self?.operation = "Codex configuration copied. Paste it into config.toml manually."
+            self?.setConfirmationOperation("Codex configuration copied. Paste it into config.toml manually.")
         }
     }
 
@@ -413,7 +465,7 @@ final class HelperModel: ObservableObject {
             launchAtLogin = enabled
         } catch {
             launchAtLogin = SMAppService.mainApp.status == .enabled
-            operation = "Login item could not be updated: \(error.localizedDescription)"
+            setErrorOperation("Login item could not be updated: \(error.localizedDescription)")
         }
     }
 
@@ -451,18 +503,9 @@ final class HelperModel: ObservableObject {
     }
 
     private func updateAfterAccountLogin() {
-        operation = "Account connected. Updating the catalog…"
-        runHelper(["refresh-catalog"], timeout: 5 * 60) { [weak self] result in
-            guard let self else { return }
-            self.accountLoginInProgress = false
-            if result.success {
-                _ = self.applyStatusOutput(result.output)
-                self.operation = "Account connected."
-            } else {
-                self.operation = "Account connected. Catalog refresh is pending."
-            }
-            self.refreshStatus()
-        }
+        accountLoginInProgress = false
+        setConfirmationOperation("Account connected.")
+        refreshStatus()
     }
 
     private func resolveExpiredAccountLogin(previousAccountCount: Int) {
@@ -475,7 +518,7 @@ final class HelperModel: ObservableObject {
                 self.updateAfterAccountLogin()
             } else {
                 self.accountLoginInProgress = false
-                self.operation = "OpenAI login expired. Try again."
+                self.setErrorOperation("OpenAI login expired. Try again.")
                 self.refreshStatus()
             }
         }
@@ -503,7 +546,10 @@ final class HelperModel: ObservableObject {
         }
         guard let decoded = try? decoder.decode(HelperStatus.self, from: data) else { return false }
         status = decoded
-        operation = operationAfterApplyingStatus(operation, status: decoded)
+        let nextOperation = operationAfterApplyingStatus(operation, status: decoded)
+        if nextOperation != operation {
+            setOperation(nextOperation)
+        }
         offerInitialHistoryImportIfNeeded()
         return true
     }
@@ -519,7 +565,7 @@ final class HelperModel: ObservableObject {
                 guard let self, result.success else { return }
                 self.pairing = false
                 UserDefaults.standard.set(false, forKey: "pairingPending")
-                self.operation = "Device approved. Restarting helper…"
+                self.setOperation("Device approved. Restarting helper…")
                 self.restartDaemon()
             }
         } else if !restartingDaemon && daemonProcess?.isRunning != true && !status.connected {
@@ -553,7 +599,7 @@ final class HelperModel: ObservableObject {
                     self.status.connected = false
                     self.status.state = "connecting"
                     self.status.lastError = ""
-                    self.operation = "Device approved. Connecting…"
+                    self.setOperation("Device approved. Connecting…")
                     self.startDaemon()
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
                         self.refreshStatus()
@@ -586,22 +632,22 @@ final class HelperModel: ObservableObject {
     private func previewUsageHistory(codexHome: String = defaultCodexHomePath()) {
         guard !usageReconciliationInProgress else { return }
         usageReconciliationInProgress = true
-        operation = "Scanning \(codexHome) for a reconciliation preview…"
+        setOperation("Scanning \(codexHome) for a reconciliation preview…")
         runHelper(usageHistoryHelperArguments(codexHome: codexHome, preview: true), timeout: 10 * 60) { [weak self] result in
             guard let self else { return }
             guard result.success, let data = result.output.data(using: .utf8) else {
                 self.usageReconciliationInProgress = false
-                self.operation = result.error
+                self.setErrorOperation(result.error)
                 return
             }
             guard let preview = try? JSONDecoder().decode(UsageHistoryPreview.self, from: data) else {
                 self.usageReconciliationInProgress = false
-                self.operation = "Helper returned an unreadable usage history preview. Existing telemetry was left unchanged."
+                self.setErrorOperation("Helper returned an unreadable usage history preview. Existing telemetry was left unchanged.")
                 return
             }
             guard self.status.connected else {
                 self.usageReconciliationInProgress = false
-                self.operation = "Router disconnected during the history scan. Existing telemetry was left unchanged."
+                self.setErrorOperation("Router disconnected during the history scan. Existing telemetry was left unchanged.")
                 return
             }
             let alert = NSAlert()
@@ -612,7 +658,7 @@ final class HelperModel: ObservableObject {
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else {
                 self.usageReconciliationInProgress = false
-                self.operation = "Usage history was not changed."
+                self.setConfirmationOperation("Usage history was not changed.")
                 return
             }
             self.reconcileUsageHistory(codexHome: codexHome)
@@ -620,15 +666,15 @@ final class HelperModel: ObservableObject {
     }
 
     private func reconcileUsageHistory(codexHome: String) {
-        operation = "Reconciling usage history from \(codexHome)…"
+        setOperation("Reconciling usage history from \(codexHome)…")
         runHelper(usageHistoryHelperArguments(codexHome: codexHome, preview: false), timeout: 10 * 60) { [weak self] result in
             guard let self else { return }
             self.usageReconciliationInProgress = false
             if result.success {
                 let summary = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-                self.operation = summary.isEmpty ? "Usage history reconciled." : summary
+                self.setConfirmationOperation(summary.isEmpty ? "Usage history reconciled." : summary)
             } else {
-                self.operation = result.error
+                self.setErrorOperation(result.error)
             }
         }
     }
@@ -641,7 +687,7 @@ final class HelperModel: ObservableObject {
         }
         guard daemonProcess?.isRunning != true else { return }
         guard let executable = helperExecutable else {
-            operation = "Bundled router-helper was not found."
+            setErrorOperation("Bundled router-helper was not found.")
             return
         }
         let process = Process()
@@ -653,7 +699,7 @@ final class HelperModel: ObservableObject {
             try process.run()
             daemonProcess = process
         } catch {
-            operation = "Helper could not start: \(error.localizedDescription)"
+            setErrorOperation("Helper could not start: \(error.localizedDescription)")
         }
     }
 
@@ -711,8 +757,27 @@ final class HelperModel: ObservableObject {
         status = HelperStatus()
         status.state = "setup"
         if operation.isEmpty || operation == "Helper daemon is not running." {
-            operation = "Open Settings to connect and enroll this Mac."
+            setOperation("Open Settings to connect and enroll this Mac.")
         }
+    }
+
+    func setOperation(_ message: String, clearsAfter delay: TimeInterval? = nil) {
+        operationGeneration &+= 1
+        let generation = operationGeneration
+        operation = message
+        guard let delay, delay > 0, !message.isEmpty else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.operationGeneration == generation else { return }
+            self.operation = ""
+        }
+    }
+
+    private func setConfirmationOperation(_ message: String) {
+        setOperation(message, clearsAfter: Self.confirmationDuration)
+    }
+
+    private func setErrorOperation(_ message: String) {
+        setOperation(message, clearsAfter: Self.errorDuration)
     }
 
     private var helperExecutable: URL? {

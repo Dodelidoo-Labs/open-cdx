@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -241,7 +242,27 @@ func token(configPath string, args []string) error {
 		return err
 	}
 	fmt.Println(value)
+	notifyCodexStarted(configPath, secret, os.Getppid())
 	return nil
+}
+
+func notifyCodexStarted(configPath, secret string, parentPID int) {
+	config, err := helper.LoadConfig(configPath)
+	if err != nil || parentPID <= 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		config.LocalBaseURL()+"/control/catalog/codex-started?pid="+strconv.Itoa(parentPID), nil)
+	if err != nil {
+		return
+	}
+	request.Header.Set("X-OpenCDX-Control", secret)
+	response, err := (&http.Client{Timeout: 2 * time.Second}).Do(request)
+	if err == nil {
+		response.Body.Close()
+	}
 }
 
 func loginOpenAI(configPath string, args []string) error {

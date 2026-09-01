@@ -235,7 +235,7 @@ func (manager *Manager) RefreshCatalog(ctx context.Context, accountID, clientVer
 	return manager.store.UpdateAccountCatalog(ctx, accountID, discovery.Raw, modelIDs(discovery.Models))
 }
 
-func (manager *Manager) RefreshAll(ctx context.Context, clientVersion string) error {
+func (manager *Manager) RefreshQuotas(ctx context.Context) error {
 	accounts, err := manager.store.Accounts(ctx, false)
 	if err != nil {
 		return err
@@ -245,29 +245,40 @@ func (manager *Manager) RefreshAll(ctx context.Context, clientVersion string) er
 		if account.Paused {
 			continue
 		}
-		quotaErr := manager.RefreshQuota(ctx, account.ID)
-		if quotaErr != nil {
+		if refreshErr := manager.RefreshQuota(ctx, account.ID); refreshErr != nil {
 			failures++
-		}
-		catalogErr := manager.RefreshCatalog(ctx, account.ID, clientVersion)
-		if catalogErr != nil {
-			failures++
-		}
-		if quotaErr != nil || catalogErr != nil {
-			message := "quota refresh failed"
-			if quotaErr == nil {
-				message = "catalog refresh failed"
-			} else if catalogErr != nil {
-				message = "quota and catalog refresh failed"
-			}
 			latest, latestErr := manager.store.Account(ctx, account.ID, false)
 			if latestErr != nil || latest.Status != "reauthentication_required" {
-				_ = manager.store.SetAccountStatus(ctx, account.ID, "degraded", message)
+				_ = manager.store.SetAccountStatus(ctx, account.ID, "degraded", "quota refresh failed")
 			}
 		}
 	}
 	if failures > 0 {
-		return fmt.Errorf("%d account refresh operations failed", failures)
+		return fmt.Errorf("%d account quota refresh operations failed", failures)
+	}
+	return nil
+}
+
+func (manager *Manager) RefreshCatalogs(ctx context.Context, clientVersion string) error {
+	accounts, err := manager.store.Accounts(ctx, false)
+	if err != nil {
+		return err
+	}
+	var failures int
+	for _, account := range accounts {
+		if account.Paused {
+			continue
+		}
+		if refreshErr := manager.RefreshCatalog(ctx, account.ID, clientVersion); refreshErr != nil {
+			failures++
+			latest, latestErr := manager.store.Account(ctx, account.ID, false)
+			if latestErr != nil || latest.Status != "reauthentication_required" {
+				_ = manager.store.SetAccountStatus(ctx, account.ID, "degraded", "catalog refresh failed")
+			}
+		}
+	}
+	if failures > 0 {
+		return fmt.Errorf("%d account catalog refresh operations failed", failures)
 	}
 	return nil
 }
