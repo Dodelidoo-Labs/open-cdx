@@ -4,8 +4,48 @@ set -eu
 REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 SOURCE_APP="$REPO_ROOT/dist/OpenCDX Router.app"
 SOURCE_HELPER="$SOURCE_APP/Contents/Resources/router-helper"
-TARGET_PARENT="$HOME/Applications"
-TARGET_APP="$TARGET_PARENT/OpenCDX Router.app"
+SYSTEM_APP="/Applications/OpenCDX Router.app"
+USER_APP="$HOME/Applications/OpenCDX Router.app"
+CHECK_ONLY=0
+if [ "${1:-}" = "--check" ]; then
+  CHECK_ONLY=1
+  shift
+fi
+if [ "$#" -ne 0 ]; then
+  echo "Usage: $0 [--check]" >&2
+  exit 2
+fi
+
+TARGET_APP=${OPENCODEX_INSTALL_APP_PATH:-}
+if [ -z "$TARGET_APP" ]; then
+  if [ -d "$SYSTEM_APP" ] && [ -d "$USER_APP" ]; then
+    echo "Refusing to choose between two installed OpenCDX Router copies:" >&2
+    echo "  $SYSTEM_APP" >&2
+    echo "  $USER_APP" >&2
+    echo "Remove the unintended copy or set OPENCODEX_INSTALL_APP_PATH explicitly." >&2
+    exit 1
+  elif [ -d "$SYSTEM_APP" ]; then
+    TARGET_APP=$SYSTEM_APP
+  elif [ -d "$USER_APP" ]; then
+    TARGET_APP=$USER_APP
+  else
+    TARGET_APP=$USER_APP
+  fi
+fi
+case "$TARGET_APP" in
+  /*/"OpenCDX Router.app") ;;
+  *)
+    echo "OPENCODEX_INSTALL_APP_PATH must be an absolute path ending in OpenCDX Router.app." >&2
+    exit 1
+    ;;
+esac
+for KNOWN_APP in "$SYSTEM_APP" "$USER_APP"; do
+  if [ -d "$KNOWN_APP" ] && [ "$KNOWN_APP" != "$TARGET_APP" ]; then
+    echo "Refusing to install while another OpenCDX Router copy exists at $KNOWN_APP." >&2
+    exit 1
+  fi
+done
+TARGET_PARENT=${TARGET_APP%/*}
 TARGET_HELPER="$TARGET_APP/Contents/Resources/router-helper"
 EXPECTED_BUNDLE_ID="com.dodelidoo.opencdx"
 EXPECTED_URL_NAME="com.dodelidoo.opencdx.oauth"
@@ -13,7 +53,11 @@ EXPECTED_URL_SCHEME="com.dodelidoo.opencdx"
 EXPECTED_HELPER_ID="com.dodelidoo.opencdx.helper"
 
 [ -d "$SOURCE_APP" ] || { echo "Build the app first with scripts/build-macos-app.sh" >&2; exit 1; }
-mkdir -p "$TARGET_PARENT"
+if [ "$CHECK_ONLY" = "1" ]; then
+  [ -d "$TARGET_PARENT" ] || { echo "Target parent does not exist: $TARGET_PARENT" >&2; exit 1; }
+else
+  mkdir -p "$TARGET_PARENT"
+fi
 
 codesign --verify --deep --strict --verbose=2 "$SOURCE_APP"
 BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$SOURCE_APP/Contents/Info.plist")
@@ -54,6 +98,12 @@ if [ -d "$TARGET_APP" ]; then
     echo "A signer change creates another macOS Local Network privacy identity. Rebuild with the previous identity, or set OPENCODEX_ALLOW_SIGNING_IDENTITY_CHANGE=1 only for an intentional migration." >&2
     exit 1
   fi
+fi
+
+if [ "$CHECK_ONLY" = "1" ]; then
+  echo "Ready to replace $TARGET_APP with the signed local build (team $TEAM_ID)."
+  echo "The installed app was not stopped, replaced, or launched."
+  exit 0
 fi
 
 if pgrep -x "OpenCDX Router" >/dev/null 2>&1; then

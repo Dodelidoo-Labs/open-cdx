@@ -127,7 +127,12 @@ func TestDaemonStatusIncludesSafeAccountAllowances(t *testing.T) {
 			"accounts":[{
 				"masked_email":"a***@example.com","plan":"plus","status":"ready",
 				"paused":false,"primary":true,"quota_remaining":84,
-				"quota_reset_at":"2030-01-02T03:04:05Z","reset_credits":2
+				"quota_reset_at":"2030-01-02T03:04:05Z","reset_credits":2,
+				"quota_windows":[{
+					"label":"Weekly","remaining":84,"duration_minutes":10080,
+					"reset_at":"2030-01-02T03:04:05Z","pace_status":"on_pace",
+					"pace_marker_percent":70,"pace_buffer_percent":14
+				}]
 			}]
 		}`))
 	}))
@@ -148,6 +153,9 @@ func TestDaemonStatusIncludesSafeAccountAllowances(t *testing.T) {
 	}
 	if account.QuotaResetAt == nil || !account.QuotaResetAt.Equal(resetAt) {
 		t.Fatalf("quota reset=%v, expected %v", account.QuotaResetAt, resetAt)
+	}
+	if len(account.QuotaWindows) != 1 || account.QuotaWindows[0].Label != "Weekly" || account.QuotaWindows[0].PaceStatus != "on_pace" || account.QuotaWindows[0].PaceMarkerPercent != 70 {
+		t.Fatalf("unexpected quota windows: %#v", account.QuotaWindows)
 	}
 }
 

@@ -14,6 +14,9 @@ let package = Package(
             dependencies: [
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
+            swiftSettings: [
+                .define("DEBUG", .when(configuration: .debug)),
+            ],
             linkerSettings: [
                 .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@loader_path/../Frameworks"]),
             ]

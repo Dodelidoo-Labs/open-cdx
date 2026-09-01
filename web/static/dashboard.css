@@ -375,8 +375,16 @@ form { margin: 0; }
 .quota-item { min-width: 0; }
 .quota-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; font-size: 13px; }
 .quota-value { font: 600 13px/1 var(--font-mono); }
-.quota-track { height: 4px; background: var(--fg-soft); }
-.quota-track span { display: block; height: 100%; background: var(--accent); }
+.quota-track { position: relative; height: 4px; background: var(--fg-soft); }
+.quota-fill { display: block; height: 100%; background: var(--accent); }
+.quota-pace-marker { position: absolute; top: -2px; width: 1px; height: 8px; background: var(--muted); transform: translateX(-.5px); }
+.quota-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; color: var(--muted); font-size: 11px; }
+.quota-pace.too-fast { color: var(--warning); }
+.quota-window-secondary { margin-top: 12px; }
+.quota-window-secondary .quota-head { margin-bottom: 6px; color: var(--muted); font-size: 11px; }
+.quota-window-secondary .quota-value { font-size: 11px; }
+.quota-window-secondary .quota-track { height: 3px; }
+.quota-window-secondary .quota-pace-marker { top: -2px; height: 7px; }
 .model-list { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; }
 .model-list code { color: var(--muted); font: 11px/1.4 var(--font-mono); white-space: nowrap; }
 .detail-actions, .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }

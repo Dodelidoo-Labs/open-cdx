@@ -8,6 +8,12 @@ GO_BINARY_FILE="$REPO_ROOT/.opencdx-go-binary"
 HELPER_SIGNING_IDENTIFIER="com.dodelidoo.opencdx.helper"
 STAGING_DIR=$(mktemp -d "${TMPDIR:-/tmp}/opencdx-app.XXXXXX")
 trap 'rm -rf "$STAGING_DIR"' EXIT INT TERM
+SWIFT_BUILD_KEY=$(printf '%s' "$REPO_ROOT" | shasum -a 256 | cut -c 1-16)
+if [ -n "${OPENCODEX_SWIFT_BUILD_ROOT:-}" ]; then
+  SWIFT_BUILD_ROOT=$OPENCODEX_SWIFT_BUILD_ROOT
+else
+  SWIFT_BUILD_ROOT="${TMPDIR:-/tmp}/opencdx-swift-build-$SWIFT_BUILD_KEY"
+fi
 
 APP_VERSION=${OPENCODEX_VERSION:-$(tr -d '[:space:]' < "$REPO_ROOT/VERSION")}
 if ! printf '%s\n' "$APP_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
@@ -99,23 +105,23 @@ build_menu_app() {
   SWIFT_ROOT="$REPO_ROOT/mac/RouterMenu"
   if [ "$UNIVERSAL_BUILD" = "1" ]; then
     for SWIFT_ARCH in arm64 x86_64; do
-      SWIFT_SCRATCH="$SWIFT_ROOT/.build-$SWIFT_ARCH"
-      SWIFT_MODULE_CACHE="$SWIFT_SCRATCH/ModuleCache"
+      SWIFT_SCRATCH="$SWIFT_BUILD_ROOT/$SWIFT_ARCH"
+      SWIFT_MODULE_CACHE="$SWIFT_BUILD_ROOT/ModuleCache-$SWIFT_ARCH"
       mkdir -p "$SWIFT_MODULE_CACHE"
       (cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH" --triple "$SWIFT_ARCH-apple-macosx13.0")
       SWIFT_BIN_DIR=$(cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH" --triple "$SWIFT_ARCH-apple-macosx13.0" --show-bin-path)
       cp "$SWIFT_BIN_DIR/OpenCDXRouterMenu" "$STAGING_DIR/OpenCDXRouterMenu-$SWIFT_ARCH"
     done
-    SPARKLE_PACKAGE_ROOT="$SWIFT_ROOT/.build-arm64/artifacts/sparkle/Sparkle"
+    SPARKLE_PACKAGE_ROOT="$SWIFT_BUILD_ROOT/arm64/artifacts/sparkle/Sparkle"
     lipo -create "$STAGING_DIR/OpenCDXRouterMenu-arm64" "$STAGING_DIR/OpenCDXRouterMenu-x86_64" -output "$STAGED_MENU"
   else
-    SWIFT_SCRATCH="$SWIFT_ROOT/.build"
-    SWIFT_MODULE_CACHE="$SWIFT_SCRATCH/ModuleCache"
+    SWIFT_SCRATCH="$SWIFT_BUILD_ROOT/native"
+    SWIFT_MODULE_CACHE="$SWIFT_BUILD_ROOT/ModuleCache-native"
     mkdir -p "$SWIFT_MODULE_CACHE"
     (cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH")
     SWIFT_BIN_DIR=$(cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH" --show-bin-path)
     cp "$SWIFT_BIN_DIR/OpenCDXRouterMenu" "$STAGED_MENU"
-    SPARKLE_PACKAGE_ROOT="$SWIFT_ROOT/.build/artifacts/sparkle/Sparkle"
+    SPARKLE_PACKAGE_ROOT="$SWIFT_BUILD_ROOT/native/artifacts/sparkle/Sparkle"
   fi
 }
 
@@ -194,9 +200,9 @@ else
     codesign --force --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$STAGED_APP"
     echo "Signed hardened release with: $SIGNING_IDENTITY"
   else
-    codesign --force --identifier "$HELPER_SIGNING_IDENTIFIER" --timestamp=none --sign "$SIGNING_IDENTITY" "$STAGED_HELPER"
+    codesign --force --identifier "$HELPER_SIGNING_IDENTIFIER" --options runtime --timestamp=none --sign "$SIGNING_IDENTITY" "$STAGED_HELPER"
     sign_sparkle_components "$SIGNING_IDENTITY" --timestamp=none
-    codesign --force --timestamp=none --sign "$SIGNING_IDENTITY" "$STAGED_APP"
+    codesign --force --options runtime --timestamp=none --sign "$SIGNING_IDENTITY" "$STAGED_APP"
     echo "Signed development build with: $SIGNING_IDENTITY"
   fi
 fi

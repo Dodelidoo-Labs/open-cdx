@@ -1084,35 +1084,80 @@
     const status = row.querySelector("[data-account-status]");
     status.className = `state ${account.paused ? "warn" : account.status === "ready" ? "good" : "bad"}`;
     status.textContent = account.paused ? "Paused" : account.status;
-    const codex = account.quotas.find((quota) => quota.name === "Codex");
+    const quotas = account.quotas || [];
+    const codex = quotas.find((quota) => quota.name === "Codex");
+    const mainCodexWindow = codex?.windows?.[0];
     const reset = row.querySelector("[data-account-reset]");
-    if (reset && codex?.reset_at) reset.replaceChildren("Codex resets ", createLocalizedTime(codex.reset_at, "datetime"));
+    if (reset && mainCodexWindow?.reset_at) reset.replaceChildren("Codex resets ", createLocalizedTime(mainCodexWindow.reset_at, "datetime"));
     else if (reset) reset.textContent = "Reset time unavailable";
     const quotaHost = row.querySelector("[data-account-quotas]");
-    const quotaItems = account.quotas.map((quota) => {
+    const quotaItems = quotas.map((quota) => {
       const item = document.createElement("div");
       item.className = "quota-item";
-      const head = document.createElement("div");
-      head.className = "quota-head";
-      const name = document.createElement("span");
-      name.textContent = quota.name;
-      const value = document.createElement("span");
-      value.className = "quota-value";
-      value.textContent = `${formatNumber(quota.remaining)}%`;
-      head.append(name, value);
-      const track = document.createElement("div");
-      track.className = "quota-track";
-      track.setAttribute("role", "progressbar");
-      track.setAttribute("aria-label", `${quota.name} allowance remaining`);
-      track.setAttribute("aria-valuemin", "0");
-      track.setAttribute("aria-valuemax", "100");
-      track.setAttribute("aria-valuenow", String(Math.round(quota.remaining)));
-      const fill = document.createElement("span");
-      fill.style.width = `${Math.max(0, Math.min(100, quota.remaining))}%`;
-      track.appendChild(fill);
-      item.append(head, track);
+      (quota.windows || []).forEach((window, index) => {
+        const windowHost = document.createElement("div");
+        windowHost.className = `quota-window${index > 0 ? " quota-window-secondary" : ""}`;
+        const head = document.createElement("div");
+        head.className = "quota-head";
+        const name = document.createElement("span");
+        name.textContent = index === 0
+          ? `${quota.name}${window.label && window.label !== "Allowance" ? ` · ${window.label}` : ""}`
+          : window.label;
+        const value = document.createElement("span");
+        value.className = "quota-value";
+        value.textContent = `${formatNumber(window.remaining)}%`;
+        head.append(name, value);
+        const track = document.createElement("div");
+        track.className = "quota-track";
+        track.setAttribute("role", "progressbar");
+        track.setAttribute("aria-label", `${quota.name} ${window.label} allowance remaining`);
+        track.setAttribute("aria-valuemin", "0");
+        track.setAttribute("aria-valuemax", "100");
+        track.setAttribute("aria-valuenow", String(Math.round(window.remaining)));
+        const fill = document.createElement("span");
+        fill.className = "quota-fill";
+        fill.style.width = `${Math.max(0, Math.min(100, window.remaining))}%`;
+        track.appendChild(fill);
+        if (window.pace_status) {
+          const marker = document.createElement("i");
+          marker.className = "quota-pace-marker";
+          marker.style.left = `${Math.max(0, Math.min(100, window.pace_marker_percent))}%`;
+          marker.setAttribute("aria-hidden", "true");
+          track.appendChild(marker);
+        }
+        windowHost.append(head, track);
+        if (window.pace_status || (index > 0 && window.reset_at)) {
+          const meta = document.createElement("div");
+          meta.className = "quota-meta";
+          if (window.pace_status) {
+            const pace = document.createElement("span");
+            pace.className = `quota-pace${window.pace_status === "too_fast" ? " too-fast" : ""}`;
+            if (window.pace_status === "too_fast") {
+              pace.textContent = `Going fast · ${formatNumber(Math.abs(window.pace_buffer_percent))}% behind`;
+            } else {
+              pace.textContent = window.pace_buffer_percent > 0.49
+                ? `On pace · ${formatNumber(window.pace_buffer_percent)}% buffer`
+                : "On pace";
+            }
+            meta.appendChild(pace);
+          }
+          if (index > 0 && window.reset_at) {
+            const resetCopy = document.createElement("span");
+            resetCopy.append("Resets ", createLocalizedTime(window.reset_at, "datetime"));
+            meta.appendChild(resetCopy);
+          }
+          windowHost.appendChild(meta);
+        }
+        item.appendChild(windowHost);
+      });
       return item;
     });
+    if (quotaItems.length === 0) {
+      const empty = document.createElement("span");
+      empty.className = "muted";
+      empty.textContent = "Allowance unavailable.";
+      quotaItems.push(empty);
+    }
     quotaHost.replaceChildren(...quotaItems);
     const error = row.querySelector("[data-account-error]");
     error.textContent = account.last_error || "";

@@ -59,12 +59,21 @@ Assigning `VM_IP` is silent; the `printf` line confirms the detected address. Th
 
 ## macOS app
 
-Build and install a local app without administrator privileges:
+Build and install a local app, reusing its existing location:
 
 ```sh
 ./scripts/build-macos-app.sh
+./scripts/install-macos-app.sh --check
 ./scripts/install-macos-app.sh
 ```
+
+The installer reuses the location of the one existing app—`/Applications` or
+`~/Applications`—so a test build replaces that bundle in place instead of
+creating a second Local Network privacy identity. It stops if copies exist in
+both locations. Set `OPENCODEX_INSTALL_APP_PATH` only when intentionally
+choosing another absolute `OpenCDX Router.app` path. The `--check` form verifies
+the signature, bundle identifiers, helper identity, and signer compatibility
+without stopping, replacing, or launching the installed app.
 
 Go must be available for every app build so a stale bundled helper cannot be reused. If Go is not on `PATH`, set `OPENCODEX_GO_BINARY` or place its absolute path in the ignored `.opencdx-go-binary` file.
 

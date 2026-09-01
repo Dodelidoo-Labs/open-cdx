@@ -9,6 +9,54 @@ func isOpenCDXOAuthURL(_ url: URL) -> Bool {
     url.scheme == openCDXApplicationIdentifier && url.host == "oauth" && url.path == "/openai/start"
 }
 
+struct AccountQuotaWindowStatus: Codable {
+    var label = "Allowance"
+    var remaining = 0.0
+    var durationMinutes = 0
+    var resetAt: Date?
+    var paceStatus = ""
+    var paceMarkerPercent: Double?
+    var paceBufferPercent = 0.0
+
+    enum CodingKeys: String, CodingKey {
+        case label, remaining
+        case durationMinutes = "duration_minutes"
+        case resetAt = "reset_at"
+        case paceStatus = "pace_status"
+        case paceMarkerPercent = "pace_marker_percent"
+        case paceBufferPercent = "pace_buffer_percent"
+    }
+
+    init(
+        label: String = "Allowance",
+        remaining: Double = 0,
+        durationMinutes: Int = 0,
+        resetAt: Date? = nil,
+        paceStatus: String = "",
+        paceMarkerPercent: Double? = nil,
+        paceBufferPercent: Double = 0
+    ) {
+        self.label = label
+        self.remaining = remaining
+        self.durationMinutes = durationMinutes
+        self.resetAt = resetAt
+        self.paceStatus = paceStatus
+        self.paceMarkerPercent = paceMarkerPercent
+        self.paceBufferPercent = paceBufferPercent
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        label = try container.decodeIfPresent(String.self, forKey: .label) ?? "Allowance"
+        remaining = try container.decodeIfPresent(Double.self, forKey: .remaining) ?? 0
+        durationMinutes = try container.decodeIfPresent(Int.self, forKey: .durationMinutes) ?? 0
+        resetAt = try container.decodeIfPresent(Date.self, forKey: .resetAt)
+        paceStatus = try container.decodeIfPresent(String.self, forKey: .paceStatus) ?? ""
+        paceMarkerPercent = try container.decodeIfPresent(Double.self, forKey: .paceMarkerPercent)
+        paceBufferPercent = try container.decodeIfPresent(Double.self, forKey: .paceBufferPercent) ?? 0
+    }
+}
+
 struct AccountAllowanceStatus: Codable {
     var maskedEmail = ""
     var plan = ""
@@ -17,6 +65,7 @@ struct AccountAllowanceStatus: Codable {
     var primary = false
     var quotaRemaining = 0.0
     var quotaResetAt: Date?
+    var quotaWindows: [AccountQuotaWindowStatus] = []
     var resetCredits = 0
 
     enum CodingKeys: String, CodingKey {
@@ -24,6 +73,7 @@ struct AccountAllowanceStatus: Codable {
         case maskedEmail = "masked_email"
         case quotaRemaining = "quota_remaining"
         case quotaResetAt = "quota_reset_at"
+        case quotaWindows = "quota_windows"
         case resetCredits = "reset_credits"
     }
 
@@ -38,6 +88,7 @@ struct AccountAllowanceStatus: Codable {
         primary = try container.decodeIfPresent(Bool.self, forKey: .primary) ?? false
         quotaRemaining = try container.decodeIfPresent(Double.self, forKey: .quotaRemaining) ?? 0
         quotaResetAt = try container.decodeIfPresent(Date.self, forKey: .quotaResetAt)
+        quotaWindows = try container.decodeIfPresent([AccountQuotaWindowStatus].self, forKey: .quotaWindows) ?? []
         resetCredits = try container.decodeIfPresent(Int.self, forKey: .resetCredits) ?? 0
     }
 }
@@ -208,6 +259,14 @@ final class HelperModel: ObservableObject {
             .autoconnect()
             .sink { [weak self] _ in self?.activityTick() }
     }
+
+#if DEBUG
+    func applyPreviewStatus(_ previewStatus: HelperStatus) {
+        configured = true
+        status = previewStatus
+        operation = ""
+    }
+#endif
 
     func requestEnrollment() {
         let trimmed = routerURL.trimmingCharacters(in: .whitespacesAndNewlines)

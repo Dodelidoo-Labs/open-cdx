@@ -658,10 +658,29 @@ func (server *Server) adminDevicesLive(writer http.ResponseWriter, request *http
 	writeConditionalPayload(writer, request, "text/html; charset=utf-8", rendered.Bytes())
 }
 
+type quotaWindowState struct {
+	Label             string
+	Remaining         float64
+	DurationMinutes   int64
+	ResetAt           time.Time
+	PaceStatus        string
+	PaceMarkerPercent float64
+	PaceBufferPercent float64
+}
+
+type accountLiveQuotaWindow struct {
+	Label             string  `json:"label"`
+	Remaining         float64 `json:"remaining"`
+	DurationMinutes   int64   `json:"duration_minutes,omitempty"`
+	ResetAt           string  `json:"reset_at,omitempty"`
+	PaceStatus        string  `json:"pace_status,omitempty"`
+	PaceMarkerPercent float64 `json:"pace_marker_percent"`
+	PaceBufferPercent float64 `json:"pace_buffer_percent,omitempty"`
+}
+
 type accountLiveQuota struct {
-	Name      string  `json:"name"`
-	Remaining float64 `json:"remaining"`
-	ResetAt   string  `json:"reset_at,omitempty"`
+	Name    string                   `json:"name"`
+	Windows []accountLiveQuotaWindow `json:"windows"`
 }
 
 type accountLiveView struct {
@@ -685,6 +704,65 @@ type accountsLiveResponse struct {
 	NearestResetAt      string            `json:"nearest_reset_at,omitempty"`
 }
 
+func accountQuotaWindowStates(raw json.RawMessage, fallbackUsed float64, fallbackReset time.Time, now time.Time) []quotaWindowState {
+	windows, err := openai.ParseQuotaWindows(raw, now)
+	if err == nil && len(raw) > 0 {
+		result := make([]quotaWindowState, 0, len(windows))
+		for _, window := range windows {
+			state := quotaWindowState{
+				Label: window.Label(), Remaining: window.RemainingPercent(),
+				DurationMinutes: int64(window.Duration / time.Minute), ResetAt: window.ResetAt,
+			}
+			if pace := window.Pace(now); pace.Available {
+				state.PaceStatus = pace.Status
+				state.PaceMarkerPercent = pace.RequiredRemainingPercent
+				state.PaceBufferPercent = pace.BufferPercent
+			}
+			result = append(result, state)
+		}
+		return result
+	}
+	if fallbackReset.IsZero() && fallbackUsed == 0 {
+		return nil
+	}
+	return []quotaWindowState{{
+		Label: "Allowance", Remaining: minFloat(100, maxFloat(0, 100-fallbackUsed)), ResetAt: fallbackReset,
+	}}
+}
+
+func liveQuotaWindows(windows []quotaWindowState) []accountLiveQuotaWindow {
+	result := make([]accountLiveQuotaWindow, 0, len(windows))
+	for _, window := range windows {
+		result = append(result, accountLiveQuotaWindow{
+			Label: window.Label, Remaining: window.Remaining, DurationMinutes: window.DurationMinutes,
+			ResetAt: browserTimestamp(window.ResetAt), PaceStatus: window.PaceStatus,
+			PaceMarkerPercent: window.PaceMarkerPercent, PaceBufferPercent: window.PaceBufferPercent,
+		})
+	}
+	return result
+}
+
+func templateQuotaWindows(windows []quotaWindowState) []quotaWindowView {
+	result := make([]quotaWindowView, 0, len(windows))
+	for _, window := range windows {
+		view := quotaWindowView{
+			Label: window.Label, Remaining: window.Remaining, PaceStatus: window.PaceStatus,
+			PaceMarkerPercent: window.PaceMarkerPercent, PaceBufferPercent: window.PaceBufferPercent,
+		}
+		if window.PaceBufferPercent < 0 {
+			view.PaceDifferencePercent = -window.PaceBufferPercent
+		} else {
+			view.PaceDifferencePercent = window.PaceBufferPercent
+		}
+		if !window.ResetAt.IsZero() {
+			view.Reset = window.ResetAt.Local().Format("Jan 2 · 15:04")
+			view.ResetAt = browserTimestamp(window.ResetAt)
+		}
+		result = append(result, view)
+	}
+	return result
+}
+
 func (server *Server) adminAccountsLive(writer http.ResponseWriter, request *http.Request) {
 	states, err := server.store.AccountDisplayStates(request.Context())
 	if err != nil {
@@ -692,6 +770,7 @@ func (server *Server) adminAccountsLive(writer http.ResponseWriter, request *htt
 		return
 	}
 	response := accountsLiveResponse{Accounts: make([]accountLiveView, 0, len(states)), Healthy: len(states) > 0}
+	now := time.Now().UTC()
 	var nearestReset time.Time
 	considerReset := func(candidate time.Time) {
 		if candidate.IsZero() || (!nearestReset.IsZero() && !candidate.Before(nearestReset)) {
@@ -703,18 +782,24 @@ func (server *Server) adminAccountsLive(writer http.ResponseWriter, request *htt
 		view := accountLiveView{
 			ID: state.ID, MaskedEmail: state.MaskedEmail, Plan: state.Plan, Status: state.Status,
 			LastError: state.LastError, Paused: state.Paused, Primary: state.Primary, ResetCredits: state.ResetCredits,
-			Quotas: []accountLiveQuota{{Name: "Codex", Remaining: maxFloat(0, 100-state.QuotaUsedPercent), ResetAt: browserTimestamp(state.QuotaResetAt)}},
+			Quotas: make([]accountLiveQuota, 0),
 		}
-		considerReset(state.QuotaResetAt)
+		codexWindows := accountQuotaWindowStates(state.RawQuota, state.QuotaUsedPercent, state.QuotaResetAt, now)
+		if len(codexWindows) > 0 {
+			view.Quotas = append(view.Quotas, accountLiveQuota{Name: "Codex", Windows: liveQuotaWindows(codexWindows)})
+			for _, window := range codexWindows {
+				considerReset(window.ResetAt)
+			}
+		}
 		if additional, parseErr := openai.ParseAdditionalQuotas(state.RawQuota); parseErr == nil {
 			for _, quota := range additional {
 				identity := strings.ToLower(quota.Name + " " + quota.MeteredFeature)
 				if !strings.Contains(identity, "spark") {
 					continue
 				}
-				view.Quotas = append(view.Quotas, accountLiveQuota{
-					Name: "Codex Spark", Remaining: maxFloat(0, 100-quota.UsedPercent), ResetAt: browserTimestamp(quota.ResetAt),
-				})
+				view.Quotas = append(view.Quotas, accountLiveQuota{Name: "Codex Spark", Windows: liveQuotaWindows([]quotaWindowState{{
+					Label: "Allowance", Remaining: minFloat(100, maxFloat(0, 100-quota.UsedPercent)), ResetAt: quota.ResetAt,
+				}})})
 				considerReset(quota.ResetAt)
 			}
 		}
@@ -898,14 +983,20 @@ type accountView struct {
 	ID, MaskedEmail, Plan, Status, LastError string
 	Paused, Primary                          bool
 	ResetCredits                             int
+	CodexReset, CodexResetAt                 string
 	VisibleModels, MoreModels                []string
 	Quotas                                   []quotaView
 }
 
 type quotaView struct {
-	Name, Reset, ResetAt string
-	Remaining            float64
-	Spark                bool
+	Name    string
+	Windows []quotaWindowView
+	Spark   bool
+}
+type quotaWindowView struct {
+	Label, Reset, ResetAt                                                  string
+	Remaining, PaceMarkerPercent, PaceBufferPercent, PaceDifferencePercent float64
+	PaceStatus                                                             string
 }
 type deviceView struct {
 	ID, Name, Status, LastSeen, LastSeenAt, CatalogSynced, CatalogSyncedAt string
@@ -932,6 +1023,7 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 	if err != nil {
 		return page, err
 	}
+	now := time.Now().UTC()
 	var nearestReset time.Time
 	considerReset := func(candidate time.Time) {
 		if candidate.IsZero() || (!nearestReset.IsZero() && !candidate.Before(nearestReset)) {
@@ -940,30 +1032,31 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 		nearestReset = candidate
 	}
 	for _, account := range accounts {
-		remaining := maxFloat(0, 100-account.QuotaUsedPercent)
 		view := accountView{
 			ID: account.ID, MaskedEmail: account.MaskedEmail, Plan: account.Plan, Status: account.Status,
 			Paused: account.Paused, Primary: account.Primary, ResetCredits: account.ResetCredits, LastError: account.LastError,
 		}
-		primaryQuota := quotaView{Name: "Codex", Remaining: remaining}
-		if !account.QuotaResetAt.IsZero() {
-			primaryQuota.Reset = account.QuotaResetAt.Local().Format("Jan 2 · 15:04")
-			primaryQuota.ResetAt = browserTimestamp(account.QuotaResetAt)
-			considerReset(account.QuotaResetAt)
+		codexWindows := accountQuotaWindowStates(account.RawQuota, account.QuotaUsedPercent, account.QuotaResetAt, now)
+		if len(codexWindows) > 0 {
+			view.Quotas = append(view.Quotas, quotaView{Name: "Codex", Windows: templateQuotaWindows(codexWindows)})
+			if !codexWindows[0].ResetAt.IsZero() {
+				view.CodexReset = codexWindows[0].ResetAt.Local().Format("Jan 2 · 15:04")
+				view.CodexResetAt = browserTimestamp(codexWindows[0].ResetAt)
+			}
+			for _, window := range codexWindows {
+				considerReset(window.ResetAt)
+			}
 		}
-		view.Quotas = append(view.Quotas, primaryQuota)
 		if additional, parseErr := openai.ParseAdditionalQuotas(account.RawQuota); parseErr == nil {
 			for _, quota := range additional {
 				identity := strings.ToLower(quota.Name + " " + quota.MeteredFeature)
 				if !strings.Contains(identity, "spark") {
 					continue
 				}
-				spark := quotaView{Name: "Codex Spark", Remaining: maxFloat(0, 100-quota.UsedPercent), Spark: true}
-				if !quota.ResetAt.IsZero() {
-					spark.Reset = quota.ResetAt.Local().Format("Jan 2 · 15:04")
-					spark.ResetAt = browserTimestamp(quota.ResetAt)
-					considerReset(quota.ResetAt)
-				}
+				spark := quotaView{Name: "Codex Spark", Spark: true, Windows: templateQuotaWindows([]quotaWindowState{{
+					Label: "Allowance", Remaining: minFloat(100, maxFloat(0, 100-quota.UsedPercent)), ResetAt: quota.ResetAt,
+				}})}
+				considerReset(quota.ResetAt)
 				view.Quotas = append(view.Quotas, spark)
 			}
 		}
@@ -1137,9 +1230,16 @@ func (server *Server) safeAccounts(ctx context.Context) ([]map[string]any, error
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now().UTC()
 	result := make([]map[string]any, 0, len(accounts))
 	for _, account := range accounts {
-		result = append(result, map[string]any{"masked_email": account.MaskedEmail, "plan": account.Plan, "status": account.Status, "paused": account.Paused, "primary": account.Primary, "quota_remaining": maxFloat(0, 100-account.QuotaUsedPercent), "quota_reset_at": account.QuotaResetAt, "reset_credits": account.ResetCredits, "models": len(account.EntitledModels)})
+		windows := accountQuotaWindowStates(account.RawQuota, account.QuotaUsedPercent, account.QuotaResetAt, now)
+		result = append(result, map[string]any{
+			"masked_email": account.MaskedEmail, "plan": account.Plan, "status": account.Status,
+			"paused": account.Paused, "primary": account.Primary,
+			"quota_remaining": maxFloat(0, 100-account.QuotaUsedPercent), "quota_reset_at": account.QuotaResetAt,
+			"quota_windows": liveQuotaWindows(windows), "reset_credits": account.ResetCredits, "models": len(account.EntitledModels),
+		})
 	}
 	return result, nil
 }
@@ -1286,6 +1386,13 @@ func browserTimestamp(value time.Time) string {
 
 func maxFloat(left, right float64) float64 {
 	if left > right {
+		return left
+	}
+	return right
+}
+
+func minFloat(left, right float64) float64 {
+	if left < right {
 		return left
 	}
 	return right

@@ -35,14 +35,25 @@ type LocalStatus struct {
 }
 
 type AccountAllowance struct {
-	MaskedEmail    string     `json:"masked_email"`
-	Plan           string     `json:"plan,omitempty"`
-	Status         string     `json:"status"`
-	Paused         bool       `json:"paused"`
-	Primary        bool       `json:"primary,omitempty"`
-	QuotaRemaining float64    `json:"quota_remaining"`
-	QuotaResetAt   *time.Time `json:"quota_reset_at,omitempty"`
-	ResetCredits   int        `json:"reset_credits,omitempty"`
+	MaskedEmail    string            `json:"masked_email"`
+	Plan           string            `json:"plan,omitempty"`
+	Status         string            `json:"status"`
+	Paused         bool              `json:"paused"`
+	Primary        bool              `json:"primary,omitempty"`
+	QuotaRemaining float64           `json:"quota_remaining"`
+	QuotaResetAt   *time.Time        `json:"quota_reset_at,omitempty"`
+	QuotaWindows   []AllowanceWindow `json:"quota_windows,omitempty"`
+	ResetCredits   int               `json:"reset_credits,omitempty"`
+}
+
+type AllowanceWindow struct {
+	Label             string     `json:"label"`
+	Remaining         float64    `json:"remaining"`
+	DurationMinutes   int64      `json:"duration_minutes,omitempty"`
+	ResetAt           *time.Time `json:"reset_at,omitempty"`
+	PaceStatus        string     `json:"pace_status,omitempty"`
+	PaceMarkerPercent float64    `json:"pace_marker_percent"`
+	PaceBufferPercent float64    `json:"pace_buffer_percent,omitempty"`
 }
 
 type Daemon struct {
@@ -316,7 +327,16 @@ func (daemon *Daemon) refreshStatus(ctx context.Context) error {
 			Primary        bool      `json:"primary"`
 			QuotaRemaining float64   `json:"quota_remaining"`
 			QuotaResetAt   time.Time `json:"quota_reset_at"`
-			ResetCredits   int       `json:"reset_credits"`
+			QuotaWindows   []struct {
+				Label             string    `json:"label"`
+				Remaining         float64   `json:"remaining"`
+				DurationMinutes   int64     `json:"duration_minutes"`
+				ResetAt           time.Time `json:"reset_at"`
+				PaceStatus        string    `json:"pace_status"`
+				PaceMarkerPercent float64   `json:"pace_marker_percent"`
+				PaceBufferPercent float64   `json:"pace_buffer_percent"`
+			} `json:"quota_windows"`
+			ResetCredits int `json:"reset_credits"`
 		} `json:"accounts"`
 		Route struct {
 			Connected       bool      `json:"connected"`
@@ -351,11 +371,20 @@ func (daemon *Daemon) refreshStatus(ctx context.Context) error {
 		status.QuotaResetAt = nonZeroTimePointer(remoteStatus.Route.QuotaResetAt)
 		status.Accounts = make([]AccountAllowance, 0, len(remoteStatus.Accounts))
 		for _, account := range remoteStatus.Accounts {
-			status.Accounts = append(status.Accounts, AccountAllowance{
+			allowance := AccountAllowance{
 				MaskedEmail: account.MaskedEmail, Plan: account.Plan, Status: account.Status,
 				Paused: account.Paused, Primary: account.Primary, QuotaRemaining: account.QuotaRemaining,
 				QuotaResetAt: nonZeroTimePointer(account.QuotaResetAt), ResetCredits: account.ResetCredits,
-			})
+			}
+			allowance.QuotaWindows = make([]AllowanceWindow, 0, len(account.QuotaWindows))
+			for _, window := range account.QuotaWindows {
+				allowance.QuotaWindows = append(allowance.QuotaWindows, AllowanceWindow{
+					Label: window.Label, Remaining: window.Remaining, DurationMinutes: window.DurationMinutes,
+					ResetAt: nonZeroTimePointer(window.ResetAt), PaceStatus: window.PaceStatus,
+					PaceMarkerPercent: window.PaceMarkerPercent, PaceBufferPercent: window.PaceBufferPercent,
+				})
+			}
+			status.Accounts = append(status.Accounts, allowance)
 		}
 		status.RestartRequired = status.RestartRequired || remoteStatus.Route.RestartRequired
 		status.LastRequestAt, status.LastError = nonZeroTimePointer(remoteStatus.Route.LastRequestAt), remoteStatus.Route.LastError

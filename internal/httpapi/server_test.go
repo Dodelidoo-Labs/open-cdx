@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
@@ -350,13 +351,14 @@ func TestAdminDevicesLiveConditionalResponsesTrackLifecycle(t *testing.T) {
 
 func TestAdminAccountsLiveIsConditionalLightweightAndPrivacyMinimal(t *testing.T) {
 	server, store := liveTestServer(t)
-	rawQuota := json.RawMessage(`{"secret_quota_marker":"RAW_QUOTA_SECRET","additional_rate_limits":[{"limit_name":"Codex Spark","rate_limit":{"allowed":true,"primary_window":{"used_percent":25,"reset_at":1788220800}}}]}`)
+	resetAt := time.Now().UTC().Add(5 * 24 * time.Hour).Truncate(time.Second)
+	rawQuota := json.RawMessage(fmt.Sprintf(`{"secret_quota_marker":"RAW_QUOTA_SECRET","rate_limit":{"allowed":true,"primary_window":{"used_percent":20,"limit_window_seconds":604800,"reset_at":%d}},"additional_rate_limits":[{"limit_name":"Codex Spark","rate_limit":{"allowed":true,"primary_window":{"used_percent":25,"reset_at":1788220800}}}]}`, resetAt.Unix()))
 	account, _, err := store.PutAccount(context.Background(), storage.AccountInput{
 		Credential: storage.OpenAICredential{
 			AccountID: "RAW_ACCOUNT_ID", AccessToken: "RAW_ACCESS_TOKEN", RefreshToken: "RAW_REFRESH_TOKEN", IDToken: "RAW_ID_TOKEN", ExpiresAt: time.Now().Add(time.Hour),
 		},
 		MaskedEmail: "a***@example.com", Plan: "plus", Status: "ready", QuotaUsedPercent: 20,
-		QuotaResetAt: time.Date(2026, time.September, 2, 0, 0, 0, 0, time.UTC), ResetCredits: 2,
+		QuotaResetAt: resetAt, ResetCredits: 2,
 		RawQuota: rawQuota, RawCatalogSnapshot: json.RawMessage(`{"raw_catalog_marker":"RAW_CATALOG_SECRET"}`), EntitledModels: []string{"SECRET_MODEL"},
 	}, false)
 	if err != nil {
@@ -374,7 +376,7 @@ func TestAdminAccountsLiveIsConditionalLightweightAndPrivacyMinimal(t *testing.T
 	}
 	initial := request("")
 	initialETag := initial.Header().Get("ETag")
-	if initial.Code != http.StatusOK || !isQuotedETag(initialETag) || !strings.Contains(initial.Header().Get("Content-Type"), "application/json") || !strings.Contains(initial.Body.String(), `"remaining":80`) || !strings.Contains(initial.Body.String(), "Codex Spark") {
+	if initial.Code != http.StatusOK || !isQuotedETag(initialETag) || !strings.Contains(initial.Header().Get("Content-Type"), "application/json") || !strings.Contains(initial.Body.String(), `"remaining":80`) || !strings.Contains(initial.Body.String(), `"label":"Weekly"`) || !strings.Contains(initial.Body.String(), `"pace_status":"on_pace"`) || !strings.Contains(initial.Body.String(), "Codex Spark") {
 		t.Fatalf("initial account response = %d, etag=%q, body=%q", initial.Code, initialETag, initial.Body.String())
 	}
 	for _, secret := range []string{"RAW_ACCOUNT_ID", "RAW_ACCESS_TOKEN", "RAW_REFRESH_TOKEN", "RAW_ID_TOKEN", "RAW_QUOTA_SECRET", "RAW_CATALOG_SECRET", "SECRET_MODEL", "credential", "access_token", "refresh_token", "id_token", "raw_quota", "raw_catalog"} {
@@ -386,7 +388,9 @@ func TestAdminAccountsLiveIsConditionalLightweightAndPrivacyMinimal(t *testing.T
 	if unchanged.Code != http.StatusNotModified || unchanged.Body.Len() != 0 {
 		t.Fatalf("unchanged account response = %d, body=%q", unchanged.Code, unchanged.Body.String())
 	}
-	if err = store.UpdateAccountQuota(context.Background(), account.ID, "pro", 80, time.Date(2026, time.September, 3, 0, 0, 0, 0, time.UTC), 1, json.RawMessage(`{"quota_mutation_secret":"HIDDEN"}`)); err != nil {
+	updatedReset := resetAt.Add(24 * time.Hour)
+	updatedRaw := json.RawMessage(fmt.Sprintf(`{"quota_mutation_secret":"HIDDEN","rate_limit":{"allowed":true,"primary_window":{"used_percent":80,"limit_window_seconds":604800,"reset_at":%d}}}`, updatedReset.Unix()))
+	if err = store.UpdateAccountQuota(context.Background(), account.ID, "pro", 80, updatedReset, 1, updatedRaw); err != nil {
 		t.Fatal(err)
 	}
 	quotaChanged := request(initialETag)
@@ -400,6 +404,54 @@ func TestAdminAccountsLiveIsConditionalLightweightAndPrivacyMinimal(t *testing.T
 	statusChanged := request(quotaETag)
 	if statusChanged.Code != http.StatusOK || statusChanged.Header().Get("ETag") == quotaETag || !strings.Contains(statusChanged.Body.String(), "quota refresh failed") || !strings.Contains(statusChanged.Body.String(), `"healthy":false`) {
 		t.Fatalf("status update response = %d, etag=%q, body=%q", statusChanged.Code, statusChanged.Header().Get("ETag"), statusChanged.Body.String())
+	}
+}
+
+func TestSafeAccountsExposeOnlyReportedQuotaWindows(t *testing.T) {
+	server, store := liveTestServer(t)
+	resetAt := time.Now().UTC().Add(6 * 24 * time.Hour)
+	rawQuota := json.RawMessage(fmt.Sprintf(`{
+		"private_marker":"HIDDEN_RAW_QUOTA",
+		"rate_limit":{"allowed":true,"primary_window":null,"secondary_window":{"used_percent":7,"limit_window_seconds":604800,"reset_at":%d}}
+	}`, resetAt.Unix()))
+	if _, _, err := store.PutAccount(context.Background(), storage.AccountInput{
+		Credential: storage.OpenAICredential{
+			AccountID: "account-a", AccessToken: "access", RefreshToken: "refresh", IDToken: "id", ExpiresAt: time.Now().Add(time.Hour),
+		},
+		MaskedEmail: "a***@example.com", Plan: "pro", Status: "ready", QuotaUsedPercent: 7,
+		QuotaResetAt: resetAt, RawQuota: rawQuota,
+	}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	accounts, err := server.safeAccounts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(encoded)
+	if !strings.Contains(body, `"quota_windows":[{"label":"Weekly","remaining":93`) {
+		t.Fatalf("reported weekly window was not exposed: %s", body)
+	}
+	for _, unwanted := range []string{"5 hours", "HIDDEN_RAW_QUOTA", "private_marker", "access", "refresh"} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("safe account payload exposed or invented %q: %s", unwanted, body)
+		}
+	}
+}
+
+func TestLiveQuotaWindowsRetainZeroPercentPaceMarker(t *testing.T) {
+	encoded, err := json.Marshal(liveQuotaWindows([]quotaWindowState{{
+		Label: "5 hours", Remaining: 4, PaceStatus: "too_fast", PaceMarkerPercent: 0,
+	}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"pace_marker_percent":0`) {
+		t.Fatalf("zero-percent pace marker was omitted: %s", encoded)
 	}
 }
 
@@ -417,8 +469,12 @@ func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
 		Accounts: []accountView{
 			{
 				ID: "account", MaskedEmail: "a***@example.com", Plan: "pro", Status: "ready", Primary: true,
+				CodexReset: "Aug 30 · 02:31", CodexResetAt: "2026-08-30T02:31:00Z",
 				VisibleModels: []string{"gpt-test"}, MoreModels: []string{"gpt-test-2"},
-				Quotas: []quotaView{{Name: "Codex", Reset: "Aug 30 · 02:31", ResetAt: "2026-08-30T02:31:00Z", Remaining: 80}, {Name: "Codex Spark", Remaining: 60, Spark: true}},
+				Quotas: []quotaView{
+					{Name: "Codex", Windows: []quotaWindowView{{Label: "Weekly", Reset: "Aug 30 · 02:31", ResetAt: "2026-08-30T02:31:00Z", Remaining: 80, PaceStatus: "on_pace", PaceMarkerPercent: 60, PaceBufferPercent: 20, PaceDifferencePercent: 20}}},
+					{Name: "Codex Spark", Windows: []quotaWindowView{{Label: "Allowance", Remaining: 60}}, Spark: true},
+				},
 			},
 			{ID: "fallback", MaskedEmail: "b***@example.com", Plan: "plus", Status: "ready"},
 		},
@@ -451,7 +507,7 @@ func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
 		`/assets/opencdx-router-logo.png?v=1.0.0-test`, `/assets/favicon-32x32.png?v=1.0.0-test`,
 		`/admin/devices/device/revoke`, `/admin/devices/retired/delete`,
 		`datetime="2026-08-30T02:31:00Z"`, `data-local-datetime`, `data-local-date`, `data-local-clock`,
-		"[hidden]{display:none!important}", "Codex Spark", "gpt-test-2", `data-sort="provider"`, `data-sort="model"`, `data-sort="state"`,
+		"[hidden]{display:none!important}", "Codex Spark", "On pace", "quota-pace-marker", "gpt-test-2", `data-sort="provider"`, `data-sort="model"`, `data-sort="state"`,
 	} {
 		if !strings.Contains(output.String(), marker) {
 			t.Fatalf("dashboard is missing %q", marker)

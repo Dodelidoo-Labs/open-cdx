@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -68,6 +69,102 @@ func TestCurrentSpendControlAndReachedTypeExhaustQuota(t *testing.T) {
 	}
 	if !quota.LimitReached || quota.UsedPercent != 100 || quota.ResetCredits != 2 || quota.ResetAt.Unix() != 2_000_000_100 {
 		t.Fatalf("current quota fields were not applied: %#v", quota)
+	}
+}
+
+func TestQuotaWindowsAreSparseAndOrderedByReportedDuration(t *testing.T) {
+	now := time.Date(2026, time.August, 31, 18, 0, 0, 0, time.UTC)
+	weeklyReset := now.Add(6*24*time.Hour + 5*time.Hour)
+	fiveHourReset := now.Add(2*time.Hour + 13*time.Minute)
+	raw := []byte(fmt.Sprintf(`{
+		"rate_limit":{
+			"primary_window":{"used_percent":36,"limit_window_seconds":18000,"reset_at":%d},
+			"secondary_window":{"used_percent":3,"limit_window_seconds":604800,"reset_at":%d}
+		}
+	}`, fiveHourReset.Unix(), weeklyReset.Unix()))
+
+	windows, err := ParseQuotaWindows(raw, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(windows) != 2 {
+		t.Fatalf("windows=%d, expected two reported windows: %#v", len(windows), windows)
+	}
+	if windows[0].Role != "secondary" || windows[0].Label() != "Weekly" || windows[0].RemainingPercent() != 97 {
+		t.Fatalf("weekly window was not promoted to the main position: %#v", windows[0])
+	}
+	if windows[1].Role != "primary" || windows[1].Label() != "5 hours" || windows[1].RemainingPercent() != 64 {
+		t.Fatalf("five-hour window was not preserved: %#v", windows[1])
+	}
+}
+
+func TestQuotaWindowsDoNotInventMissingPlanWindows(t *testing.T) {
+	now := time.Date(2026, time.August, 31, 18, 0, 0, 0, time.UTC)
+	weeklyReset := now.Add(6 * 24 * time.Hour)
+	raw := []byte(fmt.Sprintf(`{
+		"plan_type":"pro",
+		"rate_limit":{"primary_window":null,"secondary_window":{"used_percent":20,"limit_window_seconds":604800,"reset_at":%d}}
+	}`, weeklyReset.Unix()))
+
+	windows, err := ParseQuotaWindows(raw, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(windows) != 1 || windows[0].Label() != "Weekly" || windows[0].RemainingPercent() != 80 {
+		t.Fatalf("missing five-hour window was fabricated or weekly window was lost: %#v", windows)
+	}
+
+	windows, err = ParseQuotaWindows([]byte(`{"plan_type":"plus","rate_limit":null}`), now)
+	if err != nil || len(windows) != 0 {
+		t.Fatalf("absent windows were fabricated: %#v, %v", windows, err)
+	}
+}
+
+func TestQuotaWindowRetainsPartialDataButWithholdsPace(t *testing.T) {
+	now := time.Date(2026, time.August, 31, 18, 0, 0, 0, time.UTC)
+	windows, err := ParseQuotaWindows([]byte(`{
+		"rate_limit":{"primary_window":{"used_percent":12,"reset_after_seconds":900}}
+	}`), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(windows) != 1 || windows[0].Label() != "Allowance" || !windows[0].ResetAt.Equal(now.Add(15*time.Minute)) {
+		t.Fatalf("partial window was not retained: %#v", windows)
+	}
+	if pace := windows[0].Pace(now); pace.Available {
+		t.Fatalf("pace was invented without a reported duration: %#v", pace)
+	}
+
+	windows, err = ParseQuotaWindows([]byte(`{
+		"rate_limit":{"primary_window":{"used_percent":12,"limit_window_seconds":18000,"reset_at":0,"reset_after_seconds":900}}
+	}`), now)
+	if err != nil || len(windows) != 1 || !windows[0].ResetAt.Equal(now.Add(15*time.Minute)) {
+		t.Fatalf("reset-after fallback was not used for an empty reset timestamp: %#v, %v", windows, err)
+	}
+
+	windows, err = ParseQuotaWindows([]byte(`{
+		"rate_limit":{"primary_window":{"limit_window_seconds":18000,"reset_after_seconds":900}}
+	}`), now)
+	if err != nil || len(windows) != 0 {
+		t.Fatalf("window without usage was presented as zero usage: %#v, %v", windows, err)
+	}
+}
+
+func TestQuotaPaceUsesAllowanceAndTimeRemaining(t *testing.T) {
+	now := time.Date(2026, time.August, 31, 18, 0, 0, 0, time.UTC)
+	onPace := QuotaWindow{UsedPercent: 36, Duration: 5 * time.Hour, ResetAt: now.Add(2*time.Hour + 13*time.Minute)}.Pace(now)
+	if !onPace.Available || onPace.Status != "on_pace" || onPace.RequiredRemainingPercent != 44.3 || onPace.BufferPercent != 19.7 {
+		t.Fatalf("unexpected on-pace calculation: %#v", onPace)
+	}
+
+	tooFast := QuotaWindow{UsedPercent: 30, Duration: 5 * time.Hour, ResetAt: now.Add(4 * time.Hour)}.Pace(now)
+	if !tooFast.Available || tooFast.Status != "too_fast" || tooFast.RequiredRemainingPercent != 80 || tooFast.BufferPercent != -10 {
+		t.Fatalf("unexpected too-fast calculation: %#v", tooFast)
+	}
+
+	rounded := QuotaWindow{UsedPercent: 21, Duration: 5 * time.Hour, ResetAt: now.Add(4 * time.Hour)}.Pace(now)
+	if rounded.Status != "on_pace" || rounded.BufferPercent != -1 {
+		t.Fatalf("rounding tolerance was not applied: %#v", rounded)
 	}
 }
 

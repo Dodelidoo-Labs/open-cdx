@@ -89,6 +89,7 @@ jobs:
     env:
       VERSION: ${{ needs.validate.outputs.version }}
       BUILD_NUMBER: ${{ github.run_number }}
+      OPENCODEX_SWIFT_BUILD_ROOT: ${{ github.workspace }}/mac/RouterMenu/.build-release
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -201,7 +202,7 @@ jobs:
           chmod 600 "$SPARKLE_KEY_FILE"
           test -s "$SPARKLE_KEY_FILE"
 
-          SPARKLE_TOOLS_DIR="mac/RouterMenu/.build-arm64/artifacts/sparkle/Sparkle/bin"
+          SPARKLE_TOOLS_DIR="$OPENCODEX_SWIFT_BUILD_ROOT/arm64/artifacts/sparkle/Sparkle/bin"
           GENERATE_APPCAST="$SPARKLE_TOOLS_DIR/generate_appcast"
           SIGN_UPDATE="$SPARKLE_TOOLS_DIR/sign_update"
           test -x "$GENERATE_APPCAST"
