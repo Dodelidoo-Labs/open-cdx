@@ -57,6 +57,7 @@ type AdditionalQuota struct {
 	MeteredFeature string
 	UsedPercent    float64
 	ResetAt        time.Time
+	Windows        []QuotaWindow
 }
 
 // QuotaWindow is one independently enforced window returned by the Codex
@@ -136,14 +137,18 @@ func ParseQuotaWindows(raw []byte, now time.Time) ([]QuotaWindow, error) {
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return nil, errors.New("quota response was invalid")
 	}
-	if payload.RateLimit == nil {
-		return nil, nil
+	return quotaWindows(payload.RateLimit, now), nil
+}
+
+func quotaWindows(limit *quotaRateLimit, now time.Time) []QuotaWindow {
+	if limit == nil {
+		return nil
 	}
 	windows := make([]QuotaWindow, 0, 2)
 	for _, candidate := range []struct {
 		role   string
 		window *quotaWindow
-	}{{role: "primary", window: payload.RateLimit.Primary}, {role: "secondary", window: payload.RateLimit.Secondary}} {
+	}{{role: "primary", window: limit.Primary}, {role: "secondary", window: limit.Secondary}} {
 		if candidate.window == nil || candidate.window.UsedPercent == nil {
 			continue
 		}
@@ -161,7 +166,7 @@ func ParseQuotaWindows(raw []byte, now time.Time) ([]QuotaWindow, error) {
 		}
 		return windows[left].Duration > windows[right].Duration
 	})
-	return windows, nil
+	return windows
 }
 
 func (window QuotaWindow) RemainingPercent() float64 {
@@ -239,6 +244,7 @@ func ParseAdditionalQuotas(raw []byte) ([]AdditionalQuota, error) {
 		}
 		quotas = append(quotas, AdditionalQuota{
 			Name: name, MeteredFeature: feature, UsedPercent: clampPercent(used), ResetAt: resetAt,
+			Windows: quotaWindows(additional.RateLimit, now),
 		})
 	}
 	sort.SliceStable(quotas, func(left, right int) bool {

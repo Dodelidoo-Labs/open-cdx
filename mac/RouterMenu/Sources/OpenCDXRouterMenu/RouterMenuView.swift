@@ -404,6 +404,7 @@ private struct AllowanceWindowRow: View {
     private var displayLabel: String {
         switch window.label.lowercased() {
         case "5 hours", "5 hour", "5-hour": return "5-HOUR"
+        case "spark · 5 hours": return "SPARK · 5-HOUR"
         default: return window.label.uppercased()
         }
     }
@@ -439,6 +440,7 @@ private struct AllowanceProgressBar: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityName)
         .accessibilityValue(accessibilityValue)
+        .help(paceDescription)
     }
 
     private var accessibilityValue: String {
@@ -446,6 +448,13 @@ private struct AllowanceProgressBar: View {
         if window.paceStatus == "on_pace" { value += ", on pace" }
         if window.paceStatus == "too_fast" { value += ", going fast" }
         return value
+    }
+
+    private var paceDescription: String {
+        guard !window.paceStatus.isEmpty, let marker = window.paceMarkerPercent else {
+            return "Pace unavailable without a current reset time and window duration."
+        }
+        return String(format: "Ideal remaining: %.1f%% · Usage buffer: %+.1f percentage points", marker, window.paceBufferPercent)
     }
 
     private func markerOffset(_ marker: Double, width: CGFloat) -> CGFloat {
@@ -556,6 +565,11 @@ private struct RouterMenuViewPreviews: PreviewProvider {
                         label: "Weekly", remaining: 97, durationMinutes: 10_080,
                         resetAt: now.addingTimeInterval(6 * 24 * 60 * 60 + 5 * 60 * 60),
                         paceStatus: "on_pace", paceMarkerPercent: 88.7, paceBufferPercent: 8.3
+                    ),
+                    AccountQuotaWindowStatus(
+                        label: "Spark · 5 hours", remaining: 75, durationMinutes: 300,
+                        resetAt: now.addingTimeInterval(3 * 60 * 60),
+                        paceStatus: "on_pace", paceMarkerPercent: 60, paceBufferPercent: 15
                     )
                 ]
             ),

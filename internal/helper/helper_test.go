@@ -147,7 +147,9 @@ func TestDaemonStatusIncludesSafeAccountAllowances(t *testing.T) {
 					"label":"Weekly","remaining":84,"duration_minutes":10080,
 					"reset_at":"2030-01-02T03:04:05Z","pace_status":"on_pace",
 					"pace_marker_percent":70,"pace_buffer_percent":14
-				}]
+				},{"label":"Spark · 5 hours","remaining":75,"duration_minutes":300,
+                    "reset_at":"2030-01-02T03:04:05Z","pace_status":"on_pace",
+                    "pace_marker_percent":60,"pace_buffer_percent":15}]
 			}]
 		}`))
 	}))
@@ -169,8 +171,12 @@ func TestDaemonStatusIncludesSafeAccountAllowances(t *testing.T) {
 	if account.QuotaResetAt == nil || !account.QuotaResetAt.Equal(resetAt) {
 		t.Fatalf("quota reset=%v, expected %v", account.QuotaResetAt, resetAt)
 	}
-	if len(account.QuotaWindows) != 1 || account.QuotaWindows[0].Label != "Weekly" || account.QuotaWindows[0].PaceStatus != "on_pace" || account.QuotaWindows[0].PaceMarkerPercent != 70 {
+	if len(account.QuotaWindows) != 2 || account.QuotaWindows[0].Label != "Weekly" || account.QuotaWindows[0].PaceStatus != "on_pace" || account.QuotaWindows[0].PaceMarkerPercent != 70 {
 		t.Fatalf("unexpected quota windows: %#v", account.QuotaWindows)
+	}
+	spark := account.QuotaWindows[1]
+	if spark.Label != "Spark · 5 hours" || spark.Remaining != 75 || spark.DurationMinutes != 300 || spark.ResetAt == nil || spark.PaceMarkerPercent != 60 || spark.PaceBufferPercent != 15 {
+		t.Fatalf("Spark allowance lost in helper: %#v", spark)
 	}
 }
 

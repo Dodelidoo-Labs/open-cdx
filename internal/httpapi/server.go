@@ -1242,6 +1242,25 @@ func (server *Server) safeAccounts(ctx context.Context) ([]map[string]any, error
 	result := make([]map[string]any, 0, len(accounts))
 	for _, account := range accounts {
 		windows := accountQuotaWindowStates(account.RawQuota, account.QuotaUsedPercent, account.QuotaResetAt, now)
+		if additional, parseErr := openai.ParseAdditionalQuotas(account.RawQuota); parseErr == nil {
+			for _, quota := range additional {
+				if !strings.Contains(strings.ToLower(quota.Name+" "+quota.MeteredFeature), "spark") {
+					continue
+				}
+				for _, window := range quota.Windows {
+					state := quotaWindowState{
+						Label: "Spark · " + window.Label(), Remaining: window.RemainingPercent(),
+						DurationMinutes: int64(window.Duration / time.Minute), ResetAt: window.ResetAt,
+					}
+					if pace := window.Pace(now); pace.Available {
+						state.PaceStatus = pace.Status
+						state.PaceMarkerPercent = pace.RequiredRemainingPercent
+						state.PaceBufferPercent = pace.BufferPercent
+					}
+					windows = append(windows, state)
+				}
+			}
+		}
 		result = append(result, map[string]any{
 			"masked_email": account.MaskedEmail, "plan": account.Plan, "status": account.Status,
 			"paused": account.Paused, "primary": account.Primary,

@@ -92,6 +92,31 @@ final class HelperModelTests: XCTestCase {
         XCTAssertEqual(account.quotaWindows[0].paceBufferPercent, 8.3)
     }
 
+    func testSparkAllowanceDecodesAlongsideNormalWindows() throws {
+        let data = Data(#"""
+        {"quota_windows":[
+            {"label":"Weekly","remaining":97},
+            {"label":"Spark · 5 hours","remaining":75,"duration_minutes":300,
+             "reset_at":"2030-01-02T03:04:05Z","pace_status":"on_pace",
+             "pace_marker_percent":60,"pace_buffer_percent":15},
+            {"label":"Spark · Allowance","remaining":90}
+        ]}
+        """#.utf8)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let account = try decoder.decode(AccountAllowanceStatus.self, from: data)
+        XCTAssertEqual(account.quotaWindows.count, 3)
+        let spark = account.quotaWindows[1]
+        XCTAssertEqual(spark.label, "Spark · 5 hours")
+        XCTAssertEqual(spark.remaining, 75)
+        XCTAssertEqual(spark.durationMinutes, 300)
+        XCTAssertNotNil(spark.resetAt)
+        XCTAssertEqual(spark.paceMarkerPercent, 60)
+        XCTAssertEqual(spark.paceBufferPercent, 15)
+        XCTAssertTrue(account.quotaWindows[2].paceStatus.isEmpty)
+        XCTAssertNil(account.quotaWindows[2].paceMarkerPercent)
+    }
+
     func testAccountAllowanceAcceptsMissingQuotaWindows() throws {
         let data = Data(#"{"masked_email":"a***@example.com","plan":"pro","status":"ready"}"#.utf8)
         let account = try JSONDecoder().decode(AccountAllowanceStatus.self, from: data)
@@ -164,6 +189,16 @@ final class HelperModelTests: XCTestCase {
                 paceStatus: "too_fast",
                 paceMarkerPercent: 71.4,
                 paceBufferPercent: -10.4
+            ),
+            AccountQuotaWindowStatus(
+                label: "Spark · Weekly", remaining: 75, durationMinutes: 10_080,
+                resetAt: Date().addingTimeInterval(4 * 24 * 60 * 60),
+                paceStatus: "on_pace", paceMarkerPercent: 57.1, paceBufferPercent: 17.9
+            ),
+            AccountQuotaWindowStatus(
+                label: "Spark · 5 hours", remaining: 64, durationMinutes: 300,
+                resetAt: Date().addingTimeInterval(2 * 60 * 60),
+                paceStatus: "on_pace", paceMarkerPercent: 40, paceBufferPercent: 24
             ),
         ]
 

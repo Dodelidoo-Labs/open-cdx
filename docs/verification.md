@@ -46,6 +46,23 @@ builds must use a stable Apple-issued signing identity.
 
 The suite covers OAuth state/PKCE, duplicate detection, encrypted persistence, refresh single-flight, native entry preservation, entitlement selection, sticky affinity, quota failover, partial-stream no-retry, headers/auth replacement, capability-driven OpenRouter catalog mapping, account-collapsed token telemetry, Codex-local patch exposure, unsupported/no-op reasoning handling, Ollama hosted-search suppression, atomic catalogs, device lifecycle, error redaction, HTTP policy, and helper local tokens.
 
+## Spark allowance in the macOS menu
+
+The device-status API must include Spark windows before the menu can display
+them; updating only the macOS bundle against an older server is insufficient.
+Spark windows appear only when reported by the allowance service, regardless
+of account plan. Each reported window has its own remaining percentage and reset.
+The pace ticker uses the same calculation as normal allowance: required remaining
+is the percentage of time left in the window, and the buffer is actual remaining
+minus required remaining. Hover over a bar to see both values. Missing duration,
+missing reset time, or an expired reset suppresses the ticker.
+
+After Codex is inactive, use the build/install workflow in
+[Development](development.md#macos-app), and update the server through the normal
+deployment workflow. Verify an account with Spark shows its reported windows
+alongside normal allowances, while an account without Spark has no extra rows.
+Builds and fixture tests can run without installing or restarting the active app.
+
 ## Docker VM record
 
 The checked-in stack was tested in a Multipass VM named `opencdx-docker-test` with Ubuntu 24.04, Docker Engine 29.1.3, Compose 2.40.3, and Buildx 0.30.1. The test performed:

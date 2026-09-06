@@ -412,8 +412,12 @@ func TestSafeAccountsExposeOnlyReportedQuotaWindows(t *testing.T) {
 	resetAt := time.Now().UTC().Add(6 * 24 * time.Hour)
 	rawQuota := json.RawMessage(fmt.Sprintf(`{
 		"private_marker":"HIDDEN_RAW_QUOTA",
-		"rate_limit":{"allowed":true,"primary_window":null,"secondary_window":{"used_percent":7,"limit_window_seconds":604800,"reset_at":%d}}
-	}`, resetAt.Unix()))
+		"rate_limit":{"allowed":true,"primary_window":null,"secondary_window":{"used_percent":7,"limit_window_seconds":604800,"reset_at":%d}},
+        "additional_rate_limits":[
+            {"limit_name":"Codex Spark","rate_limit":{"primary_window":{"used_percent":25,"limit_window_seconds":604800,"reset_at":%d},"secondary_window":{"used_percent":10}}},
+            {"limit_name":"Other","rate_limit":{"primary_window":{"used_percent":1}}}
+        ]
+	}`, resetAt.Unix(), resetAt.Unix()))
 	if _, _, err := store.PutAccount(context.Background(), storage.AccountInput{
 		Credential: storage.OpenAICredential{
 			AccountID: "account-a", AccessToken: "access", RefreshToken: "refresh", IDToken: "id", ExpiresAt: time.Now().Add(time.Hour),
@@ -436,7 +440,20 @@ func TestSafeAccountsExposeOnlyReportedQuotaWindows(t *testing.T) {
 	if !strings.Contains(body, `"quota_windows":[{"label":"Weekly","remaining":93`) {
 		t.Fatalf("reported weekly window was not exposed: %s", body)
 	}
-	for _, unwanted := range []string{"5 hours", "HIDDEN_RAW_QUOTA", "private_marker", "access", "refresh"} {
+	var payload []struct {
+		Windows []accountLiveQuotaWindow `json:"quota_windows"`
+	}
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatal(err)
+	}
+	windows := payload[0].Windows
+	if len(windows) != 3 || windows[1].Label != "Spark · Weekly" || windows[1].Remaining != 75 || windows[1].PaceStatus != "too_fast" || windows[1].PaceMarkerPercent < 85 || windows[1].PaceBufferPercent >= 0 {
+		t.Fatalf("Spark window and pace missing: %s", body)
+	}
+	if windows[2].Label != "Spark · Allowance" || windows[2].Remaining != 90 || windows[2].PaceStatus != "" {
+		t.Fatalf("partial Spark window should have no pace: %s", body)
+	}
+	for _, unwanted := range []string{"Other", "5 hours", "HIDDEN_RAW_QUOTA", "private_marker", "access", "refresh"} {
 		if strings.Contains(body, unwanted) {
 			t.Fatalf("safe account payload exposed or invented %q: %s", unwanted, body)
 		}
