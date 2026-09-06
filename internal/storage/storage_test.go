@@ -157,7 +157,7 @@ func TestUsageReconciliationReplacesAtomicallyAndPreservesDetailedCounters(t *te
 		{Day: "2026-08-28", Provider: "openrouter", ModelID: "openrouter/vendor/model", Routing: UsageRoutingRouted, Requests: 1, InputTokens: 20},
 		{Day: "2026-08-28", Provider: "openrouter", ModelID: "openrouter/vendor/model", Routing: UsageRoutingRouted, Requests: 1, InputTokens: 30},
 	}
-	if err := store.ReplaceUsage(context.Background(), duplicate, UsageReconciliation{ReconciledAt: reconciledAt}); err == nil {
+	if err := store.ReplaceUsage(context.Background(), "", duplicate, UsageReconciliation{ReconciledAt: reconciledAt}); err == nil {
 		t.Fatal("duplicate replacement unexpectedly succeeded")
 	}
 	unchanged, err := store.Usage(context.Background(), time.Time{})
@@ -170,7 +170,7 @@ func TestUsageReconciliationReplacesAtomicallyAndPreservesDetailedCounters(t *te
 		OutputTokens: 20, ReasoningOutputTokens: 5,
 	}}
 	metadata := UsageReconciliation{ReconciledAt: reconciledAt, FilesScanned: 4, EventsImported: 2, RowsImported: 1}
-	if err = store.ReplaceUsage(context.Background(), replacement, metadata); err != nil {
+	if err = store.ReplaceUsage(context.Background(), "", replacement, metadata); err != nil {
 		t.Fatal(err)
 	}
 	usage, err := store.Usage(context.Background(), time.Time{})
@@ -193,7 +193,7 @@ func TestUsageReconciliationPreservesRoutedAndNativeRows(t *testing.T) {
 		{Day: "2026-08-28", Provider: "openai", ModelID: "gpt-test", Routing: UsageRoutingNative, Requests: 1, InputTokens: 10},
 		{Day: "2026-08-28", Provider: "openai", ModelID: "gpt-test", Routing: UsageRoutingRouted, Requests: 2, InputTokens: 20},
 	}
-	if err := store.ReplaceUsage(context.Background(), replacement, UsageReconciliation{
+	if err := store.ReplaceUsage(context.Background(), "", replacement, UsageReconciliation{
 		ReconciledAt: time.Now(), FilesScanned: 2, EventsImported: 3, RowsImported: 2,
 	}); err != nil {
 		t.Fatal(err)
@@ -227,7 +227,7 @@ func TestResetTelemetryRemovesOnlyUsageAndReconciliation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err = store.ReplaceUsage(context.Background(), []UsageAggregate{{
+	if err = store.ReplaceUsage(context.Background(), "", []UsageAggregate{{
 		Day: "2026-08-30", Provider: "openai", ModelID: "gpt-test", Routing: UsageRoutingNative,
 		Requests: 2, InputTokens: 100, OutputTokens: 20,
 	}}, UsageReconciliation{ReconciledAt: time.Now(), FilesScanned: 1, EventsImported: 2, RowsImported: 1}); err != nil {
@@ -274,7 +274,7 @@ func TestExistingUsageTableMigratesDetailedCounters(t *testing.T) {
 	}
 	store := testStore(t, path)
 	primaryKey, err := store.tablePrimaryKeyColumns(context.Background(), "usage_aggregate")
-	if err != nil || len(primaryKey) != 5 || primaryKey[4] != "routing" {
+	if err != nil || len(primaryKey) != 6 || primaryKey[4] != "routing" || primaryKey[5] != "device_id" {
 		t.Fatalf("legacy usage primary key was not migrated: %#v, %v", primaryKey, err)
 	}
 	replacement := []UsageAggregate{{
@@ -282,7 +282,7 @@ func TestExistingUsageTableMigratesDetailedCounters(t *testing.T) {
 		InputTokens: 10, CachedInputTokens: 4, CacheWriteInputTokens: 2,
 		OutputTokens: 3, ReasoningOutputTokens: 1,
 	}}
-	if err = store.ReplaceUsage(context.Background(), replacement, UsageReconciliation{ReconciledAt: time.Now(), FilesScanned: 1, EventsImported: 1, RowsImported: 1}); err != nil {
+	if err = store.ReplaceUsage(context.Background(), "", replacement, UsageReconciliation{ReconciledAt: time.Now(), FilesScanned: 1, EventsImported: 1, RowsImported: 1}); err != nil {
 		t.Fatalf("legacy database migration did not add detailed counters: %v", err)
 	}
 	if usage, usageErr := store.Usage(context.Background(), time.Time{}); usageErr != nil || len(usage) != 1 || usage[0].Source != UsageSourceReconciled || usage[0].Routing != UsageRoutingNative {

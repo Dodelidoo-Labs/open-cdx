@@ -215,7 +215,7 @@ func usageHistoryPreviewMessage(_ preview: UsageHistoryPreview, codexHome: Strin
     if preview.duplicateEvents > 0 || preview.malformedLines > 0 {
         message += "\n\nSkipped copied events: \(preview.duplicateEvents.formatted()) · malformed records: \(preview.malformedLines.formatted())."
     }
-    message += "\n\nOnly aggregate dates, providers, models, routing classifications, request counts, and token counters will be sent. Existing router telemetry will be replaced; prompts, responses, paths, credentials, and account identifiers are never imported."
+    message += "\n\nOnly aggregate dates, providers, models, routing classifications, request counts, and token counters will be sent. Only this Mac’s router telemetry will be replaced. Other machines’ history will be preserved; prompts, responses, paths, credentials, and account identifiers are never imported."
     return message
 }
 
@@ -651,10 +651,10 @@ final class HelperModel: ObservableObject {
                 return
             }
             let alert = NSAlert()
-            alert.messageText = "Replace telemetry with this Codex usage history?"
+            alert.messageText = "Replace this Mac’s telemetry with its Codex usage history?"
             alert.informativeText = usageHistoryPreviewMessage(preview, codexHome: codexHome)
             alert.alertStyle = .warning
-            alert.addButton(withTitle: "Replace Telemetry")
+            alert.addButton(withTitle: "Replace This Mac’s Telemetry")
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else {
                 self.usageReconciliationInProgress = false

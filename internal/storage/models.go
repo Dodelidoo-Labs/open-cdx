@@ -152,6 +152,8 @@ type CatalogExclusion struct {
 }
 
 type UsageAggregate struct {
+	DeviceID              string
+	DeviceName            string
 	Day                   string
 	Provider              string
 	ModelID               string
@@ -174,6 +176,7 @@ const (
 )
 
 type UsageReconciliation struct {
+	DeviceID       string
 	ReconciledAt   time.Time
 	FilesScanned   int
 	EventsImported int

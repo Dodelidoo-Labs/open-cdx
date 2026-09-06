@@ -111,7 +111,11 @@ func (store *Store) migrate(ctx context.Context) error {
 	if err = store.migrateUsageRouting(ctx); err != nil {
 		return err
 	}
-	return nil
+	if err = store.migrateReconciliationDevices(ctx); err != nil {
+		return err
+	}
+	_, err = store.db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS usage_device_idx ON usage_aggregate(device_id)")
+	return err
 }
 
 func (store *Store) migrateUsageRouting(ctx context.Context) error {
@@ -123,7 +127,11 @@ func (store *Store) migrateUsageRouting(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("inspect usage routing key: %w", err)
 	}
-	expectedKey := []string{"day", "provider", "model_id", "account_id", "routing"}
+	devicePresent, err := store.tableHasColumn(ctx, "usage_aggregate", "device_id")
+	if err != nil {
+		return err
+	}
+	expectedKey := []string{"day", "provider", "model_id", "account_id", "routing", "device_id"}
 	keyMatches := len(primaryKey) == len(expectedKey)
 	for index := range primaryKey {
 		if !keyMatches || primaryKey[index] != expectedKey[index] {
@@ -142,6 +150,7 @@ func (store *Store) migrateUsageRouting(ctx context.Context) error {
 	defer transaction.Rollback()
 	if _, err = transaction.ExecContext(ctx, `
 		CREATE TABLE usage_aggregate_next (
+			device_id TEXT NOT NULL DEFAULT '',
 			day TEXT NOT NULL,
 			provider TEXT NOT NULL,
 			model_id TEXT NOT NULL,
@@ -154,18 +163,22 @@ func (store *Store) migrateUsageRouting(ctx context.Context) error {
 			cache_write_input_tokens INTEGER NOT NULL DEFAULT 0,
 			output_tokens INTEGER NOT NULL DEFAULT 0,
 			reasoning_output_tokens INTEGER NOT NULL DEFAULT 0,
-			PRIMARY KEY (day, provider, model_id, account_id, routing)
+			PRIMARY KEY (day, provider, model_id, account_id, routing, device_id)
 		)`); err != nil {
 		return fmt.Errorf("create usage routing table: %w", err)
+	}
+	deviceExpression := "''"
+	if devicePresent {
+		deviceExpression = "device_id"
 	}
 	routingExpression := "CASE WHEN source='routed' THEN 'routed' ELSE 'native' END"
 	if routingPresent {
 		routingExpression = "CASE WHEN routing='native' THEN 'native' ELSE 'routed' END"
 	}
 	if _, err = transaction.ExecContext(ctx, `
-		INSERT INTO usage_aggregate_next(day, provider, model_id, account_id, source, routing, requests,
+		INSERT INTO usage_aggregate_next(device_id, day, provider, model_id, account_id, source, routing, requests,
 			input_tokens, cached_input_tokens, cache_write_input_tokens, output_tokens, reasoning_output_tokens)
-		SELECT day, provider, model_id, account_id,
+		SELECT `+deviceExpression+`, day, provider, model_id, account_id,
 			CASE WHEN source='reconciled' THEN 'reconciled' ELSE 'routed' END, `+routingExpression+`, requests,
 			input_tokens, cached_input_tokens, cache_write_input_tokens, output_tokens, reasoning_output_tokens
 		FROM usage_aggregate`); err != nil {
@@ -181,6 +194,33 @@ func (store *Store) migrateUsageRouting(ctx context.Context) error {
 		return fmt.Errorf("commit usage routing migration: %w", err)
 	}
 	return nil
+}
+
+// Old aggregate history remains unattributed; it cannot be assigned to a machine.
+func (store *Store) migrateReconciliationDevices(ctx context.Context) error {
+	present, err := store.tableHasColumn(ctx, "usage_reconciliation", "device_id")
+	if err != nil || present {
+		return err
+	}
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `
+        CREATE TABLE usage_reconciliation_next (
+            device_id TEXT PRIMARY KEY NOT NULL DEFAULT '',
+            reconciled_at INTEGER NOT NULL, files_scanned INTEGER NOT NULL,
+            events_imported INTEGER NOT NULL, rows_imported INTEGER NOT NULL
+        );
+        INSERT INTO usage_reconciliation_next
+            SELECT '', reconciled_at, files_scanned, events_imported, rows_imported FROM usage_reconciliation;
+        DROP TABLE usage_reconciliation;
+        ALTER TABLE usage_reconciliation_next RENAME TO usage_reconciliation;
+    `); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (store *Store) tableHasColumn(ctx context.Context, table, column string) (bool, error) {

@@ -17,6 +17,7 @@ import (
 	secure "github.com/Dodelidoo-Labs/open-cdx/internal/crypto"
 	"github.com/Dodelidoo-Labs/open-cdx/internal/routing"
 	"github.com/Dodelidoo-Labs/open-cdx/internal/storage"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/telemetry"
 	"github.com/Dodelidoo-Labs/open-cdx/internal/usagehistory"
 	site "github.com/Dodelidoo-Labs/open-cdx/web"
 )
@@ -234,7 +235,7 @@ func TestAdminTelemetryConditionalETagTracksSuccessfulMutations(t *testing.T) {
 		t.Fatalf("unchanged telemetry response = %d, body=%q", unchanged.Code, unchanged.Body.String())
 	}
 
-	if err := store.RecordUsage(context.Background(), "openai", "gpt-test", "account", 12, 3); err != nil {
+	if err := store.RecordUsage(context.Background(), "", "openai", "gpt-test", "account", 12, 3); err != nil {
 		t.Fatal(err)
 	}
 	recorded := telemetryResponse(t, server, initialETag)
@@ -247,7 +248,7 @@ func TestAdminTelemetryConditionalETagTracksSuccessfulMutations(t *testing.T) {
 		{Day: "2026-08-30", Provider: "openai", ModelID: "gpt-test", Routing: storage.UsageRoutingNative, Requests: 1, InputTokens: 10},
 		{Day: "2026-08-30", Provider: "openai", ModelID: "gpt-test", Routing: storage.UsageRoutingRouted, Requests: 2, InputTokens: 20},
 	}
-	if err := store.ReplaceUsage(context.Background(), replacement, storage.UsageReconciliation{ReconciledAt: time.Now(), RowsImported: 2}); err != nil {
+	if err := store.ReplaceUsage(context.Background(), "", replacement, storage.UsageReconciliation{ReconciledAt: time.Now(), RowsImported: 2}); err != nil {
 		t.Fatal(err)
 	}
 	replaced := telemetryResponse(t, server, recordedETag)
@@ -514,7 +515,7 @@ func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
 	for _, marker := range []string{
 		`data-tab="home"`, `data-tab="accounts"`, `data-tab="providers"`, `data-tab="devices"`, `data-tab="catalog"`,
 		`class="sidebar"`, `data-telemetry`, `data-telemetry-range`, `data-usage-chart="tokens"`, `model-breakdown-section`,
-		`data-custom-range`, `role="dialog"`, `data-flash-dismiss`,
+		`data-telemetry-device`, `/assets/telemetry-devices.js?v=1.0.0-test`, `data-custom-range`, `role="dialog"`, `data-flash-dismiss`,
 		`class="rail-actions"`, `data-theme-toggle`, `aria-label="Sign out"`, `material-symbols-outlined`,
 		`href="com.dodelidoo.opencdx://oauth/openai/start">Connect account`, `provider-config-trigger`, `Refresh catalog`,
 		`action="/admin/providers/refresh"`, `action="/admin/catalog/refresh"`,
@@ -776,7 +777,7 @@ func TestDeviceTelemetryResetRequiresAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = store.ReplaceUsage(context.Background(), []storage.UsageAggregate{{
+	if err = store.ReplaceUsage(context.Background(), "", []storage.UsageAggregate{{
 		Day: "2026-08-30", Provider: "openai", ModelID: "gpt-test", Routing: storage.UsageRoutingNative,
 		Requests: 1, InputTokens: 10,
 	}}, storage.UsageReconciliation{ReconciledAt: time.Now(), FilesScanned: 1, EventsImported: 1, RowsImported: 1}); err != nil {
@@ -847,5 +848,81 @@ func TestAdminOllamaAllowHTTPIsExplicitAndPersistent(t *testing.T) {
 	provider, err = store.Provider(context.Background(), "ollama", false)
 	if err != nil || !provider.AllowHTTP() {
 		t.Fatalf("rejected update changed the persisted policy: %#v, %v", provider, err)
+	}
+}
+
+func TestReconciliationUsesAuthenticatedMachineAndPreservesOtherMachines(t *testing.T) {
+	server, store := liveTestServer(t)
+	ctx := context.Background()
+	type client struct{ id, token string }
+	clients := make([]client, 0, 2)
+	for _, name := range []string{"Office Mac", "Travel Mac"} {
+		enrollment, err := store.CreateEnrollment(ctx, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.ApproveDevice(ctx, enrollment.DeviceID); err != nil {
+			t.Fatal(err)
+		}
+		approved, err := store.EnrollmentStatus(ctx, enrollment.DeviceID, enrollment.EnrollmentSecret)
+		if err != nil {
+			t.Fatal(err)
+		}
+		clients = append(clients, client{enrollment.DeviceID, approved.DeviceToken})
+	}
+	handler := server.device(http.HandlerFunc(server.reconcileUsage))
+	submit := func(token, payload string) int {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/telemetry/reconcile", strings.NewReader(payload))
+		if token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response.Code
+	}
+	payload := `{"version":2,"generated_at":"2026-09-01T00:00:00Z","files_scanned":1,"events_imported":1,"rows":[{"day":"2026-09-01","provider":"openai","model":"same-model","routing":"routed","requests":1,"input_tokens":10}]}`
+	if code := submit("", payload); code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated import status=%d", code)
+	}
+	for _, index := range []int{0, 1, 0} {
+		if code := submit(clients[index].token, payload); code != http.StatusOK {
+			t.Fatalf("import status=%d", code)
+		}
+	}
+	forged := strings.TrimSuffix(payload, "}") + `,"device_id":"` + clients[1].id + `"}`
+	if code := submit(clients[0].token, forged); code != http.StatusBadRequest {
+		t.Fatalf("forged device ID status=%d", code)
+	}
+	usage, err := store.Usage(ctx, time.Time{})
+	if err != nil || len(usage) != 2 {
+		t.Fatalf("usage=%#v err=%v", usage, err)
+	}
+	seen := map[string]string{}
+	for _, row := range usage {
+		if row.Requests != 1 {
+			t.Fatalf("repeated import added usage: %#v", row)
+		}
+		seen[row.DeviceID] = row.DeviceName
+	}
+	if seen[clients[0].id] != "Office Mac" || seen[clients[1].id] != "Travel Mac" {
+		t.Fatalf("wrong machine attribution: %#v", seen)
+	}
+	response := telemetryResponse(t, server, "")
+	var report telemetry.Report
+	if err := json.Unmarshal(response.Body.Bytes(), &report); err != nil || len(report.Usage) != 2 || report.TotalRequests != 2 {
+		t.Fatalf("machine attribution lost in report: %s, %v", response.Body.String(), err)
+	}
+	for _, point := range report.Usage {
+		if seen[point.DeviceID] != point.DeviceName || point.DeviceID == "" {
+			t.Fatalf("missing machine in report: %#v", point)
+		}
+	}
+	// Removing an enrollment must not cascade-delete historical consumption.
+	if err := store.RevokeDevice(ctx, clients[1].id); err != nil {
+		t.Fatal(err)
+	}
+	usage, err = store.Usage(ctx, time.Time{})
+	if err != nil || len(usage) != 2 {
+		t.Fatalf("device removal deleted telemetry: %#v, %v", usage, err)
 	}
 }

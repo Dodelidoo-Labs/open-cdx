@@ -392,7 +392,7 @@ func (server *Server) reconcileUsage(writer http.ResponseWriter, request *http.R
 		return
 	}
 	reconciledAt := time.Now().UTC()
-	if err = server.store.ReplaceUsage(request.Context(), aggregates, storage.UsageReconciliation{
+	if err = server.store.ReplaceUsage(request.Context(), currentDevice(request.Context()).ID, aggregates, storage.UsageReconciliation{
 		ReconciledAt: reconciledAt, FilesScanned: snapshot.FilesScanned,
 		EventsImported: snapshot.EventsImported, RowsImported: len(aggregates),
 	}); err != nil {

@@ -7,6 +7,7 @@ Run Go tests in a Go environment or isolated container:
 ```sh
 go test ./...
 go vet ./...
+node --test web/tests/*.test.cjs
 ```
 
 Run the real Codex signed-out command-auth proof:
@@ -118,3 +119,19 @@ These checks require the installed app, a real browser, and normal router activi
 9. Return to the tab; confirm the selected live panel performs one immediate refresh.
 10. Inspect browser Network activity; confirm unchanged live requests return `304` with empty bodies.
 11. Switch repeatedly among live and non-live tabs; confirm duplicate polling loops do not accumulate.
+
+## Machine telemetry acceptance
+
+Use an isolated server with two enrolled test clients. Record usage from both,
+then reconcile A, B, and A again. Each import must replace only its sender’s
+history; B’s counters must survive the second A import. Test the Machine filter
+with matching model names on both clients: totals, chart, activity, breakdown,
+and CSV rows must all follow the selected machine. Switch back to All machines
+and confirm combined totals. Reset telemetry remains explicitly global.
+
+The storage tests cover legacy migration, repeated imports, failed-import
+rollback, subsequent live usage, and per-device reconciliation metadata. API
+tests verify authenticated attribution, rejection of forged IDs, and history
+retention after device deletion. Node tests exercise machine filtering without
+connecting to an installed app. Run the Swift tests to check the confirmation
+text without launching the macOS app.

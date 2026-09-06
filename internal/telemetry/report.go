@@ -13,6 +13,8 @@ type ActivityPoint struct {
 }
 
 type UsagePoint struct {
+	DeviceID              string `json:"device_id"`
+	DeviceName            string `json:"device_name"`
 	Date                  string `json:"date"`
 	Provider              string `json:"provider"`
 	Model                 string `json:"model"`
@@ -27,6 +29,7 @@ type UsagePoint struct {
 }
 
 type Reconciliation struct {
+	DeviceID       string `json:"device_id"`
 	ReconciledAt   string `json:"reconciled_at"`
 	FilesScanned   int    `json:"files_scanned"`
 	EventsImported int    `json:"events_imported"`
@@ -51,20 +54,21 @@ func Build(aggregates []storage.UsageAggregate, reconciliation *storage.UsageRec
 	}
 	if reconciliation != nil {
 		report.Reconciliation = &Reconciliation{
-			ReconciledAt: reconciliation.ReconciledAt.UTC().Format(time.RFC3339),
+			DeviceID: reconciliation.DeviceID, ReconciledAt: reconciliation.ReconciledAt.UTC().Format(time.RFC3339),
 			FilesScanned: reconciliation.FilesScanned, EventsImported: reconciliation.EventsImported,
 			RowsImported: reconciliation.RowsImported,
 		}
 	}
-	type usageKey struct{ day, provider, model, source, routing string }
+	type usageKey struct{ day, provider, model, source, routing, device string }
 	combined := make(map[usageKey]storage.UsageAggregate)
 	activity := make(map[string]int64)
 	for _, aggregate := range aggregates {
 		key := usageKey{
-			day: aggregate.Day, provider: aggregate.Provider, model: aggregate.ModelID,
+			device: aggregate.DeviceID, day: aggregate.Day, provider: aggregate.Provider, model: aggregate.ModelID,
 			source: aggregate.Source, routing: aggregate.Routing,
 		}
 		current := combined[key]
+		current.DeviceID, current.DeviceName = aggregate.DeviceID, aggregate.DeviceName
 		current.Day, current.Provider, current.ModelID = key.day, key.provider, key.model
 		current.Source, current.Routing = key.source, key.routing
 		current.Requests += aggregate.Requests
@@ -83,7 +87,7 @@ func Build(aggregates []storage.UsageAggregate, reconciliation *storage.UsageRec
 
 	for key, aggregate := range combined {
 		point := UsagePoint{
-			Date: key.day, Provider: key.provider, Model: key.model, Source: key.source, Routing: key.routing,
+			DeviceID: key.device, DeviceName: aggregate.DeviceName, Date: key.day, Provider: key.provider, Model: key.model, Source: key.source, Routing: key.routing,
 			Requests:    aggregate.Requests,
 			InputTokens: aggregate.InputTokens, CachedInputTokens: aggregate.CachedInputTokens,
 			CacheWriteInputTokens: aggregate.CacheWriteInputTokens, OutputTokens: aggregate.OutputTokens,
@@ -107,7 +111,10 @@ func Build(aggregates []storage.UsageAggregate, reconciliation *storage.UsageRec
 		if report.Usage[left].Source != report.Usage[right].Source {
 			return report.Usage[left].Source < report.Usage[right].Source
 		}
-		return report.Usage[left].Routing < report.Usage[right].Routing
+		if report.Usage[left].Routing != report.Usage[right].Routing {
+			return report.Usage[left].Routing < report.Usage[right].Routing
+		}
+		return report.Usage[left].DeviceID < report.Usage[right].DeviceID
 	})
 	return report
 }

@@ -590,7 +590,7 @@
   }
 
   function exportTelemetry(points, range) {
-    const columns = ["date", "provider", "model", "source", "routing", "requests", "input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens", "reasoning_output_tokens"];
+    const columns = ["date", "device_id", "device_name", "provider", "model", "source", "routing", "requests", "input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens", "reasoning_output_tokens"];
     const escapeCell = (value) => {
       const text = String(value ?? "");
       return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
@@ -865,6 +865,15 @@
     if (breakdown) breakdown.innerHTML = '<li class="breakdown-empty">Telemetry could not be loaded.</li>';
   }
 
+  const deviceSelect = telemetryRoot.querySelector("[data-telemetry-device]");
+  function updateTelemetryDevices(report) {
+    const selected = deviceSelect.value;
+    deviceSelect.replaceChildren(new Option("All machines", "*"));
+    for (const device of OpenCDXTelemetryDevices.devices(report)) {
+      deviceSelect.add(new Option(device.name, device.id));
+    }
+    deviceSelect.value = Array.from(deviceSelect.options).some((option) => option.value === selected) ? selected : "*";
+  }
   const select = telemetryRoot.querySelector("[data-telemetry-range]");
   const custom = telemetryRoot.querySelector("[data-custom-range]");
   const startInput = telemetryRoot.querySelector("[data-range-start]");
@@ -913,8 +922,8 @@
   }
 
   function renderTelemetry(selection = select.value, includeHeatmap = false) {
-    const report = telemetryState.report;
-    if (!report) return false;
+    if (!telemetryState.report) return false;
+    const report = OpenCDXTelemetryDevices.filter(telemetryState.report, deviceSelect.value);
     const range = selectedRange(report, selection);
     if (!range) {
       rangeError.textContent = "Choose a valid start and end date.";
@@ -960,6 +969,7 @@
     closeCustomRange();
     renderTelemetry(selection);
   }));
+  deviceSelect.addEventListener("change", () => renderTelemetry(select.value, true));
   telemetryRoot.querySelector("[data-metric-mode]")?.addEventListener("change", () => renderTelemetry());
   telemetryRoot.querySelector("[data-group-mode]")?.addEventListener("change", () => renderTelemetry());
   telemetryRoot.querySelector("[data-apply-range]").addEventListener("click", () => {
@@ -1003,6 +1013,7 @@
     const report = await response.json();
     throwIfAborted(signal);
     telemetryState.report = report;
+    updateTelemetryDevices(report);
     updateTelemetryBounds(report);
     renderTelemetry(select.value, true);
     return { etag: response.headers.get("ETag") || "" };

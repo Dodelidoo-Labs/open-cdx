@@ -520,3 +520,5 @@ form { margin: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+
+[data-telemetry-device] { max-width: 260px; }

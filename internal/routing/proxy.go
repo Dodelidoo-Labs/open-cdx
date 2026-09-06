@@ -186,7 +186,7 @@ func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Re
 	collector := newTailCollector(256 << 10)
 	_, copyErr := copyStreaming(writer, io.TeeReader(response.Body, collector))
 	inputTokens, outputTokens := collector.usage()
-	_ = proxy.store.RecordUsage(context.WithoutCancel(request.Context()), target.provider, modelID, target.account.ID, inputTokens, outputTokens)
+	_ = proxy.store.RecordUsage(context.WithoutCancel(request.Context()), device.ID, target.provider, modelID, target.account.ID, inputTokens, outputTokens)
 	streamHealthy := streamEndedNormally(request.Context(), collector, copyErr)
 	proxy.status.Update(device.ID, func(status *RouteStatus) {
 		status.Connected = streamHealthy

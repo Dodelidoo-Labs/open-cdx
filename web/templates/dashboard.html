@@ -113,6 +113,12 @@
               <option value="custom">Custom range</option>
             </select>
             <div class="toolbar-group">
+              <label class="muted" for="telemetry-device">Machine</label>
+              <select class="select" id="telemetry-device" data-telemetry-device>
+                <option value="*">All machines</option>
+              </select>
+            </div>
+            <div class="toolbar-group">
               <label class="muted" for="measure">Measure</label>
               <select class="select" id="measure" data-metric-mode>
                 <option value="tokens">Tokens</option>
@@ -287,6 +293,7 @@
     </div>
   </main>
 </div>
+<script src="/assets/telemetry-devices.js?v={{.AssetVersion}}" defer></script>
 <script src="/assets/dashboard.js?v={{.AssetVersion}}" defer></script>
 </body>
 </html>

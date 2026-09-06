@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS affinities (
 );
 
 CREATE TABLE IF NOT EXISTS usage_aggregate (
+    device_id TEXT NOT NULL DEFAULT '',
     day TEXT NOT NULL,
     provider TEXT NOT NULL,
     model_id TEXT NOT NULL,
@@ -122,11 +123,11 @@ CREATE TABLE IF NOT EXISTS usage_aggregate (
     cache_write_input_tokens INTEGER NOT NULL DEFAULT 0,
     output_tokens INTEGER NOT NULL DEFAULT 0,
     reasoning_output_tokens INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (day, provider, model_id, account_id, routing)
+    PRIMARY KEY (day, provider, model_id, account_id, routing, device_id)
 );
 
 CREATE TABLE IF NOT EXISTS usage_reconciliation (
-    singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+    device_id TEXT PRIMARY KEY NOT NULL DEFAULT '',
     reconciled_at INTEGER NOT NULL,
     files_scanned INTEGER NOT NULL,
     events_imported INTEGER NOT NULL,

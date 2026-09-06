@@ -35,3 +35,24 @@ func TestReportCombinesAccountsAndPreservesMeasuredTokens(t *testing.T) {
 		t.Fatalf("reconciliation boundary was not exposed: %#v", report.Reconciliation)
 	}
 }
+
+func TestReportKeepsMachinesSeparateWhileCombiningTheirAccounts(t *testing.T) {
+	usage := []storage.UsageAggregate{
+		{DeviceID: "a", DeviceName: "Mac", Day: "2026-09-01", Provider: "openai", ModelID: "model", AccountID: "one", Requests: 1, InputTokens: 10},
+		{DeviceID: "a", DeviceName: "Mac", Day: "2026-09-01", Provider: "openai", ModelID: "model", AccountID: "two", Requests: 2, InputTokens: 20},
+		{DeviceID: "b", DeviceName: "Mac", Day: "2026-09-01", Provider: "openai", ModelID: "model", AccountID: "one", Requests: 4, InputTokens: 40},
+		{Day: "2026-09-01", Provider: "openai", ModelID: "model", Requests: 8, InputTokens: 80},
+	}
+	report := Build(usage, nil, time.Now())
+	if len(report.Usage) != 3 || report.TotalRequests != 15 || report.TotalInputTokens != 150 || report.Activity[0].Requests != 15 {
+		t.Fatalf("report=%#v", report)
+	}
+	for _, point := range report.Usage {
+		if point.DeviceID == "a" && (point.Requests != 3 || point.DeviceName != "Mac") {
+			t.Fatalf("machine A=%#v", point)
+		}
+		if point.DeviceID == "b" && point.Requests != 4 {
+			t.Fatalf("machine B=%#v", point)
+		}
+	}
+}

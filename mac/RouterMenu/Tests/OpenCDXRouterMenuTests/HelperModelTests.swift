@@ -170,7 +170,8 @@ final class HelperModelTests: XCTestCase {
         XCTAssertTrue(message.contains("5 routed"))
         XCTAssertTrue(message.contains("7 native (not routed)"))
         XCTAssertTrue(message.contains("Skipped copied events: 2 · malformed records: 1"))
-        XCTAssertTrue(message.contains("Existing router telemetry will be replaced"))
+        XCTAssertTrue(message.contains("Only this Mac’s router telemetry will be replaced"))
+        XCTAssertTrue(message.contains("Other machines’ history will be preserved"))
     }
 
     @MainActor

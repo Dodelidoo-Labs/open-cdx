@@ -85,16 +85,32 @@ Use the helper directly when Codex runs with a custom `CODEX_HOME`:
 
 ```sh
 router-helper reconcile-usage --codex-home /absolute/path/to/codex-home --dry-run
-# Review the routed/native counts, then replace telemetry:
+# Review the routed/native counts, then replace this machine’s telemetry:
 router-helper reconcile-usage --codex-home /absolute/path/to/codex-home
 ```
 
 The chosen directory is the complete reconciliation source. A successful run
-replaces existing telemetry rather than merging it, so importing a different
-home later also replaces the previous snapshot. The router keeps ingestion
+replaces only the authenticated machine’s telemetry rather than merging it.
+The first import adds that machine’s history; subsequent imports replace it.
+Other machines’ usage and reconciliation metadata are preserved. Importing a
+different home later replaces the same machine’s previous snapshot. The router keeps ingestion
 source (reconciled or live proxy) separate from routing classification (routed
 or native), so later reconciliations preserve the dashboard's routed/native
 view.
+
+The dashboard’s **Machine** filter applies to totals, charts, activity, and CSV
+exports. New routed requests are attributed to the authenticated device, and
+reconciled history is tagged with that same identity by the server. Names are
+shown alongside device IDs so machines with identical names remain distinct.
+Deleting an enrollment preserves its usage under its device ID; enrolling again
+creates a new identity. Old usage remains under **Unknown device** because it
+cannot be attributed retrospectively.
+
+To rebuild attribution from local history, reset telemetry once, then reconcile
+each machine’s own history. Do not reset between machines. Avoid importing the
+same copied session history from multiple machines, which would count it once
+for each importing device. Update the server before using this workflow; older
+servers replace telemetry globally.
 
 To start the dashboard counters over without changing the local history, use
 **Reset Telemetry…** in the menu app or run:
@@ -115,7 +131,7 @@ router. It leaves providers, devices, accounts, and all `~/.codex` files intact.
 | `router-helper refresh-catalog` | Refresh providers, atomically download catalog |
 | `router-helper refresh-quotas` | Refresh account quotas |
 | `router-helper reconnect` | Recheck remote connectivity |
-| `router-helper reconcile-usage [--codex-home PATH] [--dry-run]` | Preview or replace telemetry from one Codex history root |
+| `router-helper reconcile-usage [--codex-home PATH] [--dry-run]` | Preview or replace this machine’s telemetry from one Codex history root |
 | `router-helper reset-telemetry` | Reset router telemetry without changing local Codex history or router configuration |
 | `router-helper open-dashboard` | Open the configured dashboard |
 | `router-helper quit` | Stop the user helper daemon |

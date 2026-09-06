@@ -30,7 +30,7 @@ func TestNativeProxyPreservesBodyAndMetadataWhileReplacingAuthentication(t *test
 		_, _ = writer.Write([]byte(`{"id":"response","usage":{"input_tokens":4,"output_tokens":2}}`))
 	}))
 	defer upstream.Close()
-	proxy, _, _ := proxyFixture(t, upstream.Client(), upstream.URL, []routeFixture{{stable: "stable-native", quota: 10, models: []string{"gpt-native"}}})
+	proxy, store, _ := proxyFixture(t, upstream.Client(), upstream.URL, []routeFixture{{stable: "stable-native", quota: 10, models: []string{"gpt-native"}}})
 	request := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(requestBody))
 	request.Header.Set("Authorization", "Bearer local-short-lived")
 	request.Header.Set("Cookie", "browser=secret")
@@ -50,6 +50,10 @@ func TestNativeProxyPreservesBodyAndMetadataWhileReplacingAuthentication(t *test
 	proxy.ServeDeviceHTTP(writer, request, DeviceContext{ID: "device"})
 	if writer.Code != http.StatusOK {
 		t.Fatalf("proxy returned %d: %s", writer.Code, writer.Body.String())
+	}
+	usage, err := store.Usage(context.Background(), time.Time{})
+	if err != nil || len(usage) != 1 || usage[0].DeviceID != "device" || usage[0].InputTokens != 4 || usage[0].OutputTokens != 2 {
+		t.Fatalf("proxy did not attribute usage to authenticated machine: %#v, %v", usage, err)
 	}
 	if !bytes.Equal(receivedBody, requestBody) {
 		t.Fatalf("native body changed\nwant %s\n got %s", requestBody, receivedBody)
