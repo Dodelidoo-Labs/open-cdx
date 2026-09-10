@@ -16,22 +16,23 @@ import (
 )
 
 type LocalStatus struct {
-	State           string             `json:"state"`
-	Connected       bool               `json:"connected"`
-	ActiveRequests  int                `json:"active_requests"`
-	RouterURL       string             `json:"router_url"`
-	DeviceName      string             `json:"device_name"`
-	Accounts        []AccountAllowance `json:"accounts,omitempty"`
-	Provider        string             `json:"provider,omitempty"`
-	Model           string             `json:"model,omitempty"`
-	Account         string             `json:"account,omitempty"`
-	QuotaRemaining  float64            `json:"quota_remaining,omitempty"`
-	QuotaResetAt    *time.Time         `json:"quota_reset_at,omitempty"`
-	CatalogSynced   bool               `json:"catalog_synced"`
-	CatalogUpdated  *time.Time         `json:"catalog_updated_at,omitempty"`
-	RestartRequired bool               `json:"codex_restart_required,omitempty"`
-	LastRequestAt   *time.Time         `json:"last_request_at,omitempty"`
-	LastError       string             `json:"last_error,omitempty"`
+	State              string             `json:"state"`
+	Connected          bool               `json:"connected"`
+	EnrollmentRequired bool               `json:"enrollment_required"`
+	ActiveRequests     int                `json:"active_requests"`
+	RouterURL          string             `json:"router_url"`
+	DeviceName         string             `json:"device_name"`
+	Accounts           []AccountAllowance `json:"accounts,omitempty"`
+	Provider           string             `json:"provider,omitempty"`
+	Model              string             `json:"model,omitempty"`
+	Account            string             `json:"account,omitempty"`
+	QuotaRemaining     float64            `json:"quota_remaining,omitempty"`
+	QuotaResetAt       *time.Time         `json:"quota_reset_at,omitempty"`
+	CatalogSynced      bool               `json:"catalog_synced"`
+	CatalogUpdated     *time.Time         `json:"catalog_updated_at,omitempty"`
+	RestartRequired    bool               `json:"codex_restart_required,omitempty"`
+	LastRequestAt      *time.Time         `json:"last_request_at,omitempty"`
+	LastError          string             `json:"last_error,omitempty"`
 }
 
 type AccountAllowance struct {
@@ -425,18 +426,22 @@ func (daemon *Daemon) refreshStatus(ctx context.Context) error {
 			LastError       string    `json:"last_error"`
 		} `json:"route"`
 	}
-	_, err := daemon.remote.JSON(ctx, http.MethodGet, "/api/v1/device/status", nil, &remoteStatus, true)
+	response, err := daemon.remote.JSON(ctx, http.MethodGet, "/api/v1/device/status", nil, &remoteStatus, true)
 	if err != nil {
 		daemon.updateStatus(func(status *LocalStatus) {
 			status.Connected = false
 			status.State = "error"
 			status.LastError = err.Error()
+			if response != nil && response.StatusCode == http.StatusUnauthorized {
+				status.EnrollmentRequired = true
+			}
 		})
 		return err
 	}
 	daemon.updateStatus(func(status *LocalStatus) {
 		status.Connected = true
 		status.State = remoteStatus.Route.State
+		status.EnrollmentRequired = false
 		if status.State == "" {
 			status.State = "connected"
 		}

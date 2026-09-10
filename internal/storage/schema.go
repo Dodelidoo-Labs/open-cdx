@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS affinities (
 );
 
 CREATE TABLE IF NOT EXISTS usage_aggregate (
+    recorded_at TEXT NOT NULL DEFAULT '',
     device_id TEXT NOT NULL DEFAULT '',
     day TEXT NOT NULL,
     provider TEXT NOT NULL,
@@ -123,7 +124,17 @@ CREATE TABLE IF NOT EXISTS usage_aggregate (
     cache_write_input_tokens INTEGER NOT NULL DEFAULT 0,
     output_tokens INTEGER NOT NULL DEFAULT 0,
     reasoning_output_tokens INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (day, provider, model_id, account_id, routing, device_id)
+    PRIMARY KEY (day, provider, model_id, account_id, routing, device_id, recorded_at)
+);
+
+CREATE TABLE IF NOT EXISTS allowance_observations (
+    source TEXT NOT NULL CHECK(source IN ('live','history')),
+    account_id TEXT NOT NULL DEFAULT '',
+    device_id TEXT NOT NULL DEFAULT '',
+    observed_at TEXT NOT NULL,
+    reset_at TEXT NOT NULL,
+    used_percent REAL NOT NULL,
+    PRIMARY KEY(source, account_id, device_id, observed_at, reset_at, used_percent)
 );
 
 CREATE TABLE IF NOT EXISTS usage_reconciliation (

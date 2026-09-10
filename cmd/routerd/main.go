@@ -70,7 +70,11 @@ func run() error {
 	selector := routing.NewSelector(store, affinitySecret[:])
 	statusRegistry := routing.NewStatusRegistry()
 	proxy := routing.NewProxy(store, accountManager, catalogManager, selector, statusRegistry, streamHTTP, cfg.InsecureDevelopment)
-	api, err := httpapi.New(store, accountManager, catalogManager, proxy, statusRegistry, adminToken, cfg.PublicBaseURL, cfg.InsecureDevelopment, metadataHTTP)
+	location, err := config.LoadTimeZone(cfg.TimeZone)
+	if err != nil {
+		return err
+	}
+	api, err := httpapi.New(store, accountManager, catalogManager, proxy, statusRegistry, adminToken, cfg.PublicBaseURL, cfg.InsecureDevelopment, metadataHTTP, location)
 	if err != nil {
 		return err
 	}

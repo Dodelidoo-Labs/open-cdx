@@ -522,3 +522,13 @@ form { margin: 0; }
 }
 
 [data-telemetry-device] { max-width: 260px; }
+
+.chart-shell .allowance-reset { cursor: pointer; outline: none; }
+.chart-shell .allowance-reset line { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 5; opacity: .5; pointer-events: none; }
+.chart-shell .allowance-reset rect { fill: transparent; }
+.chart-shell .allowance-reset text { fill: var(--muted); font-size: 13px; }
+.chart-shell .allowance-reset:focus rect, .chart-shell .allowance-reset:hover rect { stroke: var(--muted); rx: 4; }
+.allowance-cycle-details { margin: 0 12px 12px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.allowance-cycle-details summary { cursor: pointer; }
+.allowance-cycle-details ul { padding-left: 18px; }
+.allowance-cycle-details li { margin: 10px 0; }

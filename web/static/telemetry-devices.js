@@ -6,6 +6,9 @@
       const id = point.device_id || "";
       names.set(id, id ? `${point.device_name || "Removed device"} · ${id}` : "Unknown device");
     }
+    for (const reset of report.allowance_resets || []) {
+      if (reset.device_id && !names.has(reset.device_id)) names.set(reset.device_id, `${reset.label} · ${reset.device_id}`);
+    }
     return Array.from(names, ([id, name]) => ({ id, name }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -23,6 +26,10 @@
     }
     return {
       ...report, usage,
+      allowance_resets: (report.allowance_resets || []).filter((reset) => reset.source === "live" || reset.device_id === deviceID)
+        .map((reset) => ({ ...reset, usage: reset.usage.filter((row) => row.device_id === deviceID) })),
+      rolling_usage: report.rolling_usage && Object.fromEntries(Object.entries(report.rolling_usage).map(([hours, points]) => [hours, points.filter((point) => (point.device_id || "") === deviceID)])),
+      untimed_usage: report.untimed_usage?.filter((point) => (point.device_id || "") === deviceID),
       activity: Array.from(counts, ([date, requests]) => ({ date, requests })).sort((a, b) => a.date.localeCompare(b.date)),
       total_requests: requests, total_input_tokens: input, total_output_tokens: output,
       reconciliation: report.reconciliation?.device_id === deviceID ? report.reconciliation : null,

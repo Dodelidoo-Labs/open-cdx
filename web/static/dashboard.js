@@ -13,14 +13,23 @@
     ? requestedTheme
     : ["light", "dark"].includes(storedTheme) ? storedTheme : preferredTheme;
 
-  const localDateTime = new Intl.DateTimeFormat(undefined, {
-    month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
-  });
-  const localDate = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
-  const localClock = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
-  const localDateTimeTitle = new Intl.DateTimeFormat(undefined, {
-    dateStyle: "full", timeStyle: "long",
-  });
+  const fallbackTimeZone = root.dataset.timeZone || "UTC";
+  let savedTimeZone = "";
+  try { savedTimeZone = localStorage.getItem("opencdx-timezone") || ""; } catch {}
+  const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  let selectedTimeZone = OpenCDXTelemetryRanges.preferredTimeZone(savedTimeZone, browserTimeZone, fallbackTimeZone);
+  let localDateTime, localDate, localClock, localDateTimeTitle;
+  function configureTimeFormats() {
+    localDateTime = new Intl.DateTimeFormat(undefined, {
+      timeZone: selectedTimeZone, month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+    });
+    localDate = new Intl.DateTimeFormat(undefined, { timeZone: selectedTimeZone, month: "short", day: "numeric" });
+    localClock = new Intl.DateTimeFormat(undefined, { timeZone: selectedTimeZone, hour: "numeric", minute: "2-digit" });
+    localDateTimeTitle = new Intl.DateTimeFormat(undefined, {
+      timeZone: selectedTimeZone, dateStyle: "full", timeStyle: "long",
+    });
+  }
+  configureTimeFormats();
   const localizeTime = (element, formatter) => {
     const value = new Date(element.dateTime);
     if (Number.isNaN(value.getTime())) return;
@@ -418,8 +427,7 @@
   }
 
   function generatedDay(report) {
-    const parsed = new Date(report.generated_at);
-    return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
+    return utcDate(OpenCDXTelemetryRanges.dayKey(report.generated_at, report.time_zone));
   }
 
   function positionTooltip(clientX, clientY) {
@@ -521,9 +529,7 @@
   }
 
   function pointsForRange(report, range) {
-    const start = dateKey(range.start);
-    const end = dateKey(range.end);
-    return report.usage.filter((point) => point.date >= start && point.date <= end);
+    return OpenCDXTelemetryRanges.select(report, range).points;
   }
 
   function setMetrics(points) {
@@ -586,7 +592,7 @@
     const start = date.format(range.start);
     const end = date.format(range.end);
     telemetryRoot.querySelector("[data-chart-title]").textContent = `${groupingLabel(grouping)} usage by ${mode}`;
-    telemetryRoot.querySelector("[data-chart-meta]").textContent = `${start === end ? start : `${start}–${end}`} · ${mode === "tokens" ? "input and output combined" : "inference calls"}`;
+    telemetryRoot.querySelector("[data-chart-meta]").textContent = `${range.hours ? `Last ${range.hours === 24 ? "24 hours" : `${range.hours / 24} days`} · ` : ""}${start === end ? start : `${start}–${end}`} · ${selectedTimeZone} · ${mode === "tokens" ? "input and output combined" : "inference calls"}`;
   }
 
   function exportTelemetry(points, range) {
@@ -718,6 +724,7 @@
     const host = telemetryRoot.querySelector('[data-usage-chart="tokens"]');
     host.textContent = "";
     const points = pointsForRange(report, range);
+    const resets = OpenCDXTelemetryRanges.resets(report, range);
     const spanDays = Math.max(1, Math.round((range.end - range.start) / 86400000) + 1);
     const buckets = new Map();
     for (let date = range.start; date <= range.end; date = addDays(date, 1)) {
@@ -741,8 +748,8 @@
       return seriesLabel(left, grouping).localeCompare(seriesLabel(right, grouping));
     });
     const bucketList = Array.from(buckets.values());
-    const maximum = niceMaximum(Math.max(0, ...bucketList.map((bucket) => Array.from(bucket.series.values()).reduce((sum, value) => sum + value, 0))));
-    if (orderedSeries.length === 0 || maximum === 0) {
+    let maximum = niceMaximum(Math.max(0, ...bucketList.map((bucket) => Array.from(bucket.series.values()).reduce((sum, value) => sum + value, 0))));
+    if ((orderedSeries.length === 0 || maximum === 0) && resets.length === 0) {
       const empty = document.createElement("div");
       empty.className = "telemetry-empty";
       empty.textContent = orderedSeries.length === 0 ? "No usage in this period." : `No ${mode} were reported in this period.`;
@@ -750,6 +757,7 @@
       return;
     }
 
+    maximum = Math.max(1, maximum);
     const width = 1200;
     const height = 330;
     const left = 78;
@@ -829,19 +837,79 @@
         svg.appendChild(label);
       }
     });
+    const resetDate = (value) => new Intl.DateTimeFormat(undefined, { timeZone: report.time_zone || "UTC", dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+    const resetDescription = (reset) => {
+      const tokens = reset.usage.reduce((sum, row) => sum + row.tokens, 0);
+      const requests = reset.usage.reduce((sum, row) => sum + row.requests, 0);
+      const timing = reset.scheduled ? `Scheduled boundary ${resetDate(reset.at)}, transition observed ${resetDate(reset.observed_at)}`
+        : `Inferred between ${resetDate(reset.after)} and ${resetDate(reset.observed_at)}`;
+      const scope = reset.source === "history" ? "Machine history; account unknown (a switch can look like a reset)" : "Account quota; routed usage with known account only";
+      return `${reset.label}: ${timing}. First observation: ${formatNumber(reset.observed_remaining)}% remaining. ${formatNumber(tokens)} recorded tokens / ${formatNumber(requests)} requests from ${resetDate(reset.at)} to ${reset.until ? resetDate(reset.until) : "latest telemetry (ongoing)"}. ${scope}. ${reset.usage.some((row) => row.untimed) ? "Incomplete: daily-only usage excluded. " : ""}Inferred boundaries make cycle totals approximate; totals cover the full interval, beyond the chart filter.`;
+    };
+    const resetBuckets = new Map();
+    resets.forEach((reset) => {
+      const day = OpenCDXTelemetryRanges.dayKey(reset.at, report.time_zone);
+      const key = bucketDetails(utcDate(day), spanDays).key;
+      if (!resetBuckets.has(key)) resetBuckets.set(key, []);
+      resetBuckets.get(key).push(reset);
+    });
+    bucketList.forEach((bucket, index) => {
+      const entries = resetBuckets.get(bucket.key);
+      if (!entries) return;
+      const x = left + (index + 0.5) * slot;
+      const marker = svgElement("g", { class: "allowance-reset", tabindex: 0, role: "button", "aria-label": `${entries.length} weekly window transition${entries.length === 1 ? "" : "s"}, ${bucket.tooltip}. Activate for cycle details.` });
+      marker.appendChild(svgElement("line", { x1: x, x2: x, y1: top + 14, y2: top + plotHeight }));
+      marker.appendChild(svgElement("rect", { x: x - 12, y: top - 8, width: 24, height: 28 }));
+      const glyph = svgElement("text", { x, y: top + 9, "text-anchor": "middle" });
+      glyph.textContent = entries.length > 1 ? `↻${entries.length}` : "↻";
+      marker.appendChild(glyph);
+      const title = `${entries.length} weekly window transition${entries.length === 1 ? "" : "s"} · ${report.time_zone || "UTC"}`;
+      const rows = entries.slice(0, 2).map((reset) => ({ value: `${reset.label} · ${resetDate(reset.at)} · ${reset.scheduled ? "scheduled transition" : "inferred reset"}${reset.source === "history" ? " (account unknown)" : ""}. ${formatNumber(reset.usage.reduce((sum, row) => sum + row.tokens, 0))} recorded tokens until ${reset.until ? resetDate(reset.until) : "latest telemetry"}. Activate for bounds, requests and attribution.` }));
+      if (entries.length > 2) rows.push({ value: `${entries.length - 2} more; activate to see all cycle details.` });
+      marker.addEventListener("pointerenter", (event) => showTooltip(title, rows, "", event.clientX, event.clientY));
+      marker.addEventListener("pointerleave", hideTooltip);
+      marker.addEventListener("focus", () => showAnchoredTooltip(marker, title, rows, ""));
+      marker.addEventListener("blur", hideTooltip);
+      const expand = () => { hideTooltip(); details.open = true; cycleItems.get(entries[0]).focus(); };
+      marker.addEventListener("click", expand);
+      marker.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); expand(); } });
+      svg.appendChild(marker);
+    });
     host.appendChild(svg);
+    const details = document.createElement("details");
+    const cycleItems = new Map();
+    if (resets.length) {
+      details.className = "allowance-cycle-details";
+      const summary = document.createElement("summary");
+      summary.textContent = `↻ ${resets.length} weekly window transition${resets.length === 1 ? "" : "s"} · cycle details`;
+      const note = document.createElement("p");
+      note.textContent = `Times in ${report.time_zone || "UTC"}. Markers group transitions by chart bucket. Historical observations can overlap accounts or machines; this is not a count of unique account resets. Usage is recorded input + output (cached tokens included), not allowance billing.`;
+      const list = document.createElement("ul");
+      resets.forEach((reset) => {
+        const item = document.createElement("li");
+        item.tabIndex = -1;
+        item.textContent = resetDescription(reset);
+        cycleItems.set(reset, item);
+        list.appendChild(item);
+      });
+      details.append(summary, note, list);
+      host.appendChild(details);
+    }
   }
 
   function earliestUsageDay(report) {
-    if (!report.usage.length) return generatedDay(report);
-    return utcDate(report.usage.reduce((earliest, point) => point.date < earliest ? point.date : earliest, report.usage[0].date));
+    const days = report.usage.map((point) => point.date);
+    for (const reset of report.allowance_resets || []) days.push(OpenCDXTelemetryRanges.dayKey(reset.at, report.time_zone));
+    if (!days.length) return generatedDay(report);
+    return utcDate(days.reduce((earliest, day) => day < earliest ? day : earliest));
   }
 
   function selectedRange(report, selection = telemetryRoot.querySelector("[data-telemetry-range]").value) {
     const today = generatedDay(report);
+    if (selection === "rolling24") return OpenCDXTelemetryRanges.rolling(report, 24);
     if (selection === "today") return { start: today, end: today };
-    if (selection === "week") return { start: addDays(today, -6), end: today };
-    if (selection === "thirty") return { start: addDays(today, -29), end: today };
+    if (selection === "week") return OpenCDXTelemetryRanges.rolling(report, 7 * 24);
+    if (selection === "thirty") return OpenCDXTelemetryRanges.rolling(report, 30 * 24);
     if (selection === "month") return { start: new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)), end: today };
     if (selection === "year") return { start: new Date(Date.UTC(today.getUTCFullYear(), 0, 1)), end: today };
     if (selection === "all") return { start: earliestUsageDay(report), end: today };
@@ -935,7 +1003,28 @@
     rangeError.hidden = true;
     select.value = selection;
     syncPresetButtons();
-    const points = pointsForRange(report, range);
+    const selected = OpenCDXTelemetryRanges.select(report, range);
+    const precision = telemetryRoot.querySelector("[data-telemetry-precision]");
+    precision.hidden = selected.complete;
+    precision.textContent = selected.complete ? "" : "This rolling total is unavailable because older records contain only UTC daily totals. Reconcile usage with the updated helper to restore request timestamps, or select a calendar range.";
+    telemetryState.precisionComplete = selected.complete;
+    if (!selected.complete) {
+      telemetryState.currentPoints = [];
+      telemetryState.currentRange = null;
+      telemetryRoot.querySelectorAll("[data-metric]").forEach((element) => { element.textContent = "—"; });
+      telemetryRoot.querySelector('[data-usage-chart="tokens"]').textContent = "Complete rolling-window history is unavailable.";
+      telemetryRoot.querySelector("[data-model-breakdown]").textContent = "";
+      telemetryRoot.querySelector("[data-breakdown-total]").textContent = "";
+      updateChartMeta(range, "tokens", "model");
+      exportButton.disabled = true;
+      if (includeHeatmap) renderHeatmap(report);
+      return true;
+    }
+    if (!range.from && report.time_zone !== "UTC" && report.untimed_usage?.length) {
+      precision.hidden = false;
+      precision.textContent = "Older records without request timestamps remain grouped by UTC day. Reconcile usage with the updated helper to apply the configured timezone to that history.";
+    }
+    const points = selected.points;
     telemetryState.currentPoints = points;
     telemetryState.currentRange = range;
     const mode = telemetryRoot.querySelector("[data-metric-mode]")?.value || "tokens";
@@ -1001,12 +1090,21 @@
   };
 
   async function refreshTelemetry(signal, etag) {
-    const response = await fetch("/admin/telemetry", {
+    const response = await fetch(`/admin/telemetry?timezone=${encodeURIComponent(selectedTimeZone)}`, {
       credentials: "same-origin",
       headers: conditionalHeaders("application/json", etag),
       signal,
     });
-    if (response.status === 304) return { etag: response.headers.get("ETag") || etag };
+    throwIfAborted(signal);
+    if (response.status === 304) {
+      const serverDate = response.headers.get("X-OpenCDX-Generated-At") || response.headers.get("Date");
+      if (telemetryState.report && serverDate) {
+        telemetryState.report.generated_at = new Date(serverDate).toISOString();
+        updateTelemetryBounds(telemetryState.report);
+        renderTelemetry(select.value, true);
+      }
+      return { etag: response.headers.get("ETag") || etag };
+    }
     if (!response.ok || !response.headers.get("Content-Type")?.includes("application/json")) {
       throw new Error("telemetry unavailable");
     }
@@ -1230,6 +1328,44 @@
     devices: { interval: 2500, maxDelay: 20000, etag: "", failures: 0, timer: null, controller: null, promise: null, succeeded: false, refresh: refreshDevices },
     accounts: { interval: 20000, maxDelay: 120000, etag: "", failures: 0, timer: null, controller: null, promise: null, succeeded: false, refresh: refreshAccounts },
   };
+  const timeZoneSelect = telemetryRoot.querySelector("[data-telemetry-timezone]");
+  const detectedTimeZone = OpenCDXTelemetryRanges.preferredTimeZone("", browserTimeZone, fallbackTimeZone);
+  timeZoneSelect.add(new Option(`Automatic (${detectedTimeZone})`, ""));
+  const timeZones = new Set(["UTC", selectedTimeZone, detectedTimeZone,
+    "America/Argentina/Buenos_Aires", "Europe/London",
+    ...(Intl.supportedValuesOf?.("timeZone") || [])]);
+  Array.from(timeZones).sort().forEach((zone) => timeZoneSelect.add(new Option(zone.replaceAll("_", " "), zone)));
+  timeZoneSelect.value = savedTimeZone ? selectedTimeZone : "";
+  timeZoneSelect.addEventListener("change", async () => {
+    timeZoneSelect.disabled = true;
+    const state = liveStates.home;
+    state.controller?.abort();
+    await state.promise;
+    window.clearTimeout(state.timer);
+    state.timer = null;
+    selectedTimeZone = timeZoneSelect.value || detectedTimeZone;
+    try {
+      if (timeZoneSelect.value) localStorage.setItem("opencdx-timezone", selectedTimeZone);
+      else localStorage.removeItem("opencdx-timezone");
+    } catch {}
+    configureTimeFormats();
+    localizeTimes();
+    state.etag = "";
+    state.succeeded = false;
+    telemetryState.report = null;
+    telemetryState.currentRange = null;
+    exportButton.disabled = true;
+    telemetryRoot.setAttribute("aria-busy", "true");
+    telemetryRoot.querySelectorAll("[data-metric]").forEach((element) => { element.textContent = "—"; });
+    telemetryRoot.querySelector('[data-usage-chart="tokens"]').textContent = "Loading usage…";
+    telemetryRoot.querySelector("[data-heatmap]").textContent = "";
+    telemetryRoot.querySelector("[data-model-breakdown]").textContent = "";
+    telemetryRoot.querySelector("[data-breakdown-total]").textContent = "";
+    telemetryRoot.querySelector("[data-chart-meta]").textContent = selectedTimeZone;
+    await runLiveRefresh("home", state);
+    telemetryRoot.removeAttribute("aria-busy");
+    timeZoneSelect.disabled = false;
+  });
   let windowFocused = document.hasFocus?.() ?? true;
   const liveStateActive = (name) => selectedTab === name && document.visibilityState !== "hidden" && windowFocused;
 
@@ -1295,7 +1431,7 @@
       if (telemetryState.currentRange) exportTelemetry(telemetryState.currentPoints, telemetryState.currentRange);
     } finally {
       telemetryState.exporting = false;
-      exportButton.disabled = !telemetryState.report;
+      exportButton.disabled = !telemetryState.report || telemetryState.precisionComplete === false;
     }
   });
 

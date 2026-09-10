@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-time-zone="{{.TimeZone}}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -96,14 +96,15 @@
         <section class="telemetry-controls">
           <div class="toolbar">
             <div class="segmented" role="group" aria-label="Usage range">
-              <button class="segment" type="button" data-range-preset="today">24h</button>
+              <button class="segment" type="button" data-range-preset="rolling24">24h</button>
               <button class="segment" type="button" data-range-preset="week">7d</button>
               <button class="segment" type="button" data-range-preset="thirty">30d</button>
-              <button class="segment" type="button" data-range-preset="year">1y</button>
+              <button class="segment" type="button" data-range-preset="year">Year</button>
               <button class="segment active" type="button" data-range-preset="all">All</button>
               <button class="segment" type="button" data-range-preset="custom" aria-haspopup="dialog" aria-controls="custom-date-range" aria-expanded="false">Custom</button>
             </div>
             <select class="sr-only" data-telemetry-range aria-label="Telemetry time range">
+              <option value="rolling24">Last 24 hours</option>
               <option value="today">Today</option>
               <option value="week">Last 7 days</option>
               <option value="thirty">Last 30 days</option>
@@ -112,6 +113,10 @@
               <option value="all" selected>All time</option>
               <option value="custom">Custom range</option>
             </select>
+            <div class="toolbar-group">
+              <label class="muted" for="telemetry-timezone">Timezone</label>
+              <select class="select" id="telemetry-timezone" data-telemetry-timezone aria-label="Reporting timezone"></select>
+            </div>
             <div class="toolbar-group">
               <label class="muted" for="telemetry-device">Machine</label>
               <select class="select" id="telemetry-device" data-telemetry-device>
@@ -151,6 +156,7 @@
           </div>
         </section>
 
+        <p class="muted" data-telemetry-precision role="status" hidden></p>
         <section class="metric-strip telemetry-metric-strip">
           <div class="metric" title="Individual upstream model inference calls, including tool loops and subagents."><div class="metric-label">Inference requests</div><div class="metric-value num" data-metric="requests">—</div><div class="metric-note">Routed and native</div></div>
           <div class="metric" title="Input tokens processed, including cached context, plus output tokens."><div class="metric-label">Total tokens</div><div class="metric-value num" data-metric="tokens">—</div><div class="metric-note">Input + output</div></div>
@@ -293,6 +299,7 @@
     </div>
   </main>
 </div>
+<script src="/assets/telemetry-ranges.js?v={{.AssetVersion}}" defer></script>
 <script src="/assets/telemetry-devices.js?v={{.AssetVersion}}" defer></script>
 <script src="/assets/dashboard.js?v={{.AssetVersion}}" defer></script>
 </body>

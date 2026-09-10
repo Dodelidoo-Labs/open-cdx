@@ -92,10 +92,10 @@ This checklist requires credentials and deliberate browser choices, so it must b
 9. Copy the generated TOML manually into the isolated Codex config and restart Codex.
 10. Confirm `/model` contains the complete entitled native union, native auto-review/safety entries, and only compatible namespaced OpenRouter entries.
 11. Run one native model and one OpenRouter model.
-12. Choose **Reconcile Usage History…**, confirm the preview names the default `~/.codex` source and shows routed/native counts, then cancel and verify telemetry is unchanged.
+12. Choose **Reconcile This Mac’s History…**, confirm the preview names the default `~/.codex` source and shows routed/native counts, then cancel and verify telemetry is unchanged.
 13. Run a dry run against the isolated Codex home with `router-helper reconcile-usage --codex-home /absolute/test/home --dry-run`; confirm it reports the routed requests, then run the same command without `--dry-run` and verify the dashboard preserves their routed classification.
 14. Configure a LAN Ollama `http://` endpoint with **Allow HTTP** off and confirm it is rejected; enable the option and confirm the connection can be tested. Verify HTTPS and loopback HTTP still work with the option off.
-15. Choose **Reset Telemetry…**, confirm the dashboard returns to zero, then verify accounts, providers, devices, and the isolated `~/.codex` rollout files are unchanged. Confirm a new routed request starts telemetry fresh, or reconcile again.
+15. Open **Settings → Delete All Server History…**, confirm the warning identifies every machine and Cancel is the default, then confirm the dashboard returns to zero, then verify accounts, providers, devices, and the isolated `~/.codex` rollout files are unchanged. Confirm a new routed request starts telemetry fresh, or reconcile again.
 16. Pause A and confirm a shared entitled model routes through B while an A-only model becomes unavailable.
 17. Restart/recreate the Docker router without deleting its volume and confirm both accounts still refresh and route.
 18. Enroll and approve a second Mac; remove it and confirm only that helper loses access and the device row disappears.
@@ -135,3 +135,16 @@ tests verify authenticated attribution, rejection of forged IDs, and history
 retention after device deletion. Node tests exercise machine filtering without
 connecting to an installed app. Run the Swift tests to check the confirmation
 text without launching the macOS app.
+
+## Enrollment and server-history controls
+
+- With an enrolled Mac, verify Request Enrollment is disabled for the current
+  server, including while the server is unreachable or the helper restarts.
+- Change the URL to another server: enrollment becomes available. Restore the
+  enrolled URL, including equivalent host casing, default port, or trailing slash:
+  enrollment is disabled again.
+- Remove the device on the server, then refresh its status: enrollment becomes
+  available after the server rejects its credential. A temporary server error
+  must not enable duplicate enrollment.
+- Verify the HUD has no history deletion action. Settings and its confirmation
+  identify deletion as server-wide; reconciliation identifies only this Mac.

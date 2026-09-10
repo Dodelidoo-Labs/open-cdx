@@ -516,3 +516,28 @@ func TestRemoteHTTPPolicy(t *testing.T) {
 		t.Fatal("router URL with an unsupported path prefix was accepted")
 	}
 }
+
+func TestEnrollmentRequiredOnlyAfterCredentialRejection(t *testing.T) {
+	statusCode := http.StatusServiceUnavailable
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(statusCode)
+		if statusCode == http.StatusOK {
+			_, _ = writer.Write([]byte(`{"route":{"state":"connected"}}`))
+		} else {
+			_, _ = writer.Write([]byte(`{"error":{"message":"unavailable"}}`))
+		}
+	}))
+	defer server.Close()
+	daemon := &Daemon{remote: &RemoteClient{BaseURL: server.URL, DeviceToken: "token", HTTP: server.Client()}}
+	for _, sample := range []struct {
+		code     int
+		required bool
+	}{{http.StatusServiceUnavailable, false}, {http.StatusUnauthorized, true}, {http.StatusServiceUnavailable, true}, {http.StatusOK, false}} {
+		statusCode = sample.code
+		_ = daemon.refreshStatus(context.Background())
+		if got := daemon.currentStatus().EnrollmentRequired; got != sample.required {
+			t.Fatalf("HTTP %d: enrollment required = %v, want %v", sample.code, got, sample.required)
+		}
+	}
+}

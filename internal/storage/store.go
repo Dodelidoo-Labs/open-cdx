@@ -131,7 +131,11 @@ func (store *Store) migrateUsageRouting(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	expectedKey := []string{"day", "provider", "model_id", "account_id", "routing", "device_id"}
+	timestampPresent, err := store.tableHasColumn(ctx, "usage_aggregate", "recorded_at")
+	if err != nil {
+		return err
+	}
+	expectedKey := []string{"day", "provider", "model_id", "account_id", "routing", "device_id", "recorded_at"}
 	keyMatches := len(primaryKey) == len(expectedKey)
 	for index := range primaryKey {
 		if !keyMatches || primaryKey[index] != expectedKey[index] {
@@ -150,6 +154,7 @@ func (store *Store) migrateUsageRouting(ctx context.Context) error {
 	defer transaction.Rollback()
 	if _, err = transaction.ExecContext(ctx, `
 		CREATE TABLE usage_aggregate_next (
+			recorded_at TEXT NOT NULL DEFAULT '',
 			device_id TEXT NOT NULL DEFAULT '',
 			day TEXT NOT NULL,
 			provider TEXT NOT NULL,
@@ -163,9 +168,13 @@ func (store *Store) migrateUsageRouting(ctx context.Context) error {
 			cache_write_input_tokens INTEGER NOT NULL DEFAULT 0,
 			output_tokens INTEGER NOT NULL DEFAULT 0,
 			reasoning_output_tokens INTEGER NOT NULL DEFAULT 0,
-			PRIMARY KEY (day, provider, model_id, account_id, routing, device_id)
+			PRIMARY KEY (day, provider, model_id, account_id, routing, device_id, recorded_at)
 		)`); err != nil {
 		return fmt.Errorf("create usage routing table: %w", err)
+	}
+	timestampExpression := "''"
+	if timestampPresent {
+		timestampExpression = "recorded_at"
 	}
 	deviceExpression := "''"
 	if devicePresent {
@@ -176,9 +185,9 @@ func (store *Store) migrateUsageRouting(ctx context.Context) error {
 		routingExpression = "CASE WHEN routing='native' THEN 'native' ELSE 'routed' END"
 	}
 	if _, err = transaction.ExecContext(ctx, `
-		INSERT INTO usage_aggregate_next(device_id, day, provider, model_id, account_id, source, routing, requests,
+		INSERT INTO usage_aggregate_next(recorded_at, device_id, day, provider, model_id, account_id, source, routing, requests,
 			input_tokens, cached_input_tokens, cache_write_input_tokens, output_tokens, reasoning_output_tokens)
-		SELECT `+deviceExpression+`, day, provider, model_id, account_id,
+		SELECT `+timestampExpression+`, `+deviceExpression+`, day, provider, model_id, account_id,
 			CASE WHEN source='reconciled' THEN 'reconciled' ELSE 'routed' END, `+routingExpression+`, requests,
 			input_tokens, cached_input_tokens, cache_write_input_tokens, output_tokens, reasoning_output_tokens
 		FROM usage_aggregate`); err != nil {

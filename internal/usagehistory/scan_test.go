@@ -44,14 +44,26 @@ func TestScanUsesCumulativeDeltasDeduplicatesAndNeverExportsConversationContent(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.FilesScanned != 2 || snapshot.EventsImported != 3 || snapshot.DuplicateEvents != 5 || len(snapshot.Rows) != 2 {
+	if snapshot.FilesScanned != 2 || snapshot.EventsImported != 3 || snapshot.DuplicateEvents != 5 || len(snapshot.Rows) != 3 {
 		t.Fatalf("unexpected scan summary: %#v", snapshot)
 	}
 	var openRouter, ollama Row
 	for _, row := range snapshot.Rows {
 		switch row.Provider {
 		case "openrouter":
-			openRouter = row
+			if row.RecordedAt != "2026-08-28T00:00:02Z" && row.RecordedAt != "2026-08-28T00:00:04Z" {
+				t.Fatalf("unexpected timestamp: %#v", row)
+			}
+			if openRouter.Model == "" {
+				openRouter = row
+			} else {
+				openRouter.Requests += row.Requests
+				openRouter.InputTokens += row.InputTokens
+				openRouter.CachedInputTokens += row.CachedInputTokens
+				openRouter.CacheWriteInputTokens += row.CacheWriteInputTokens
+				openRouter.OutputTokens += row.OutputTokens
+				openRouter.ReasoningOutputTokens += row.ReasoningOutputTokens
+			}
 		case "ollama":
 			ollama = row
 		}
@@ -235,11 +247,14 @@ func TestScanDeduplicatesCopiedCumulativeHistoryWithRewrittenTimestamps(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.EventsImported != 2 || snapshot.DuplicateEvents != 2 || len(snapshot.Rows) != 1 {
+	if snapshot.EventsImported != 2 || snapshot.DuplicateEvents != 2 || len(snapshot.Rows) != 2 {
 		t.Fatalf("rewritten copied history was not deduplicated: %#v", snapshot)
 	}
-	row := snapshot.Rows[0]
-	if row.Requests != 2 || row.InputTokens != 180 || row.CachedInputTokens != 140 || row.OutputTokens != 30 {
+	row, next := snapshot.Rows[0], snapshot.Rows[1]
+	if row.RecordedAt != "2026-08-27T12:00:02Z" || next.RecordedAt != "2026-08-27T12:00:03Z" {
+		t.Fatalf("original timestamps lost: %#v", snapshot.Rows)
+	}
+	if row.Requests+next.Requests != 2 || row.InputTokens+next.InputTokens != 180 || row.CachedInputTokens+next.CachedInputTokens != 140 || row.OutputTokens+next.OutputTokens != 30 {
 		t.Fatalf("copied usage was counted more than once: %#v", row)
 	}
 }
@@ -264,11 +279,11 @@ func TestScanUsesLastUsageWhenCumulativeComponentsAreRebased(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Rows) != 1 {
+	if len(snapshot.Rows) != 2 {
 		t.Fatalf("unexpected rows: %#v", snapshot)
 	}
-	row := snapshot.Rows[0]
-	if row.Requests != 2 || row.InputTokens != 200 || row.CachedInputTokens != 130 || row.OutputTokens != 20 {
+	row, next := snapshot.Rows[0], snapshot.Rows[1]
+	if row.Requests+next.Requests != 2 || row.InputTokens+next.InputTokens != 200 || row.CachedInputTokens+next.CachedInputTokens != 130 || row.OutputTokens+next.OutputTokens != 20 {
 		t.Fatalf("last usage was not used as the response-level measurement: %#v", row)
 	}
 }

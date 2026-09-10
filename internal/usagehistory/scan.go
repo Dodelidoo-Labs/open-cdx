@@ -40,7 +40,7 @@ type tokenUsage struct {
 }
 
 type rowKey struct {
-	day, provider, model, routing string
+	day, provider, model, routing, recordedAt string
 }
 
 type scanState struct {
@@ -70,7 +70,7 @@ func DefaultCodexHome() (string, error) {
 // archived_sessions. Unknown records (including all prompt and response
 // records) are discarded without decoding their payloads.
 func Scan(ctx context.Context, codexHome string, now time.Time) (Snapshot, error) {
-	snapshot := Snapshot{Version: SnapshotVersion, GeneratedAt: now.UTC().Format(time.RFC3339), Rows: make([]Row, 0)}
+	snapshot := Snapshot{QuotaObservations: make([]QuotaObservation, 0), Version: SnapshotVersion, GeneratedAt: now.UTC().Format(time.RFC3339), Rows: make([]Row, 0)}
 	paths, err := rolloutPaths(codexHome)
 	if err != nil {
 		return Snapshot{}, err
@@ -108,8 +108,12 @@ func Scan(ctx context.Context, codexHome string, now time.Time) (Snapshot, error
 		if snapshot.Rows[left].Model != snapshot.Rows[right].Model {
 			return snapshot.Rows[left].Model < snapshot.Rows[right].Model
 		}
-		return snapshot.Rows[left].Routing < snapshot.Rows[right].Routing
+		if snapshot.Rows[left].Routing != snapshot.Rows[right].Routing {
+			return snapshot.Rows[left].Routing < snapshot.Rows[right].Routing
+		}
+		return snapshot.Rows[left].RecordedAt < snapshot.Rows[right].RecordedAt
 	})
+	snapshot.QuotaObservations = compactQuotaObservations(snapshot.QuotaObservations)
 	return snapshot, nil
 }
 
@@ -370,7 +374,8 @@ func scanTokenCount(line []byte, state *scanState, snapshot *Snapshot, aggregate
 		Timestamp string `json:"timestamp"`
 		Ordinal   *int64 `json:"ordinal"`
 		Payload   struct {
-			Info *struct {
+			RateLimits *rolloutRateLimits `json:"rate_limits"`
+			Info       *struct {
 				Total *tokenUsage `json:"total_token_usage"`
 				Last  *tokenUsage `json:"last_token_usage"`
 			} `json:"info"`
@@ -378,9 +383,6 @@ func scanTokenCount(line []byte, state *scanState, snapshot *Snapshot, aggregate
 	}
 	if err := json.Unmarshal(line, &record); err != nil {
 		return err
-	}
-	if record.Payload.Info == nil || (record.Payload.Info.Total == nil && record.Payload.Info.Last == nil) {
-		return nil
 	}
 	when, err := time.Parse(time.RFC3339Nano, record.Timestamp)
 	if err != nil {
@@ -391,7 +393,6 @@ func scanTokenCount(line []byte, state *scanState, snapshot *Snapshot, aggregate
 	if model == "" {
 		model = "unknown"
 	}
-	current := record.Payload.Info.Total
 	skipReplay := false
 	if state.replaying {
 		if !state.lastReplayUsage.IsZero() && when.Sub(state.lastReplayUsage) > 2*time.Second {
@@ -401,6 +402,13 @@ func scanTokenCount(line []byte, state *scanState, snapshot *Snapshot, aggregate
 		}
 		state.lastReplayUsage = when
 	}
+	if !skipReplay && provider == "openai" {
+		collectQuota(snapshot, record.Payload.RateLimits, when)
+	}
+	if record.Payload.Info == nil || (record.Payload.Info.Total == nil && record.Payload.Info.Last == nil) {
+		return nil
+	}
+	current := record.Payload.Info.Total
 	var increment tokenUsage
 	if current != nil {
 		// last_token_usage is the usage for exactly one model response. The
@@ -451,10 +459,10 @@ func scanTokenCount(line []byte, state *scanState, snapshot *Snapshot, aggregate
 		return nil
 	}
 	seen[fingerprint] = struct{}{}
-	key := rowKey{day: when.UTC().Format("2006-01-02"), provider: provider, model: model, routing: routing}
+	key := rowKey{day: when.UTC().Format("2006-01-02"), provider: provider, model: model, routing: routing, recordedAt: when.UTC().Format(time.RFC3339Nano)}
 	row := aggregates[key]
 	if row == nil {
-		row = &Row{Day: key.day, Provider: key.provider, Model: key.model, Routing: key.routing}
+		row = &Row{RecordedAt: key.recordedAt, Day: key.day, Provider: key.provider, Model: key.model, Routing: key.routing}
 		aggregates[key] = row
 	}
 	row.Requests++
@@ -528,5 +536,5 @@ func routingIdentity(configuredProvider string) string {
 }
 
 func (snapshot Snapshot) Summary() string {
-	return fmt.Sprintf("%d unique usage events from %d rollout files across %d daily model/routing rows", snapshot.EventsImported, snapshot.FilesScanned, len(snapshot.Rows))
+	return fmt.Sprintf("%d unique usage events from %d rollout files across %d timestamped model/routing rows", snapshot.EventsImported, snapshot.FilesScanned, len(snapshot.Rows))
 }

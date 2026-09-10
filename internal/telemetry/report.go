@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/Dodelidoo-Labs/open-cdx/internal/storage"
@@ -37,21 +38,33 @@ type Reconciliation struct {
 }
 
 type Report struct {
-	GeneratedAt       string          `json:"generated_at"`
-	TotalRequests     int64           `json:"total_requests"`
-	TotalInputTokens  int64           `json:"total_input_tokens"`
-	TotalOutputTokens int64           `json:"total_output_tokens"`
-	Activity          []ActivityPoint `json:"activity"`
-	Usage             []UsagePoint    `json:"usage"`
-	Reconciliation    *Reconciliation `json:"reconciliation,omitempty"`
+	AllowanceResets   []AllowanceReset        `json:"allowance_resets"`
+	TimeZone          string                  `json:"time_zone"`
+	RollingUsage      map[string][]UsagePoint `json:"rolling_usage"`
+	NextChangeAt      time.Time               `json:"-"`
+	UntimedUsage      []UsagePoint            `json:"untimed_usage"`
+	GeneratedAt       string                  `json:"generated_at"`
+	TotalRequests     int64                   `json:"total_requests"`
+	TotalInputTokens  int64                   `json:"total_input_tokens"`
+	TotalOutputTokens int64                   `json:"total_output_tokens"`
+	Activity          []ActivityPoint         `json:"activity"`
+	Usage             []UsagePoint            `json:"usage"`
+	Reconciliation    *Reconciliation         `json:"reconciliation,omitempty"`
 }
 
-func Build(aggregates []storage.UsageAggregate, reconciliation *storage.UsageReconciliation, now time.Time) Report {
+func Build(aggregates []storage.UsageAggregate, reconciliation *storage.UsageReconciliation, now time.Time, locations ...*time.Location) Report {
+	location := time.UTC
+	if len(locations) > 0 && locations[0] != nil {
+		location = locations[0]
+	}
 	report := Report{
-		GeneratedAt: now.UTC().Format(time.RFC3339),
+		TimeZone: location.String(), RollingUsage: make(map[string][]UsagePoint), UntimedUsage: make([]UsagePoint, 0),
+		GeneratedAt: now.UTC().Format(time.RFC3339Nano),
 		Activity:    make([]ActivityPoint, 0),
 		Usage:       make([]UsagePoint, 0),
 	}
+	localNow := now.In(location)
+	report.NextChangeAt = time.Date(localNow.Year(), localNow.Month(), localNow.Day()+1, 0, 0, 0, 0, location)
 	if reconciliation != nil {
 		report.Reconciliation = &Reconciliation{
 			DeviceID: reconciliation.DeviceID, ReconciledAt: reconciliation.ReconciledAt.UTC().Format(time.RFC3339),
@@ -61,8 +74,52 @@ func Build(aggregates []storage.UsageAggregate, reconciliation *storage.UsageRec
 	}
 	type usageKey struct{ day, provider, model, source, routing, device string }
 	combined := make(map[usageKey]storage.UsageAggregate)
+	rolling := map[int]map[usageKey]UsagePoint{24: {}, 168: {}, 720: {}}
 	activity := make(map[string]int64)
 	for _, aggregate := range aggregates {
+		recorded, err := time.Parse(time.RFC3339Nano, aggregate.RecordedAt)
+		precise := err == nil
+		if precise {
+			aggregate.Day = recorded.In(location).Format("2006-01-02")
+		}
+		detail := UsagePoint{DeviceID: aggregate.DeviceID, DeviceName: aggregate.DeviceName,
+			Date: aggregate.Day, Provider: aggregate.Provider, Model: aggregate.ModelID, Source: aggregate.Source, Routing: aggregate.Routing,
+			Requests: aggregate.Requests, InputTokens: aggregate.InputTokens, CachedInputTokens: aggregate.CachedInputTokens,
+			CacheWriteInputTokens: aggregate.CacheWriteInputTokens, OutputTokens: aggregate.OutputTokens, ReasoningOutputTokens: aggregate.ReasoningOutputTokens}
+		if precise {
+			key := usageKey{day: aggregate.Day, provider: aggregate.Provider, model: aggregate.ModelID, source: aggregate.Source, routing: aggregate.Routing, device: aggregate.DeviceID}
+			for hours, points := range rolling {
+				// The interval includes its lower boundary; expire just after it.
+				expires := recorded.Add(time.Duration(hours) * time.Hour).Add(time.Nanosecond)
+				if expires.After(now) && expires.Before(report.NextChangeAt) {
+					report.NextChangeAt = expires
+				}
+				if recorded.After(now) {
+					if recorded.Before(report.NextChangeAt) {
+						report.NextChangeAt = recorded
+					}
+					continue
+				}
+				if !recorded.Before(now.Add(-time.Duration(hours) * time.Hour)) {
+					current, exists := points[key]
+					if !exists {
+						current = detail
+					} else {
+						current.Requests += detail.Requests
+						current.InputTokens += detail.InputTokens
+						current.CachedInputTokens += detail.CachedInputTokens
+						current.CacheWriteInputTokens += detail.CacheWriteInputTokens
+						current.OutputTokens += detail.OutputTokens
+						current.ReasoningOutputTokens += detail.ReasoningOutputTokens
+					}
+					points[key] = current
+				}
+			}
+		}
+		if !precise {
+			report.UntimedUsage = append(report.UntimedUsage, detail)
+		}
+
 		key := usageKey{
 			device: aggregate.DeviceID, day: aggregate.Day, provider: aggregate.Provider, model: aggregate.ModelID,
 			source: aggregate.Source, routing: aggregate.Routing,
@@ -116,5 +173,16 @@ func Build(aggregates []storage.UsageAggregate, reconciliation *storage.UsageRec
 		}
 		return report.Usage[left].DeviceID < report.Usage[right].DeviceID
 	})
+	for hours, points := range rolling {
+		rows := make([]UsagePoint, 0, len(points))
+		for _, point := range points {
+			rows = append(rows, point)
+		}
+		sort.Slice(rows, func(i, j int) bool {
+			a, b := rows[i], rows[j]
+			return a.Date+"\x00"+a.DeviceID+"\x00"+a.Provider+"\x00"+a.Model+"\x00"+a.Source+"\x00"+a.Routing < b.Date+"\x00"+b.DeviceID+"\x00"+b.Provider+"\x00"+b.Model+"\x00"+b.Source+"\x00"+b.Routing
+		})
+		report.RollingUsage[strconv.Itoa(hours)] = rows
+	}
 	return report
 }

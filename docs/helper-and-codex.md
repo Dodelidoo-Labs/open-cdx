@@ -112,8 +112,11 @@ same copied session history from multiple machines, which would count it once
 for each importing device. Update the server before using this workflow; older
 servers replace telemetry globally.
 
-To start the dashboard counters over without changing the local history, use
-**Reset Telemetry…** in the menu app or run:
+This deletes server telemetry for **every machine**, including imported usage and
+allowance observations. It is available only in Settings, with confirmation;
+reconciliation replaces **this machine’s** history only. To start the dashboard
+counters over without changing local history, use
+**Settings → Delete All Server History…** in the macOS app or run:
 
 ```sh
 router-helper reset-telemetry
@@ -140,3 +143,40 @@ router. It leaves providers, devices, accounts, and all `~/.codex` files intact.
 ## Uninstall
 
 `scripts/uninstall-macos-app.sh` stops the helper, removes its three Keychain entries, and moves the app and its application-support folder to Trash. It deliberately does not read or change `~/.codex`, the Codex executable, or native Codex authentication. Remove the manually pasted provider snippet yourself if desired.
+
+### Request timestamps and time ranges
+
+The current helper preserves the original timestamp of each unique usage event.
+The router uses these timestamps for rolling usage windows and applies its
+viewer's selected reporting timezone to calendar days. Upgrade the router before importing
+with the updated helper. Reconcile the same original Codex home to add timestamps
+to older daily-only imports that already have machine attribution; do not reset
+telemetry first in that case. For v1.2.0 upgrades with unattributed history, use
+the one-time server reset and per-machine import procedure above. Other machines retain
+their history and must be reconciled separately. See
+[Dashboard timezone and rolling usage](deployment.md#dashboard-timezone-and-rolling-usage).
+
+The telemetry bar chart includes small `↻` markers for observed weekly Codex
+allowance window transitions. Hover or focus a marker for a preview; activate it
+(or expand **cycle details**) for observation bounds and recorded input + output
+tokens and requests through the next transition. Several transitions in one
+chart bucket share a marker and count. Cycle totals cover the full interval,
+independent of the chart date filter, and respect the selected machine. All times
+use the selected viewing timezone. The activity heatmap has no reset markers.
+
+Updated helpers import minimal weekly allowance observations from local rollout
+history at the next usage reconciliation. Older helpers remain compatible but
+cannot supply this history. Historical observations identify a machine, not the
+billed account: account switches can resemble resets and multiple machines may
+observe the same reset. These are inferred transitions, not a unique account
+reset count. Future server quota polls retain account attribution; their cycle
+totals include only usage whose account is still known. Reconciled history has
+no account attribution and is excluded from those account totals. Main weekly
+Codex windows are tracked; five-hour and Spark limits are excluded.
+
+A reset deadline alone is not evidence of a reset. A subsequent window change
+is required. Early transitions are bounded by adjacent observations; the chart
+uses the first new observation as their marker time. Cycle totals are approximate
+when boundaries are inferred, and daily-only records are excluded and flagged.
+Cached input is included in token totals; these counts are not allowance billing
+units. Clearing telemetry also clears the allowance observations.

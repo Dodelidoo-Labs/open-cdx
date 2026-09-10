@@ -54,13 +54,8 @@ struct RouterMenuView: View {
                 }
                 .disabled(!remoteActionsAvailable)
 
-                MenuActionButton("Reconcile Usage History…", systemImage: "clock.arrow.circlepath") {
+                MenuActionButton("Reconcile This Mac’s History…", systemImage: "clock.arrow.circlepath") {
                     model.requestUsageReconciliation()
-                }
-                .disabled(!model.status.connected || model.usageReconciliationInProgress || model.telemetryResetInProgress)
-
-                MenuActionButton("Reset Telemetry…", systemImage: "trash") {
-                    model.requestTelemetryReset()
                 }
                 .disabled(!model.status.connected || model.usageReconciliationInProgress || model.telemetryResetInProgress)
             }

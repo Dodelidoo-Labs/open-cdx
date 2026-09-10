@@ -220,7 +220,22 @@ func (manager *Manager) RefreshQuota(ctx context.Context, accountID string) erro
 	if err != nil {
 		return err
 	}
-	return manager.store.UpdateAccountQuota(ctx, accountID, quota.Plan, quota.UsedPercent, quota.ResetAt, quota.ResetCredits, quota.Raw)
+	if err := manager.store.UpdateAccountQuota(ctx, accountID, quota.Plan, quota.UsedPercent, quota.ResetAt, quota.ResetCredits, quota.Raw); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	windows, err := openai.ParseQuotaWindows(quota.Raw, now)
+	if err != nil {
+		return err
+	}
+	for _, window := range windows {
+		if window.Duration == 7*24*time.Hour && !window.ResetAt.IsZero() {
+			if err := manager.store.RecordAllowanceObservation(ctx, storage.AllowanceObservation{AccountID: accountID, ObservedAt: now, ResetAt: window.ResetAt, Used: window.UsedPercent}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (manager *Manager) RefreshCatalog(ctx context.Context, accountID, clientVersion string) error {

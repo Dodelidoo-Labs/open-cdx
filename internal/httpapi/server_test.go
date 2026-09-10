@@ -701,6 +701,10 @@ func TestDeviceCanReconcilePrivacyMinimalUsageSnapshot(t *testing.T) {
 	snapshot := usagehistory.Snapshot{
 		Version: usagehistory.SnapshotVersion, GeneratedAt: "2026-08-28T18:00:00Z",
 		FilesScanned: 3, EventsImported: 2,
+		QuotaObservations: []usagehistory.QuotaObservation{
+			{ObservedAt: "2026-08-27T17:00:00Z", ResetAt: "2026-08-28T17:00:00Z", Used: 80},
+			{ObservedAt: "2026-08-28T17:01:00Z", ResetAt: "2026-09-04T17:00:00Z", Used: 0},
+		},
 		Rows: []usagehistory.Row{{
 			Day: "2026-08-28", Provider: "openai", Model: "gpt-test", Routing: usagehistory.RoutingNative, Requests: 2,
 			InputTokens: 100, CachedInputTokens: 25, OutputTokens: 30, ReasoningOutputTokens: 10,
@@ -718,6 +722,10 @@ func TestDeviceCanReconcilePrivacyMinimalUsageSnapshot(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("reconciliation status = %d, body=%s", response.Code, response.Body.String())
+	}
+	observations, observationErr := store.AllowanceObservations(context.Background())
+	if observationErr != nil || len(observations) != 2 || observations[0].DeviceID != enrollment.DeviceID || observations[0].AccountID != "" {
+		t.Fatalf("allowance import: %#v %v", observations, observationErr)
 	}
 	usage, err := store.Usage(context.Background(), time.Time{})
 	if err != nil || len(usage) != 1 || usage[0].Source != storage.UsageSourceReconciled || usage[0].Routing != storage.UsageRoutingNative || usage[0].CachedInputTokens != 25 || usage[0].ReasoningOutputTokens != 10 {
@@ -924,5 +932,106 @@ func TestReconciliationUsesAuthenticatedMachineAndPreservesOtherMachines(t *test
 	usage, err = store.Usage(ctx, time.Time{})
 	if err != nil || len(usage) != 2 {
 		t.Fatalf("device removal deleted telemetry: %#v, %v", usage, err)
+	}
+}
+
+func TestTimestampedHistoryValidationPreservesSeparateResponses(t *testing.T) {
+	now := time.Date(2026, 9, 9, 1, 0, 0, 0, time.UTC)
+	snapshot := usagehistory.Snapshot{Version: usagehistory.SnapshotVersion, GeneratedAt: now.Format(time.RFC3339), FilesScanned: 1, EventsImported: 2,
+		Rows: []usagehistory.Row{
+			{Day: "2026-09-08", RecordedAt: "2026-09-08T12:00:00Z", Provider: "openai", Model: "astra", Routing: "routed", Requests: 1, InputTokens: 10},
+			{Day: "2026-09-08", RecordedAt: "2026-09-08T20:00:00Z", Provider: "openai", Model: "astra", Routing: "routed", Requests: 1, InputTokens: 20},
+		},
+	}
+	rows, err := validatedHistorySnapshot(snapshot, now)
+	if err != nil || len(rows) != 2 || rows[0].RecordedAt != snapshot.Rows[0].RecordedAt {
+		t.Fatalf("timestamps lost: %#v %v", rows, err)
+	}
+	for _, bad := range []string{"invalid", "2026-09-07T12:00:00Z", snapshot.Rows[0].RecordedAt} {
+		snapshot.Rows[1].RecordedAt = bad
+		if _, err := validatedHistorySnapshot(snapshot, now); err == nil {
+			t.Fatalf("accepted invalid/duplicate timestamp %q", bad)
+		}
+	}
+}
+
+func TestTimeRangeAssetsAreServed(t *testing.T) {
+	server, _ := liveTestServer(t)
+	for _, path := range []string{"/assets/telemetry-ranges.js", "/assets/telemetry-devices.js"} {
+		response := httptest.NewRecorder()
+		server.routes().ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Type"), "javascript") {
+			t.Fatalf("asset %s: %d", path, response.Code)
+		}
+	}
+	response := telemetryResponse(t, server, "")
+	cached := telemetryResponse(t, server, response.Header().Get("ETag"))
+	if _, err := time.Parse(time.RFC3339Nano, cached.Header().Get("X-OpenCDX-Generated-At")); err != nil {
+		t.Fatalf("cached response lacks authoritative clock: %v", err)
+	}
+}
+
+func TestTelemetryCacheExpiresWithoutAStorageMutation(t *testing.T) {
+	server, _ := liveTestServer(t)
+	first := telemetryResponse(t, server, "")
+	oldETag := first.Header().Get("ETag")
+	server.telemetryCache.NextChangeAt = time.Now().Add(-time.Second)
+	next := telemetryResponse(t, server, oldETag)
+	if next.Code != http.StatusOK || next.Header().Get("ETag") == oldETag {
+		t.Fatal("time-dependent report remained cached past a rolling cutoff")
+	}
+}
+
+func TestTelemetryViewerTimeZones(t *testing.T) {
+	server, store := liveTestServer(t)
+	server.location = time.UTC
+	rows := []storage.UsageAggregate{{
+		Day: "2026-09-08", RecordedAt: "2026-09-08T23:30:00Z",
+		Provider: "openai", ModelID: "test", Routing: storage.UsageRoutingNative,
+		Requests: 1, InputTokens: 10,
+	}}
+	if err := store.ReplaceUsage(context.Background(), "machine", rows, storage.UsageReconciliation{ReconciledAt: time.Now(), RowsImported: 1}); err != nil {
+		t.Fatal(err)
+	}
+	fetch := func(zone, etag string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/admin/telemetry?timezone="+url.QueryEscape(zone), nil)
+		request.Header.Set("If-None-Match", etag)
+		response := httptest.NewRecorder()
+		server.adminTelemetry(response, request)
+		return response
+	}
+	previousETag := ""
+	for _, sample := range []struct{ zone, day string }{
+		{"Europe/London", "2026-09-09"},
+		{"America/Argentina/Buenos_Aires", "2026-09-08"},
+		{"Europe/London", "2026-09-09"},
+		{"", "2026-09-08"},
+	} {
+		response := fetch(sample.zone, previousETag)
+		var report telemetry.Report
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &report) != nil {
+			t.Fatalf("timezone %q: %d %s", sample.zone, response.Code, response.Body.String())
+		}
+		wantZone := sample.zone
+		if wantZone == "" {
+			wantZone = "UTC"
+		}
+		if report.TimeZone != wantZone || len(report.Usage) != 1 || report.Usage[0].Date != sample.day || report.TotalInputTokens != 10 {
+			t.Fatalf("timezone %q: %#v", sample.zone, report)
+		}
+		previousETag = response.Header().Get("ETag")
+		if cached := fetch(sample.zone, previousETag); cached.Code != http.StatusNotModified {
+			t.Fatalf("same timezone was not cached: %d", cached.Code)
+		}
+	}
+	for _, zone := range []string{"Local", "invalid/zone", "../UTC"} {
+		if response := fetch(zone, ""); response.Code != http.StatusBadRequest {
+			t.Fatalf("invalid timezone %q: %d", zone, response.Code)
+		}
+	}
+	stored, err := store.Usage(context.Background(), time.Time{})
+	if err != nil || len(stored) != 1 || stored[0].RecordedAt != rows[0].RecordedAt || server.location != time.UTC {
+		t.Fatalf("viewing timezone modified source data or server default: %#v %v", stored, err)
 	}
 }

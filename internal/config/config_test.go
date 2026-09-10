@@ -50,3 +50,26 @@ func TestRouterRejectsNonHTTPSProviderInfrastructure(t *testing.T) {
 		t.Fatal("plaintext OpenAI infrastructure URL was accepted")
 	}
 }
+
+func TestTimeZoneIsExplicitAndValidated(t *testing.T) {
+	t.Setenv("TZ", "Asia/Tokyo")
+	t.Setenv("OPENCODEX_TIMEZONE", "")
+	cfg, err := RouterFromFlags(nil)
+	if err != nil || cfg.TimeZone != "UTC" {
+		t.Fatalf("default=%#v err=%v", cfg, err)
+	}
+	t.Setenv("OPENCODEX_TIMEZONE", "America/Argentina/Buenos_Aires")
+	cfg, err = RouterFromFlags(nil)
+	if err != nil || cfg.TimeZone != "America/Argentina/Buenos_Aires" {
+		t.Fatalf("setting=%#v err=%v", cfg, err)
+	}
+	cfg, err = RouterFromFlags([]string{"--timezone", "Europe/Zurich"})
+	if err != nil || cfg.TimeZone != "Europe/Zurich" {
+		t.Fatalf("flag=%#v err=%v", cfg, err)
+	}
+	for _, name := range []string{"Local", "invalid/zone"} {
+		if _, err := RouterFromFlags([]string{"--timezone", name}); err == nil {
+			t.Fatalf("accepted %q", name)
+		}
+	}
+}

@@ -152,6 +152,7 @@ type CatalogExclusion struct {
 }
 
 type UsageAggregate struct {
+	RecordedAt            string
 	DeviceID              string
 	DeviceName            string
 	Day                   string

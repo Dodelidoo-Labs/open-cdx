@@ -6,6 +6,7 @@ services:
       - "8080"
     environment:
       OPENCODEX_LISTEN: ":8080"
+      OPENCODEX_TIMEZONE: "${OPENCODEX_TIMEZONE:-UTC}"
       OPENCODEX_PUBLIC_URL: "https://${OPENCODEX_DOMAIN:?set OPENCODEX_DOMAIN}"
       OPENCODEX_DATABASE: "/var/lib/opencdx/router.db"
       OPENCODEX_MASTER_KEY_FILE: "/run/secrets/master_key"

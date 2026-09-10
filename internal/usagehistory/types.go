@@ -11,16 +11,18 @@ const (
 // helper to the router. It intentionally has no field capable of carrying
 // prompts, responses, file paths, credentials, or account identifiers.
 type Snapshot struct {
-	Version         int    `json:"version"`
-	GeneratedAt     string `json:"generated_at"`
-	FilesScanned    int    `json:"files_scanned"`
-	EventsImported  int    `json:"events_imported"`
-	DuplicateEvents int    `json:"duplicate_events_skipped"`
-	MalformedLines  int    `json:"malformed_lines_skipped"`
-	Rows            []Row  `json:"rows"`
+	QuotaObservations []QuotaObservation `json:"quota_observations"`
+	Version           int                `json:"version"`
+	GeneratedAt       string             `json:"generated_at"`
+	FilesScanned      int                `json:"files_scanned"`
+	EventsImported    int                `json:"events_imported"`
+	DuplicateEvents   int                `json:"duplicate_events_skipped"`
+	MalformedLines    int                `json:"malformed_lines_skipped"`
+	Rows              []Row              `json:"rows"`
 }
 
 type Row struct {
+	RecordedAt            string `json:"recorded_at,omitempty"`
 	Day                   string `json:"day"`
 	Provider              string `json:"provider"`
 	Model                 string `json:"model"`

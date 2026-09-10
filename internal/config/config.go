@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	_ "time/tzdata"
 )
 
 const (
@@ -24,6 +25,7 @@ const (
 )
 
 type Router struct {
+	TimeZone               string
 	ListenAddress          string
 	DatabasePath           string
 	MasterKeyFile          string
@@ -43,6 +45,7 @@ type Router struct {
 
 func RouterFromFlags(args []string) (Router, error) {
 	defaults := Router{
+		TimeZone:               envOr("OPENCODEX_TIMEZONE", "UTC"),
 		ListenAddress:          envOr("OPENCODEX_LISTEN", DefaultListenAddress),
 		DatabasePath:           envOr("OPENCODEX_DATABASE", "/var/lib/opencdx/router.db"),
 		MasterKeyFile:          envOr("OPENCODEX_MASTER_KEY_FILE", "/run/secrets/master_key"),
@@ -60,6 +63,7 @@ func RouterFromFlags(args []string) (Router, error) {
 		HTTPTimeout:            envDuration("OPENCODEX_HTTP_TIMEOUT", 5*time.Minute),
 	}
 	flags := flag.NewFlagSet("routerd", flag.ContinueOnError)
+	flags.StringVar(&defaults.TimeZone, "timezone", defaults.TimeZone, "Fallback IANA timezone when a viewer does not select one")
 	flags.StringVar(&defaults.ListenAddress, "listen", defaults.ListenAddress, "HTTP listen address")
 	flags.StringVar(&defaults.DatabasePath, "database", defaults.DatabasePath, "SQLite database path")
 	flags.StringVar(&defaults.MasterKeyFile, "master-key-file", defaults.MasterKeyFile, "master encryption key secret file")
@@ -76,6 +80,9 @@ func RouterFromFlags(args []string) (Router, error) {
 }
 
 func (config Router) Validate() error {
+	if _, err := LoadTimeZone(config.TimeZone); err != nil {
+		return err
+	}
 	if config.DatabasePath == "" {
 		return errors.New("database path is required")
 	}
@@ -174,4 +181,19 @@ func envDuration(name string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return parsed
+}
+
+// Empty means the explicit UTC default, never the host's local timezone.
+func LoadTimeZone(name string) (*time.Location, error) {
+	if name == "" {
+		name = "UTC"
+	}
+	if name == "Local" {
+		return nil, errors.New("timezone must be an explicit IANA name, not Local")
+	}
+	location, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, fmt.Errorf("invalid timezone %q: %w", name, err)
+	}
+	return location, nil
 }

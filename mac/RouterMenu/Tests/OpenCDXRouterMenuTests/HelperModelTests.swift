@@ -4,6 +4,44 @@ import XCTest
 @testable import OpenCDXRouterMenu
 
 final class HelperModelTests: XCTestCase {
+    func testEnrollmentStaysDisabledForAnEnrolledServerDuringOutages() {
+        var status = HelperStatus()
+        status.routerURL = "https://router.example.com"
+        status.connected = true
+        func allowed(_ url: String, busy: Bool = false) -> Bool {
+            enrollmentRequestAllowed(routerURL: url, configuredRouterURL: "https://router.example.com",
+                                     deviceID: "device", status: status, inProgress: busy)
+        }
+        XCTAssertFalse(allowed(" HTTPS://ROUTER.EXAMPLE.COM:443/ "))
+        status.connected = false
+        status.lastError = "remote router is unreachable"
+        XCTAssertFalse(allowed("https://router.example.com"))
+        XCTAssertTrue(allowed("https://other.example.com"))
+        XCTAssertTrue(allowed("https://router.example.com/other"))
+        XCTAssertFalse(allowed("https://other.example.com", busy: true))
+        XCTAssertFalse(allowed("invalid"))
+        status.enrollmentRequired = true
+        XCTAssertTrue(allowed("https://router.example.com"))
+        status.routerURL = "https://old.example.com"
+        XCTAssertFalse(allowed("https://router.example.com"))
+    }
+
+    func testEnrollmentDoesNotRequireAConnectionWhenNeverEnrolled() {
+        XCTAssertTrue(enrollmentRequestAllowed(routerURL: "https://router.example.com",
+                                               configuredRouterURL: "", deviceID: "",
+                                               status: HelperStatus(), inProgress: false))
+        XCTAssertFalse(enrollmentRequestAllowed(routerURL: "https://router.example.com",
+                                                configuredRouterURL: "https://router.example.com", deviceID: "device",
+                                                status: HelperStatus(), inProgress: false))
+    }
+
+    func testEnrollmentRequiredStatusIsBackwardCompatible() throws {
+        let old = try JSONDecoder().decode(HelperStatus.self, from: Data(#"{"connected":false}"#.utf8))
+        XCTAssertFalse(old.enrollmentRequired)
+        let revoked = try JSONDecoder().decode(HelperStatus.self, from: Data(#"{"connected":false,"enrollment_required":true}"#.utf8))
+        XCTAssertTrue(revoked.enrollmentRequired)
+    }
+
     func testProductIdentityAndOAuthURLUseDodelidooNamespace() throws {
         XCTAssertEqual(openCDXApplicationIdentifier, "com.dodelidoo.opencdx")
         XCTAssertTrue(isOpenCDXOAuthURL(try XCTUnwrap(URL(string: "com.dodelidoo.opencdx://oauth/openai/start"))))

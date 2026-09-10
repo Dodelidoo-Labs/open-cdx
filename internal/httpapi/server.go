@@ -21,6 +21,7 @@ import (
 
 	"github.com/Dodelidoo-Labs/open-cdx/internal/accounts"
 	"github.com/Dodelidoo-Labs/open-cdx/internal/catalog"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/config"
 	secure "github.com/Dodelidoo-Labs/open-cdx/internal/crypto"
 	"github.com/Dodelidoo-Labs/open-cdx/internal/providers/ollama"
 	"github.com/Dodelidoo-Labs/open-cdx/internal/providers/openai"
@@ -36,20 +37,24 @@ import (
 const sessionLifetime = 12 * time.Hour
 
 type Server struct {
-	store       *storage.Store
-	accounts    *accounts.Manager
-	catalog     *catalog.Manager
-	proxy       *routing.Proxy
-	status      *routing.StatusRegistry
-	adminSecret string
-	publicURL   *url.URL
-	insecureDev bool
-	httpClient  *http.Client
-	updates     *appversion.UpdateChecker
-	templates   *template.Template
-	sessionsMu  sync.Mutex
-	sessions    map[string]adminSession
-	handler     http.Handler
+	telemetryMu       sync.Mutex
+	telemetryCache    *telemetry.Report
+	telemetryCacheKey  string
+	location          *time.Location
+	store             *storage.Store
+	accounts          *accounts.Manager
+	catalog           *catalog.Manager
+	proxy             *routing.Proxy
+	status            *routing.StatusRegistry
+	adminSecret       string
+	publicURL         *url.URL
+	insecureDev       bool
+	httpClient        *http.Client
+	updates           *appversion.UpdateChecker
+	templates         *template.Template
+	sessionsMu        sync.Mutex
+	sessions          map[string]adminSession
+	handler           http.Handler
 }
 
 type adminSession struct {
@@ -59,7 +64,7 @@ type adminSession struct {
 
 type deviceContextKey struct{}
 
-func New(store *storage.Store, accountManager *accounts.Manager, catalogManager *catalog.Manager, proxy *routing.Proxy, status *routing.StatusRegistry, adminSecret, publicBaseURL string, insecureDev bool, httpClient *http.Client) (*Server, error) {
+func New(store *storage.Store, accountManager *accounts.Manager, catalogManager *catalog.Manager, proxy *routing.Proxy, status *routing.StatusRegistry, adminSecret, publicBaseURL string, insecureDev bool, httpClient *http.Client, locations ...*time.Location) (*Server, error) {
 	parsedURL, err := url.Parse(publicBaseURL)
 	if err != nil {
 		return nil, err
@@ -69,8 +74,13 @@ func New(store *storage.Store, accountManager *accounts.Manager, catalogManager 
 		return nil, fmt.Errorf("parse dashboard templates: %w", err)
 	}
 	updates := appversion.NewUpdateChecker(httpClient)
+	location := time.UTC
+	if len(locations) > 0 && locations[0] != nil {
+		location = locations[0]
+	}
 	server := &Server{
-		store: store, accounts: accountManager, catalog: catalogManager, proxy: proxy, status: status,
+		location: location,
+		store:    store, accounts: accountManager, catalog: catalogManager, proxy: proxy, status: status,
 		adminSecret: adminSecret, publicURL: parsedURL, insecureDev: insecureDev, httpClient: httpClient,
 		updates: updates, templates: templates, sessions: make(map[string]adminSession),
 	}
@@ -153,6 +163,8 @@ func (server *Server) routes() http.Handler {
 	mux.Handle("POST /v1/responses", server.device(http.HandlerFunc(server.responses)))
 	mux.Handle("POST /v1/responses/compact", server.device(http.HandlerFunc(server.responses)))
 	mux.HandleFunc("GET /admin/login", server.loginPage)
+	mux.HandleFunc("GET /assets/telemetry-ranges.js", staticAsset("telemetry-ranges.js", "text/javascript; charset=utf-8"))
+	mux.HandleFunc("GET /assets/telemetry-devices.js", staticAsset("telemetry-devices.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /assets/dashboard.js", staticAsset("dashboard.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /assets/dashboard.css", staticAsset("dashboard.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET /assets/material-symbols-outlined.woff2", staticAsset("material-symbols-outlined.woff2", "font/woff2"))
@@ -383,7 +395,7 @@ func (server *Server) refreshQuotas(writer http.ResponseWriter, request *http.Re
 
 func (server *Server) reconcileUsage(writer http.ResponseWriter, request *http.Request) {
 	var snapshot usagehistory.Snapshot
-	if !decodeJSONLimit(writer, request, &snapshot, 32<<20) {
+	if !decodeJSONLimit(writer, request, &snapshot, 256<<20) {
 		return
 	}
 	aggregates, err := validatedHistorySnapshot(snapshot, time.Now().UTC())
@@ -391,11 +403,29 @@ func (server *Server) reconcileUsage(writer http.ResponseWriter, request *http.R
 		writeAPIError(writer, http.StatusBadRequest, "invalid_usage_history", err.Error())
 		return
 	}
+	var observations []storage.AllowanceObservation
+	if snapshot.QuotaObservations != nil {
+		observations = make([]storage.AllowanceObservation, 0, len(snapshot.QuotaObservations))
+		if len(snapshot.QuotaObservations) > 1000000 {
+			writeAPIError(writer, http.StatusBadRequest, "invalid_usage_history", "too many allowance observations")
+			return
+		}
+		for _, row := range snapshot.QuotaObservations {
+			observed, e1 := time.Parse(time.RFC3339Nano, row.ObservedAt)
+			reset, e2 := time.Parse(time.RFC3339Nano, row.ResetAt)
+			observation := storage.AllowanceObservation{ObservedAt: observed, ResetAt: reset, Used: row.Used}
+			if e1 != nil || e2 != nil || observation.Validate(time.Now()) != nil {
+				writeAPIError(writer, http.StatusBadRequest, "invalid_usage_history", "invalid allowance observation")
+				return
+			}
+			observations = append(observations, observation)
+		}
+	}
 	reconciledAt := time.Now().UTC()
 	if err = server.store.ReplaceUsage(request.Context(), currentDevice(request.Context()).ID, aggregates, storage.UsageReconciliation{
 		ReconciledAt: reconciledAt, FilesScanned: snapshot.FilesScanned,
 		EventsImported: snapshot.EventsImported, RowsImported: len(aggregates),
-	}); err != nil {
+	}, observations); err != nil {
 		writeAPIError(writer, http.StatusInternalServerError, "usage_reconciliation_failed", "usage history could not be stored")
 		return
 	}
@@ -424,7 +454,7 @@ func validatedHistorySnapshot(snapshot usagehistory.Snapshot, now time.Time) ([]
 	if snapshot.FilesScanned < 1 || snapshot.FilesScanned > 1_000_000 || snapshot.EventsImported < 1 || snapshot.EventsImported > 100_000_000 {
 		return nil, errors.New("usage history summary is outside supported limits")
 	}
-	if len(snapshot.Rows) == 0 || len(snapshot.Rows) > 100_000 {
+	if len(snapshot.Rows) == 0 || len(snapshot.Rows) > 1_000_000 {
 		return nil, errors.New("usage history contains no importable rows or is too large")
 	}
 	seen := make(map[string]struct{}, len(snapshot.Rows))
@@ -446,7 +476,14 @@ func validatedHistorySnapshot(snapshot usagehistory.Snapshot, now time.Time) ([]
 			!validUsageCount(row.CacheWriteInputTokens) || !validUsageCount(row.OutputTokens) || !validUsageCount(row.ReasoningOutputTokens) {
 			return nil, errors.New("usage history contains invalid counters")
 		}
-		key := row.Day + "\x00" + provider + "\x00" + model + "\x00" + routing
+		if row.RecordedAt != "" {
+			recorded, err := time.Parse(time.RFC3339Nano, row.RecordedAt)
+			if err != nil || recorded.UTC().Format("2006-01-02") != row.Day || recorded.After(generatedAt.Add(5*time.Minute)) {
+				return nil, errors.New("usage history contains an invalid timestamp")
+			}
+			row.RecordedAt = recorded.UTC().Format(time.RFC3339Nano)
+		}
+		key := row.RecordedAt + "\x00" + row.Day + "\x00" + provider + "\x00" + model + "\x00" + routing
 		if _, duplicate := seen[key]; duplicate {
 			return nil, errors.New("usage history contains duplicate rows")
 		}
@@ -456,7 +493,7 @@ func validatedHistorySnapshot(snapshot usagehistory.Snapshot, now time.Time) ([]
 		}
 		requests += row.Requests
 		aggregates = append(aggregates, storage.UsageAggregate{
-			Day: row.Day, Provider: provider, ModelID: model, Routing: routing, Requests: row.Requests,
+			RecordedAt: row.RecordedAt, Day: row.Day, Provider: provider, ModelID: model, Routing: routing, Requests: row.Requests,
 			InputTokens: row.InputTokens, CachedInputTokens: row.CachedInputTokens,
 			CacheWriteInputTokens: row.CacheWriteInputTokens, OutputTokens: row.OutputTokens,
 			ReasoningOutputTokens: row.ReasoningOutputTokens,
@@ -615,29 +652,65 @@ func (server *Server) dashboard(writer http.ResponseWriter, request *http.Reques
 }
 
 func (server *Server) adminTelemetry(writer http.ResponseWriter, request *http.Request) {
+	location := server.location
+	if location == nil {
+		location = time.UTC
+	}
+	if name := request.URL.Query().Get("timezone"); name != "" {
+		var err error
+		location, err = config.LoadTimeZone(name)
+		if err != nil {
+			writeAPIError(writer, http.StatusBadRequest, "invalid_timezone", "timezone must be a valid IANA name")
+			return
+		}
+	}
 	now := time.Now().UTC()
+	writer.Header().Set("Date", now.Format(http.TimeFormat))
+	writer.Header().Set("X-OpenCDX-Generated-At", now.Format(time.RFC3339Nano))
+
+	// Reuse aggregation until a write, an exact rolling cutoff, or local midnight.
+	server.telemetryMu.Lock()
+	defer server.telemetryMu.Unlock()
 	seed, revision := server.store.TelemetryRevision()
-	etag := telemetryETag(seed, revision, now)
+	key := fmt.Sprintf("%s:%d:%s", seed, revision, location.String())
+	if server.telemetryCache == nil || server.telemetryCacheKey != key || !now.Before(server.telemetryCache.NextChangeAt) {
+		usage, err := server.store.Usage(request.Context(), time.Time{})
+		if err != nil {
+			writeAPIError(writer, http.StatusInternalServerError, "telemetry_unavailable", "aggregate telemetry is unavailable")
+			return
+		}
+		var reconciliation *storage.UsageReconciliation
+		metadata, err := server.store.UsageReconciliation(request.Context())
+		if err == nil {
+			reconciliation = &metadata
+		} else if !errors.Is(err, storage.ErrNotFound) {
+			writeAPIError(writer, http.StatusInternalServerError, "telemetry_unavailable", "reconciliation metadata is unavailable")
+			return
+		}
+		observations, err := server.store.AllowanceObservations(request.Context())
+		if err != nil {
+			writeAPIError(writer, http.StatusInternalServerError, "telemetry_unavailable", "allowance observations are unavailable")
+			return
+		}
+		report := telemetry.Build(usage, reconciliation, now, location)
+		report.AllowanceResets = telemetry.BuildAllowanceResets(observations, usage, now)
+		for _, observation := range observations {
+			if observation.ObservedAt.After(now) && observation.ObservedAt.Before(report.NextChangeAt) {
+				report.NextChangeAt = observation.ObservedAt
+			}
+		}
+		server.telemetryCache = &report
+		server.telemetryCacheKey = key
+	}
+	report := *server.telemetryCache
+	etag := telemetryETag(key+report.GeneratedAt, revision, now)
+	writer.Header().Set("ETag", etag)
 	if requestETagMatches(request, etag) {
-		writer.Header().Set("ETag", etag)
 		writer.WriteHeader(http.StatusNotModified)
 		return
 	}
-	usage, err := server.store.Usage(request.Context(), time.Time{})
-	if err != nil {
-		writeAPIError(writer, http.StatusInternalServerError, "telemetry_unavailable", "aggregate telemetry is unavailable")
-		return
-	}
-	var reconciliation *storage.UsageReconciliation
-	metadata, metadataErr := server.store.UsageReconciliation(request.Context())
-	if metadataErr == nil {
-		reconciliation = &metadata
-	} else if !errors.Is(metadataErr, storage.ErrNotFound) {
-		writeAPIError(writer, http.StatusInternalServerError, "telemetry_unavailable", "reconciliation metadata is unavailable")
-		return
-	}
-	writer.Header().Set("ETag", etag)
-	writeJSON(writer, http.StatusOK, telemetry.Build(usage, reconciliation, now))
+	report.GeneratedAt = now.Format(time.RFC3339Nano)
+	writeJSON(writer, http.StatusOK, report)
 }
 
 func (server *Server) adminDevicesLive(writer http.ResponseWriter, request *http.Request) {
@@ -742,7 +815,7 @@ func liveQuotaWindows(windows []quotaWindowState) []accountLiveQuotaWindow {
 	return result
 }
 
-func templateQuotaWindows(windows []quotaWindowState) []quotaWindowView {
+func (server *Server) templateQuotaWindows(windows []quotaWindowState) []quotaWindowView {
 	result := make([]quotaWindowView, 0, len(windows))
 	for _, window := range windows {
 		view := quotaWindowView{
@@ -755,7 +828,7 @@ func templateQuotaWindows(windows []quotaWindowState) []quotaWindowView {
 			view.PaceDifferencePercent = window.PaceBufferPercent
 		}
 		if !window.ResetAt.IsZero() {
-			view.Reset = window.ResetAt.Local().Format("Jan 2 · 15:04")
+			view.Reset = window.ResetAt.In(server.location).Format("Jan 2 · 15:04")
 			view.ResetAt = browserTimestamp(window.ResetAt)
 		}
 		result = append(result, view)
@@ -958,6 +1031,7 @@ func (server *Server) adminProviderRemoveSecret(writer http.ResponseWriter, requ
 }
 
 type dashboardPage struct {
+	TimeZone                string
 	CSRF                    string
 	AssetVersion            string
 	Message                 string
@@ -1022,7 +1096,7 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 	if server.updates != nil {
 		update = server.updates.Snapshot()
 	}
-	page := dashboardPage{
+	page := dashboardPage{TimeZone: server.location.String(),
 		CSRF: csrf, AccountsHealthy: true, RepositoryURL: appversion.RepositoryURL,
 		AssetVersion:   assetVersion(),
 		CurrentVersion: update.Current, LatestVersion: update.Latest, UpdateAvailable: update.Available,
@@ -1046,9 +1120,9 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 		}
 		codexWindows := accountQuotaWindowStates(account.RawQuota, account.QuotaUsedPercent, account.QuotaResetAt, now)
 		if len(codexWindows) > 0 {
-			view.Quotas = append(view.Quotas, quotaView{Name: "Codex", Windows: templateQuotaWindows(codexWindows)})
+			view.Quotas = append(view.Quotas, quotaView{Name: "Codex", Windows: server.templateQuotaWindows(codexWindows)})
 			if !codexWindows[0].ResetAt.IsZero() {
-				view.CodexReset = codexWindows[0].ResetAt.Local().Format("Jan 2 · 15:04")
+				view.CodexReset = codexWindows[0].ResetAt.In(server.location).Format("Jan 2 · 15:04")
 				view.CodexResetAt = browserTimestamp(codexWindows[0].ResetAt)
 			}
 			for _, window := range codexWindows {
@@ -1061,7 +1135,7 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 				if !strings.Contains(identity, "spark") {
 					continue
 				}
-				spark := quotaView{Name: "Codex Spark", Spark: true, Windows: templateQuotaWindows([]quotaWindowState{{
+				spark := quotaView{Name: "Codex Spark", Spark: true, Windows: server.templateQuotaWindows([]quotaWindowState{{
 					Label: "Allowance", Remaining: minFloat(100, maxFloat(0, 100-quota.UsedPercent)), ResetAt: quota.ResetAt,
 				}})}
 				considerReset(quota.ResetAt)
@@ -1092,8 +1166,8 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 		page.AccountsHealthy = false
 	}
 	if !nearestReset.IsZero() {
-		page.NearestResetDate = nearestReset.Local().Format("Jan 2")
-		page.NearestResetTime = nearestReset.Local().Format("15:04")
+		page.NearestResetDate = nearestReset.In(server.location).Format("Jan 2")
+		page.NearestResetTime = nearestReset.In(server.location).Format("15:04")
 		page.NearestResetAt = browserTimestamp(nearestReset)
 	}
 	providerConfigs, err := server.store.Providers(ctx)
@@ -1104,7 +1178,7 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 	for _, provider := range providerConfigs {
 		view := providerView{
 			Name: provider.Name, BaseURL: provider.BaseURL, Enabled: provider.Enabled, Health: provider.Health,
-			LastError: provider.LastError, Updated: friendlyTime(provider.UpdatedAt), UpdatedAt: browserTimestamp(provider.UpdatedAt),
+			LastError: provider.LastError, Updated: server.friendlyTime(provider.UpdatedAt), UpdatedAt: browserTimestamp(provider.UpdatedAt),
 			AllowHTTP: provider.AllowHTTP(),
 		}
 		switch provider.Name {
@@ -1130,7 +1204,7 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 		}
 	}
 	if !latestProviderCheck.IsZero() {
-		page.ProvidersChecked = friendlyTime(latestProviderCheck)
+		page.ProvidersChecked = server.friendlyTime(latestProviderCheck)
 		page.ProvidersCheckedAt = browserTimestamp(latestProviderCheck)
 	}
 	devices, err := server.deviceViews(ctx)
@@ -1174,8 +1248,8 @@ func (server *Server) deviceViews(ctx context.Context) ([]deviceView, error) {
 		name := strings.ToLower(device.Name)
 		views = append(views, deviceView{
 			ID: device.ID, Name: device.Name, Status: device.Status,
-			LastSeen: friendlyTime(device.LastSeenAt), LastSeenAt: browserTimestamp(device.LastSeenAt),
-			CatalogSynced: friendlyTime(device.CatalogSynced), CatalogSyncedAt: browserTimestamp(device.CatalogSynced),
+			LastSeen: server.friendlyTime(device.LastSeenAt), LastSeenAt: browserTimestamp(device.LastSeenAt),
+			CatalogSynced: server.friendlyTime(device.CatalogSynced), CatalogSyncedAt: browserTimestamp(device.CatalogSynced),
 			Laptop: strings.Contains(name, "book") || strings.Contains(name, "laptop"),
 		})
 	}
@@ -1397,11 +1471,11 @@ func safeError(err error) string {
 	return message
 }
 
-func friendlyTime(value time.Time) string {
+func (server *Server) friendlyTime(value time.Time) string {
 	if value.IsZero() {
 		return "never"
 	}
-	return value.Local().Format("Jan 2 15:04")
+	return value.In(server.location).Format("Jan 2 15:04")
 }
 
 func browserTimestamp(value time.Time) string {

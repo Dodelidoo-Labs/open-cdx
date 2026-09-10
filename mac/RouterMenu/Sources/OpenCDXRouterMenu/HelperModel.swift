@@ -96,6 +96,7 @@ struct AccountAllowanceStatus: Codable {
 struct HelperStatus: Codable {
     var state = "disconnected"
     var connected = false
+    var enrollmentRequired = false
     var activeRequests = 0
     var routerURL = ""
     var deviceName = ""
@@ -115,6 +116,7 @@ struct HelperStatus: Codable {
     enum CodingKeys: String, CodingKey {
         case state, connected, accounts, provider, model, account
         case activeRequests = "active_requests"
+        case enrollmentRequired = "enrollment_required"
         case routerURL = "router_url"
         case deviceName = "device_name"
         case quotaRemaining = "quota_remaining"
@@ -133,6 +135,7 @@ struct HelperStatus: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         state = try container.decodeIfPresent(String.self, forKey: .state) ?? "disconnected"
         connected = try container.decodeIfPresent(Bool.self, forKey: .connected) ?? false
+        enrollmentRequired = try container.decodeIfPresent(Bool.self, forKey: .enrollmentRequired) ?? false
         activeRequests = try container.decodeIfPresent(Int.self, forKey: .activeRequests) ?? 0
         routerURL = try container.decodeIfPresent(String.self, forKey: .routerURL) ?? ""
         deviceName = try container.decodeIfPresent(String.self, forKey: .deviceName) ?? ""
@@ -149,6 +152,28 @@ struct HelperStatus: Codable {
         lastRequestAt = try container.decodeIfPresent(Date.self, forKey: .lastRequestAt)
         lastError = try container.decodeIfPresent(String.self, forKey: .lastError) ?? ""
     }
+}
+
+func enrollmentRouterIdentity(_ value: String) -> String? {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard var url = URLComponents(string: trimmed),
+          let scheme = url.scheme?.lowercased(), ["https", "http"].contains(scheme),
+          let host = url.host?.lowercased(), !host.isEmpty,
+          url.user == nil, url.password == nil, url.query == nil, url.fragment == nil else { return nil }
+    url.scheme = scheme
+    url.host = host
+    if (scheme == "https" && url.port == 443) || (scheme == "http" && url.port == 80) { url.port = nil }
+    while url.path.hasSuffix("/") { url.path.removeLast() }
+    return url.string
+}
+
+func enrollmentRequestAllowed(routerURL: String, configuredRouterURL: String, deviceID: String,
+                              status: HelperStatus, inProgress: Bool) -> Bool {
+    guard !inProgress, let target = enrollmentRouterIdentity(routerURL) else { return false }
+    if target == enrollmentRouterIdentity(status.routerURL), status.connected { return false }
+    guard !deviceID.isEmpty, target == enrollmentRouterIdentity(configuredRouterURL) else { return true }
+    // A timeout or daemon restart does not mean the server removed this enrollment.
+    return target == enrollmentRouterIdentity(status.routerURL) && status.enrollmentRequired
 }
 
 func operationAfterApplyingStatus(_ operation: String, status: HelperStatus) -> String {
@@ -208,7 +233,7 @@ func usageHistoryPreviewMessage(_ preview: UsageHistoryPreview, codexHome: Strin
     var message = """
     Source: \(codexHome)
 
-    Scanned \(preview.filesScanned.formatted()) rollout files and found \(preview.eventsImported.formatted()) usage events across \(preview.rowsFound.formatted()) daily model/routing rows:
+    Scanned \(preview.filesScanned.formatted()) rollout files and found \(preview.eventsImported.formatted()) usage events across \(preview.rowsFound.formatted()) usage rows:
     • \(preview.routedRequests.formatted()) routed
     • \(preview.nativeRequests.formatted()) native (not routed)
     """
@@ -232,6 +257,9 @@ final class HelperModel: ObservableObject {
     @Published private(set) var activityPulsePhase = false
     @Published private(set) var usageReconciliationInProgress = false
     @Published private(set) var telemetryResetInProgress = false
+    @Published private(set) var enrollmentInProgress = false
+    @Published private(set) var configuredRouterURL = ""
+    @Published private(set) var configuredDeviceID = ""
 
     private var timer: AnyCancellable?
     private var activityTimer: AnyCancellable?
@@ -287,7 +315,13 @@ final class HelperModel: ObservableObject {
     }
 #endif
 
+    var canRequestEnrollment: Bool {
+        enrollmentRequestAllowed(routerURL: routerURL, configuredRouterURL: configuredRouterURL,
+                                 deviceID: configuredDeviceID, status: status, inProgress: enrollmentInProgress || pairing)
+    }
+
     func requestEnrollment() {
+        guard canRequestEnrollment else { return }
         let trimmed = routerURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             setErrorOperation("Enter the remote router URL.")
@@ -298,9 +332,11 @@ final class HelperModel: ObservableObject {
         UserDefaults.standard.set(insecureDevelopment, forKey: "insecureDevelopment")
         var arguments = ["enroll", "--router", trimmed, "--name", deviceName, "--no-wait"]
         if insecureDevelopment { arguments.append("--insecure-dev") }
+        enrollmentInProgress = true
         setOperation("Requesting enrollment…")
         runHelper(arguments) { [weak self] result in
             guard let self else { return }
+            self.enrollmentInProgress = false
             if result.success {
                 self.configured = true
                 self.updateHelperHealthURL()
@@ -428,22 +464,24 @@ final class HelperModel: ObservableObject {
             return
         }
         let alert = NSAlert()
-        alert.messageText = "Reset all router telemetry?"
-        alert.informativeText = "This permanently deletes aggregate request and token history stored by OpenCDX, including reconciled history. Providers, devices, accounts, and every file in ~/.codex remain unchanged. New routed usage starts again from zero, and you can reconcile local history later."
+        alert.messageText = "Delete history for every machine on this server?"
+        alert.informativeText = "Server: \(status.routerURL)\n\nThis permanently deletes request, token, and allowance history for ALL machines on this server, including imported history. It cannot be undone.\n\nLocal Codex files, enrollments, accounts, and providers are preserved. To rebuild history, reconcile each machine separately. Do not delete server history between imports."
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Reset Telemetry")
         alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else {
+        alert.addButton(withTitle: "Delete All Server History")
+        alert.buttons[0].keyEquivalent = "\r"
+        alert.buttons[1].keyEquivalent = ""
+        guard alert.runModal() == .alertSecondButtonReturn else {
             setConfirmationOperation("Telemetry was not changed.")
             return
         }
         telemetryResetInProgress = true
-        setOperation("Resetting router telemetry…")
+        setOperation("Deleting all server history…")
         runHelper(["reset-telemetry"], timeout: 60) { [weak self] result in
             guard let self else { return }
             self.telemetryResetInProgress = false
             if result.success {
-                self.setConfirmationOperation("Telemetry reset. Local Codex history was not changed.")
+                self.setConfirmationOperation("History deleted for all machines on the server. Local Codex history was not changed.")
             } else {
                 self.setErrorOperation(result.error)
             }
@@ -480,6 +518,7 @@ final class HelperModel: ObservableObject {
 
     func refreshStatus() {
         configured = helperConfigurationExists
+        updateHelperHealthURL()
         guard configured else {
             markSetupRequired()
             return
@@ -736,8 +775,12 @@ final class HelperModel: ObservableObject {
               let data = try? Data(contentsOf: configURL),
               let config = try? JSONDecoder().decode(HelperRuntimeConfiguration.self, from: data) else {
             helperHealthURL = nil
+            configuredRouterURL = ""
+            configuredDeviceID = ""
             return
         }
+        configuredRouterURL = config.routerURL ?? ""
+        configuredDeviceID = config.deviceID ?? ""
         let port = config.listenPort == 0 ? 17464 : config.listenPort
         helperHealthURL = URL(string: "http://127.0.0.1:\(port)/healthz")
     }
@@ -821,9 +864,13 @@ final class HelperModel: ObservableObject {
 
 private struct HelperRuntimeConfiguration: Decodable {
     let listenPort: Int
+    let routerURL: String?
+    let deviceID: String?
 
     enum CodingKeys: String, CodingKey {
         case listenPort = "listen_port"
+        case routerURL = "router_url"
+        case deviceID = "device_id"
     }
 }
 

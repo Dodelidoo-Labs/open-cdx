@@ -274,7 +274,7 @@ func TestExistingUsageTableMigratesDetailedCounters(t *testing.T) {
 	}
 	store := testStore(t, path)
 	primaryKey, err := store.tablePrimaryKeyColumns(context.Background(), "usage_aggregate")
-	if err != nil || len(primaryKey) != 6 || primaryKey[4] != "routing" || primaryKey[5] != "device_id" {
+	if err != nil || len(primaryKey) != 7 || primaryKey[6] != "recorded_at" || primaryKey[4] != "routing" || primaryKey[5] != "device_id" {
 		t.Fatalf("legacy usage primary key was not migrated: %#v, %v", primaryKey, err)
 	}
 	replacement := []UsageAggregate{{
@@ -473,5 +473,48 @@ func TestMigrationRemovesLegacyRevokedDeviceRows(t *testing.T) {
 	}
 	if devices, err := store.Devices(context.Background()); err != nil || len(devices) != 0 {
 		t.Fatalf("legacy revoked device remains after migration: %#v, %v", devices, err)
+	}
+}
+
+func TestTimestampedUsageSurvivesReopenAndKeepsLegacyTotals(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "timed.db")
+	store := testStore(t, path)
+	ctx := context.Background()
+	rows := []UsageAggregate{
+		{Day: "2026-09-08", ModelID: "astra", Provider: "openai", Routing: UsageRoutingRouted, Requests: 1, InputTokens: 10},
+		{Day: "2026-09-08", RecordedAt: "2026-09-08T12:00:00Z", ModelID: "astra", Provider: "openai", Routing: UsageRoutingRouted, Requests: 1, InputTokens: 20},
+		{Day: "2026-09-08", RecordedAt: "2026-09-08T20:00:00Z", ModelID: "astra", Provider: "openai", Routing: UsageRoutingRouted, Requests: 1, InputTokens: 30},
+	}
+	if err := store.ReplaceUsage(ctx, "a", rows, UsageReconciliation{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := testStore(t, path)
+	got, err := reopened.Usage(ctx, time.Time{})
+	if err != nil || len(got) != 3 {
+		t.Fatalf("lost timestamp rows on migration/reopen: %#v %v", got, err)
+	}
+	var sum int64
+	instants := make(map[string]bool)
+	for _, row := range got {
+		sum += row.InputTokens
+		instants[row.RecordedAt] = true
+	}
+	if sum != 60 || !instants[""] || !instants[rows[1].RecordedAt] || !instants[rows[2].RecordedAt] {
+		t.Fatalf("history changed: %#v", got)
+	}
+	if err := reopened.RecordUsage(ctx, "a", "openai", "astra", "account", 40, 2); err != nil {
+		t.Fatal(err)
+	}
+	got, err = reopened.Usage(ctx, time.Time{})
+	if err != nil || len(got) != 4 {
+		t.Fatalf("live usage lost: %#v %v", got, err)
+	}
+	for _, row := range got {
+		if row.AccountID == "account" && row.RecordedAt == "" {
+			t.Fatal("live request lacks timestamp")
+		}
 	}
 }

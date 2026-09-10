@@ -112,3 +112,47 @@ The version link below the dashboard logout control turns red when GitHub report
 The OpenAI authorization, ChatGPT API, and Codex Responses endpoints must always be absolute HTTPS URLs, including during development.
 
 For the source-built HTTP stack and the isolated Multipass workflow, see [Development](development.md).
+
+## Dashboard timezone and rolling usage
+
+The dashboard defaults to the viewing browser's timezone. Its **Timezone**
+selector can show statistics in any listed IANA timezone, including UTC. The
+choice is remembered in that browser; **Automatic** follows the browser timezone
+on page load. It applies independently of the Machine filter: a London viewer
+can inspect any machine's usage using London calendar dates, while another viewer
+uses Buenos Aires dates. Changing it refreshes charts, calendar ranges, reset
+markers, timestamps, and CSV date grouping without changing stored UTC timestamps
+or another viewer's settings. Rolling 24h/7d/30d durations remain identical.
+
+Set the fallback `OPENCODEX_TIMEZONE` in the server environment (or in `docker/.env` for
+production Compose). It accepts an IANA name, for example:
+
+```dotenv
+OPENCODEX_TIMEZONE=America/Argentina/Buenos_Aires
+```
+
+The fallback is explicitly `UTC` and is used when a client does not select a
+timezone or browser timezone detection is unavailable. The server host's timezone
+does not select the reporting timezone. `routerd --timezone`
+overrides the environment; invalid zones and `Local` are rejected at startup.
+Timezone data is embedded in the binary, including minimal Docker images.
+Restart the router after changing this setting.
+
+The dashboard's **24h**, **7d**, and **30d** controls select the preceding 24,
+168, and 720 hours using the server clock. Calendar ranges, chart days, and
+rendered timestamps use the selected viewing timezone. **Year** means the current
+calendar year. Changing timezone never changes a rolling window's duration.
+
+Upgrades retain older daily totals, but cannot invent their request timestamps.
+Rolling totals that overlap that history are shown as unavailable instead of
+showing a misleading partial number. After upgrading the router and helper,
+reconcile each machine's original Codex history to restore timestamps. Preview
+first with `router-helper reconcile-usage --dry-run`; the regular reconciliation
+replaces that machine's telemetry. No telemetry reset is required for history that already has machine attribution.
+For upgrades from v1.2.0, old unattributed totals would remain alongside new
+per-machine imports: verify the original local histories are available, reset
+server telemetry once, then reconcile every machine without resetting between
+imports. The reset permanently removes history absent from those local files.
+Imports from
+older helpers remain readable as daily history. Calendar totals containing
+older history are identified as retaining UTC day grouping until reconciliation.

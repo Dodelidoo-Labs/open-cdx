@@ -270,11 +270,20 @@ jobs:
         with:
           name: macos-release
           path: artifacts
-      - name: Create release with generated notes
+      - name: Create release with changelog notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          version=$(cat VERSION)
+          awk -v heading="## [$version] - " '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## / { exit }
+            found && /^\[[^]]+\]:/ { exit }
+            found { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
+          test -n "$(tr -d '[:space:]' < "$RUNNER_TEMP/release-notes.md")"
           gh release create "$GITHUB_REF_NAME" artifacts/* \
             --verify-tag \
             --title "OpenCDX ${GITHUB_REF_NAME}" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
             --generate-notes

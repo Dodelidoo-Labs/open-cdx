@@ -9,7 +9,7 @@ The repository has two GitHub Actions workflows:
   `ghcr.io/dodelidoo-labs/open-cdx`, builds a universal macOS app, signs it with
   hardened runtime, notarizes and staples it, emits SHA-256 checksums and a
   Sparkle appcast with a signed enclosure, and creates a GitHub Release with
-  generated notes.
+  notes from the tagged version's Keep a Changelog entry and a generated comparison.
 
 The release workflow publishes two separate distributions:
 

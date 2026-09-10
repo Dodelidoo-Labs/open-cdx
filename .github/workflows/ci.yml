@@ -28,6 +28,8 @@ jobs:
           grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' VERSION
       - run: go test -race ./...
       - run: go vet ./...
+      - name: Test dashboard reporting
+        run: node --test web/tests/*.test.cjs
 
   macos:
     name: macOS application
