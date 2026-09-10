@@ -204,7 +204,7 @@ final class HelperModelTests: XCTestCase {
 
         let message = usageHistoryPreviewMessage(preview, codexHome: "/Users/tester/.codex")
         XCTAssertTrue(message.contains("Source: /Users/tester/.codex"))
-        XCTAssertTrue(message.contains("3 daily model/routing rows"))
+        XCTAssertTrue(message.contains("3 usage rows"))
         XCTAssertTrue(message.contains("5 routed"))
         XCTAssertTrue(message.contains("7 native (not routed)"))
         XCTAssertTrue(message.contains("Skipped copied events: 2 · malformed records: 1"))
