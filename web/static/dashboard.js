@@ -43,9 +43,10 @@
   };
   localizeTimes();
 
-  const tabNames = ["home", "accounts", "providers", "devices", "catalog"];
+  const tabNames = ["home", "logs", "accounts", "providers", "devices", "catalog"];
   const tabTitles = {
     home: "Telemetry",
+    logs: "Request logs",
     accounts: "OpenAI accounts",
     providers: "Providers",
     devices: "Devices",

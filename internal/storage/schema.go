@@ -127,6 +127,22 @@ CREATE TABLE IF NOT EXISTS usage_aggregate (
     PRIMARY KEY (day, provider, model_id, account_id, routing, device_id, recorded_at)
 );
 
+CREATE TABLE IF NOT EXISTS request_logs (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    started_at TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    metadata BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS request_logs_time_idx ON request_logs(started_at, id);
+CREATE INDEX IF NOT EXISTS request_logs_provider_idx ON request_logs(provider, started_at, id);
+CREATE INDEX IF NOT EXISTS request_logs_model_idx ON request_logs(model, started_at, id);
+CREATE INDEX IF NOT EXISTS request_logs_device_idx ON request_logs(device_id, started_at, id);
+CREATE INDEX IF NOT EXISTS request_logs_outcome_idx ON request_logs(outcome, started_at, id);
+
 CREATE TABLE IF NOT EXISTS allowance_observations (
     source TEXT NOT NULL CHECK(source IN ('live','history')),
     account_id TEXT NOT NULL DEFAULT '',

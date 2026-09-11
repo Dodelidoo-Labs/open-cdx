@@ -175,6 +175,11 @@ func (server *Server) routes() http.Handler {
 	mux.HandleFunc("POST /admin/login", server.login)
 	mux.Handle("POST /admin/logout", server.admin(http.HandlerFunc(server.logout)))
 	mux.Handle("GET /admin", server.admin(http.HandlerFunc(server.dashboard)))
+	mux.HandleFunc("GET /assets/request-logs.js", staticAsset("request-logs.js", "text/javascript; charset=utf-8"))
+	mux.Handle("GET /admin/logs", server.admin(http.HandlerFunc(server.adminRequestLogs)))
+	mux.Handle("GET /admin/logs/export", server.admin(http.HandlerFunc(server.adminExportRequestLogs)))
+	mux.Handle("POST /admin/logs/import", server.admin(http.HandlerFunc(server.adminImportRequestLogs)))
+	mux.Handle("GET /admin/logs/{id}", server.admin(http.HandlerFunc(server.adminRequestLog)))
 	mux.Handle("GET /admin/telemetry", server.admin(http.HandlerFunc(server.adminTelemetry)))
 	mux.Handle("GET /admin/accounts/live", server.admin(http.HandlerFunc(server.adminAccountsLive)))
 	mux.Handle("GET /admin/devices/live", server.admin(http.HandlerFunc(server.adminDevicesLive)))
@@ -597,7 +602,13 @@ func (server *Server) admin(next http.Handler) http.Handler {
 			return
 		}
 		if request.Method != http.MethodGet {
-			if err := request.ParseForm(); err != nil || !constantEqual(request.FormValue("csrf"), session.CSRF) {
+			csrf := request.Header.Get("X-CSRF-Token")
+			if csrf == "" {
+				if err := request.ParseForm(); err == nil {
+					csrf = request.FormValue("csrf")
+				}
+			}
+			if !constantEqual(csrf, session.CSRF) {
 				http.Error(writer, "invalid CSRF token", http.StatusForbidden)
 				return
 			}
@@ -1408,7 +1419,7 @@ func redirectMessage(writer http.ResponseWriter, request *http.Request, message 
 	}
 	tab := request.FormValue("return_tab")
 	switch tab {
-	case "home", "accounts", "providers", "devices", "catalog":
+	case "home", "logs", "accounts", "providers", "devices", "catalog":
 	default:
 		tab = "home"
 	}

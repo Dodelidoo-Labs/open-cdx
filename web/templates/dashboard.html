@@ -33,6 +33,9 @@
         <span class="material-symbols-outlined nav-icon" aria-hidden="true">bar_chart</span>
         <span>Telemetry</span>
       </button>
+      <button class="tab" id="logs-tab" type="button" role="tab" aria-controls="logs" aria-selected="false" tabindex="-1" data-tab="logs">
+        <span class="material-symbols-outlined nav-icon" aria-hidden="true">menu</span><span>Logs</span>
+      </button>
       </div>
       <div class="nav-group">
       <div class="nav-label">Route</div>
@@ -80,6 +83,26 @@
   <main class="workspace" id="content">
     <div class="workspace-inner">
       {{if .Message}}<div class="flash {{if .MessageError}}error{{end}}" role="status" data-flash><span>{{.Message}}</span><button class="flash-dismiss" type="button" data-flash-dismiss aria-label="Dismiss notification" title="Dismiss">&times;</button></div>{{end}}
+
+      <div id="logs" role="tabpanel" aria-labelledby="logs-tab" data-tab-panel="logs" data-csrf="{{.CSRF}}" hidden>
+        <section class="page-head">
+          <div><p class="eyebrow">Observe</p><h1>Request logs</h1><p class="muted">Every completed proxy request, with routing, usage, and failure details.</p></div>
+          <div class="page-actions"><a class="btn" href="/admin/logs/export">Download all logs</a><button class="btn" type="button" data-log-import>Import logs</button><input type="file" accept=".ndjson,.jsonl,application/x-ndjson" data-log-file hidden></div>
+        </section>
+        <p class="muted">Logs start when requests pass through this router. Local history reconciliation cannot restore them. Download a backup before resetting the server; import it here afterward. Prompts and generated output are excluded.</p>
+        <form class="toolbar log-filters" data-log-filters>
+          <label>Provider<select class="select" name="provider"><option value="">All providers</option><option value="openai">OpenAI</option><option value="openrouter">OpenRouter</option><option value="ollama">Ollama</option></select></label>
+          <label>Outcome<select class="select" name="outcome"><option value="">All outcomes</option><option value="success">Success</option><option value="error">Error</option><option value="cancelled">Cancelled</option><option value="incomplete">Incomplete</option></select></label>
+          <label>Model<input class="select" name="model" placeholder="Exact model ID"></label>
+          <label>Machine<select class="select" name="device"><option value="">All machines</option>{{range .Devices}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
+          <button class="btn" type="submit">Apply filters</button><button class="btn" type="button" data-log-refresh>Refresh</button>
+        </form>
+        <p class="muted" role="status" aria-live="polite" data-log-status>Loading logs…</p>
+        <p role="status" aria-live="polite" data-log-import-status></p>
+        <div class="log-table-wrap"><table class="log-table"><thead><tr><th>Started</th><th>Model / effort</th><th>Provider / account</th><th>Machine</th><th>Input / cached</th><th>Output / reasoning</th><th>Tokens/s</th><th>Status</th><th>Duration</th><th>Details</th></tr></thead><tbody data-log-rows></tbody></table></div>
+        <div class="log-pagination"><button class="btn" type="button" data-log-newest>Newest</button><button class="btn" type="button" data-log-older disabled>Older requests</button><span class="muted">50 requests per page · newest requests first</span></div>
+        <dialog class="log-dialog" data-log-dialog aria-labelledby="log-dialog-title"><div class="log-dialog-head"><h2 id="log-dialog-title">Request details</h2><button class="btn" type="button" data-log-close>Close</button></div><div data-log-detail></div></dialog>
+      </div>
 
       <div id="home" role="tabpanel" aria-labelledby="home-tab" data-tab-panel="home" data-telemetry>
         <section class="page-head">
@@ -301,6 +324,7 @@
 </div>
 <script src="/assets/telemetry-ranges.js?v={{.AssetVersion}}" defer></script>
 <script src="/assets/telemetry-devices.js?v={{.AssetVersion}}" defer></script>
+<script src="/assets/request-logs.js?v={{.AssetVersion}}" defer></script>
 <script src="/assets/dashboard.js?v={{.AssetVersion}}" defer></script>
 </body>
 </html>
