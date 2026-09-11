@@ -212,6 +212,13 @@ func (manager *Manager) ForceRefreshCredential(ctx context.Context, accountID, r
 }
 
 func (manager *Manager) RefreshQuota(ctx context.Context, accountID string) error {
+	lock := manager.refreshLock("quota:" + accountID)
+	lock.Lock()
+	defer lock.Unlock()
+	return manager.refreshQuota(ctx, accountID)
+}
+
+func (manager *Manager) refreshQuota(ctx context.Context, accountID string) error {
 	credential, err := manager.FreshCredential(ctx, accountID)
 	if err != nil {
 		return err

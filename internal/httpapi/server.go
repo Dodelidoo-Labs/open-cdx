@@ -157,6 +157,8 @@ func (server *Server) routes() http.Handler {
 	mux.Handle("GET /api/v1/catalog", server.device(http.HandlerFunc(server.getCatalog)))
 	mux.Handle("POST /api/v1/catalog/refresh", server.device(http.HandlerFunc(server.refreshCatalog)))
 	mux.Handle("POST /api/v1/catalog/restart-ack", server.device(http.HandlerFunc(server.acknowledgeCatalogRestart)))
+	mux.Handle("POST /api/v1/accounts/{id}/resets/consume", server.device(http.HandlerFunc(server.consumeAccountReset)))
+	mux.Handle("POST /admin/accounts/{id}/resets/consume", server.admin(http.HandlerFunc(server.consumeAccountReset)))
 	mux.Handle("POST /api/v1/quotas/refresh", server.device(http.HandlerFunc(server.refreshQuotas)))
 	mux.Handle("POST /api/v1/telemetry/reconcile", server.device(http.HandlerFunc(server.reconcileUsage)))
 	mux.Handle("POST /api/v1/telemetry/reset", server.device(http.HandlerFunc(server.resetTelemetry)))
@@ -165,6 +167,7 @@ func (server *Server) routes() http.Handler {
 	mux.HandleFunc("GET /admin/login", server.loginPage)
 	mux.HandleFunc("GET /assets/telemetry-ranges.js", staticAsset("telemetry-ranges.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /assets/telemetry-devices.js", staticAsset("telemetry-devices.js", "text/javascript; charset=utf-8"))
+	mux.HandleFunc("GET /assets/reset-tickets.js", staticAsset("reset-tickets.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /assets/dashboard.js", staticAsset("dashboard.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /assets/dashboard.css", staticAsset("dashboard.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET /assets/material-symbols-outlined.woff2", staticAsset("material-symbols-outlined.woff2", "font/woff2"))
@@ -775,15 +778,16 @@ type accountLiveQuota struct {
 }
 
 type accountLiveView struct {
-	ID           string             `json:"id"`
-	MaskedEmail  string             `json:"masked_email"`
-	Plan         string             `json:"plan"`
-	Status       string             `json:"status"`
-	LastError    string             `json:"last_error,omitempty"`
-	Paused       bool               `json:"paused"`
-	Primary      bool               `json:"primary"`
-	ResetCredits int                `json:"reset_credits"`
-	Quotas       []accountLiveQuota `json:"quotas"`
+	ID           string               `json:"id"`
+	MaskedEmail  string               `json:"masked_email"`
+	Plan         string               `json:"plan"`
+	Status       string               `json:"status"`
+	LastError    string               `json:"last_error,omitempty"`
+	Paused       bool                 `json:"paused"`
+	Primary      bool                 `json:"primary"`
+	ResetCredits int                  `json:"reset_credits"`
+	ResetTickets []openai.ResetTicket `json:"reset_tickets"`
+	Quotas       []accountLiveQuota   `json:"quotas"`
 }
 
 type accountsLiveResponse struct {
@@ -872,8 +876,9 @@ func (server *Server) adminAccountsLive(writer http.ResponseWriter, request *htt
 	for _, state := range states {
 		view := accountLiveView{
 			ID: state.ID, MaskedEmail: state.MaskedEmail, Plan: state.Plan, Status: state.Status,
-			LastError: state.LastError, Paused: state.Paused, Primary: state.Primary, ResetCredits: state.ResetCredits,
-			Quotas: make([]accountLiveQuota, 0),
+			LastError: state.LastError, Paused: state.Paused, Primary: state.Primary, ResetCredits: len(openai.ResetTickets(state.RawQuota, now)),
+			ResetTickets: openai.ResetTickets(state.RawQuota, now),
+			Quotas:       make([]accountLiveQuota, 0),
 		}
 		codexWindows := accountQuotaWindowStates(state.RawQuota, state.QuotaUsedPercent, state.QuotaResetAt, now)
 		if len(codexWindows) > 0 {
@@ -1084,6 +1089,7 @@ type accountView struct {
 	ID, MaskedEmail, Plan, Status, LastError string
 	Paused, Primary                          bool
 	ResetCredits                             int
+	ResetTickets                             []openai.ResetTicket
 	CodexReset, CodexResetAt                 string
 	VisibleModels, MoreModels                []string
 	Quotas                                   []quotaView
@@ -1135,7 +1141,7 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 	for _, account := range accounts {
 		view := accountView{
 			ID: account.ID, MaskedEmail: account.MaskedEmail, Plan: account.Plan, Status: account.Status,
-			Paused: account.Paused, Primary: account.Primary, ResetCredits: account.ResetCredits, LastError: account.LastError,
+			Paused: account.Paused, Primary: account.Primary, ResetCredits: len(openai.ResetTickets(account.RawQuota, now)), ResetTickets: openai.ResetTickets(account.RawQuota, now), LastError: account.LastError,
 		}
 		codexWindows := accountQuotaWindowStates(account.RawQuota, account.QuotaUsedPercent, account.QuotaResetAt, now)
 		if len(codexWindows) > 0 {
@@ -1356,10 +1362,10 @@ func (server *Server) safeAccounts(ctx context.Context) ([]map[string]any, error
 			}
 		}
 		result = append(result, map[string]any{
-			"masked_email": account.MaskedEmail, "plan": account.Plan, "status": account.Status,
+			"id": account.ID, "masked_email": account.MaskedEmail, "plan": account.Plan, "status": account.Status,
 			"paused": account.Paused, "primary": account.Primary,
 			"quota_remaining": maxFloat(0, 100-account.QuotaUsedPercent), "quota_reset_at": account.QuotaResetAt,
-			"quota_windows": liveQuotaWindows(windows), "reset_credits": account.ResetCredits, "models": len(account.EntitledModels),
+			"quota_windows": liveQuotaWindows(windows), "reset_credits": len(openai.ResetTickets(account.RawQuota, now)), "reset_tickets": openai.ResetTickets(account.RawQuota, now), "models": len(account.EntitledModels),
 		})
 	}
 	return result, nil

@@ -234,7 +234,15 @@ func (client *Client) CollectQuota(ctx context.Context, credential providers.Cre
 	if err != nil {
 		return providers.Quota{}, err
 	}
-	return ParseQuota(raw)
+	quota, err := ParseQuota(raw)
+	if err != nil {
+		return providers.Quota{}, err
+	}
+	if quota.ResetCredits > 0 {
+		raw = client.collectResetDetails(ctx, credential, raw)
+		return ParseQuota(raw)
+	}
+	return quota, nil
 }
 
 func (client *Client) ResponsesURL(path string) (string, error) {

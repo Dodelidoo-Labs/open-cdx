@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -56,6 +57,8 @@ func run(args []string) error {
 		return control(configPath, http.MethodPost, "/control/catalog/refresh", commandArgs, os.Stdout)
 	case "acknowledge-restart":
 		return control(configPath, http.MethodPost, "/control/catalog/restart-ack", commandArgs, os.Stdout)
+	case "consume-reset":
+		return consumeReset(configPath, commandArgs)
 	case "refresh-quotas":
 		return control(configPath, http.MethodPost, "/control/quotas/refresh", commandArgs, os.Stdout)
 	case "reconcile-usage":
@@ -434,6 +437,10 @@ func control(configPath, method, path string, args []string, output io.Writer) e
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	return controlRequest(configPath, method, path, nil, output)
+}
+
+func controlRequest(configPath, method, path string, body []byte, output io.Writer) error {
 	config, err := helper.LoadConfig(configPath)
 	if err != nil {
 		return err
@@ -442,11 +449,14 @@ func control(configPath, method, path string, args []string, output io.Writer) e
 	if err != nil {
 		return errors.New("local control credential is unavailable")
 	}
-	request, err := http.NewRequest(method, config.LocalBaseURL()+path, nil)
+	request, err := http.NewRequest(method, config.LocalBaseURL()+path, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	request.Header.Set("X-OpenCDX-Control", secret)
+	if body != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
 	response, err := (&http.Client{Timeout: 5 * time.Minute}).Do(request)
 	if err != nil {
 		return errors.New("helper daemon is not running")
@@ -485,5 +495,5 @@ func defaultDeviceName() string {
 }
 
 func usageError() error {
-	return errors.New("usage: router-helper [--config PATH] <enroll|pair|daemon|token|status|login-openai|sync-catalog|refresh-catalog|acknowledge-restart|refresh-quotas|reconcile-usage|reset-telemetry|reconnect|config|open-dashboard|quit|version>")
+	return errors.New("usage: router-helper [--config PATH] <enroll|pair|daemon|token|status|login-openai|sync-catalog|refresh-catalog|acknowledge-restart|refresh-quotas|consume-reset|reconcile-usage|reset-telemetry|reconnect|config|open-dashboard|quit|version>")
 }

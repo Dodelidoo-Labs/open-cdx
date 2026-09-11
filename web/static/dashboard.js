@@ -1189,8 +1189,9 @@
   }
 
   function updateAccountRow(row, account) {
+    document.dispatchEvent(new CustomEvent("opencdx:reset-tickets", { detail: { row, account } }));
     row.querySelector("[data-account-name]").textContent = account.masked_email;
-    const summary = `${account.primary ? "Primary" : "Fallback"} · ${account.plan} plan${account.reset_credits > 0 ? ` · ${formatNumber(account.reset_credits)} reset credits` : ""}`;
+    const summary = `${account.primary ? "Primary" : "Fallback"} · ${account.plan} plan`;
     row.querySelector("[data-account-summary]").textContent = summary;
     const status = row.querySelector("[data-account-status]");
     status.className = `state ${account.paused ? "warn" : account.status === "ready" ? "good" : "bad"}`;
@@ -1317,6 +1318,14 @@
     applyPendingAccounts();
     return { etag: response.headers.get("ETag") || "" };
   }
+  document.addEventListener("opencdx:reset-completed", async () => {
+    const state = liveStates.accounts;
+    state.controller?.abort();
+    await state.promise;
+    pendingAccounts = null;
+    state.etag = "";
+    await runLiveRefresh("accounts", state);
+  });
   accountsLive?.addEventListener("pointerdown", () => { accountsPointerActive = true; });
   document.addEventListener("pointerup", () => {
     accountsPointerActive = false;

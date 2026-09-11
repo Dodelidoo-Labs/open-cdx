@@ -250,7 +250,7 @@
                 {{end}}
               </div>
               <div class="account-summary">
-                <div class="account-identity"><div class="account-name" data-account-name>{{.MaskedEmail}}</div><div class="account-sub" data-account-summary>{{if .Primary}}Primary{{else}}Fallback{{end}} · {{.Plan}} plan{{if gt .ResetCredits 0}} · {{number .ResetCredits}} reset credits{{end}}</div></div>
+                <div class="account-identity"><div class="account-name-line"><div class="account-name" data-account-name>{{.MaskedEmail}}</div><span class="reset-tickets" data-reset-tickets>{{range .ResetTickets}}<button class="reset-ticket" type="button" data-reset-credit="{{.ID}}" data-reset-expires="{{if .ExpiresAt}}{{.ExpiresAt.Format "2006-01-02T15:04:05Z07:00"}}{{end}}" aria-label="Apply one banked reset" title="Apply one banked reset" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v5a2 2 0 0 0 0 4v5H3v-5a2 2 0 0 0 0-4V5Z"/><path d="M15 7v2m0 2v2m0 2v2"/></svg></button>{{end}}</span></div><div class="account-sub" data-account-summary>{{if .Primary}}Primary{{else}}Fallback{{end}} · {{.Plan}} plan</div></div>
                 <div class="account-reset"><div class="state {{if .Paused}}warn{{else if eq .Status "ready"}}good{{else}}bad{{end}}" data-account-status>{{if .Paused}}Paused{{else}}{{.Status}}{{end}}</div><div class="account-sub" data-account-reset>{{if .CodexResetAt}}Codex resets <time datetime="{{.CodexResetAt}}" data-local-datetime>{{.CodexReset}}</time>{{else}}Reset time unavailable{{end}}</div></div>
                 <div class="detail-actions">
                   <form class="inline" method="post" action="/admin/accounts/{{.ID}}/{{if .Paused}}resume{{else}}pause{{end}}" data-account-pause-form><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="accounts"><button class="icon-btn btn-secondary" type="submit" aria-label="{{if .Paused}}Resume routing{{else}}Pause routing{{end}}" title="{{if .Paused}}Resume routing{{else}}Pause routing{{end}}" data-account-pause-button><span class="material-symbols-outlined" aria-hidden="true">{{if .Paused}}play_arrow{{else}}pause{{end}}</span></button></form>
@@ -353,6 +353,14 @@
 <script src="/assets/instruction-history.js?v={{.AssetVersion}}" defer></script>
 <script src="/assets/catalog-conflicts.js?v={{.AssetVersion}}" defer></script>
 <script src="/assets/request-logs.js?v={{.AssetVersion}}" defer></script>
+<dialog class="reset-confirmation" data-reset-dialog aria-labelledby="reset-dialog-title">
+  <h2 id="reset-dialog-title">Apply one reset?</h2>
+  <p data-reset-description></p>
+  <p class="muted">This uses one ticket to reset an eligible Codex allowance.</p>
+  <p role="status" aria-live="polite" data-reset-result></p>
+  <div class="reset-confirmation-actions"><button class="btn btn-secondary" type="button" data-reset-cancel>Cancel</button><button class="btn btn-primary" type="button" data-reset-apply>Apply Reset</button></div>
+</dialog>
+<script src="/assets/reset-tickets.js?v={{.AssetVersion}}" defer></script>
 <script src="/assets/dashboard.js?v={{.AssetVersion}}" defer></script>
 </body>
 </html>
