@@ -93,7 +93,7 @@ func (manager *Manager) CompleteOAuth(ctx context.Context, deviceID, transaction
 		Credential: storageCredential(credential), MaskedEmail: identity.MaskedEmail, Plan: firstNonEmpty(quota.Plan, identity.Plan),
 		Status: "ready", QuotaUsedPercent: quota.UsedPercent, QuotaResetAt: quota.ResetAt,
 		ResetCredits: quota.ResetCredits, RawQuota: quota.Raw, RawCatalogSnapshot: discovery.Raw,
-		EntitledModels: modelIDs(discovery.Models),
+		EntitledModels: modelIDs(discovery.Models), CatalogClientVersion: clientVersion,
 	}
 	account, duplicate, err := manager.store.PutAccount(ctx, input, replace)
 	if err != nil {
@@ -212,6 +212,13 @@ func (manager *Manager) ForceRefreshCredential(ctx context.Context, accountID, r
 }
 
 func (manager *Manager) RefreshQuota(ctx context.Context, accountID string) error {
+	lock := manager.refreshLock("quota:" + accountID)
+	lock.Lock()
+	defer lock.Unlock()
+	return manager.refreshQuota(ctx, accountID)
+}
+
+func (manager *Manager) refreshQuota(ctx context.Context, accountID string) error {
 	credential, err := manager.FreshCredential(ctx, accountID)
 	if err != nil {
 		return err
@@ -247,7 +254,7 @@ func (manager *Manager) RefreshCatalog(ctx context.Context, accountID, clientVer
 	if err != nil {
 		return err
 	}
-	return manager.store.UpdateAccountCatalog(ctx, accountID, discovery.Raw, modelIDs(discovery.Models))
+	return manager.store.UpdateAccountCatalog(ctx, accountID, discovery.Raw, modelIDs(discovery.Models), clientVersion)
 }
 
 func (manager *Manager) RefreshQuotas(ctx context.Context) error {

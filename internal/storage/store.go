@@ -115,7 +115,10 @@ func (store *Store) migrate(ctx context.Context) error {
 		return err
 	}
 	_, err = store.db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS usage_device_idx ON usage_aggregate(device_id)")
-	return err
+	if err != nil {
+		return err
+	}
+	return store.initializeInstructionHistory(ctx)
 }
 
 func (store *Store) migrateUsageRouting(ctx context.Context) error {

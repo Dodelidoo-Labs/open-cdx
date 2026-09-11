@@ -6,7 +6,7 @@ This guide covers local repository work. End users should follow the installatio
 
 - Go 1.22 or newer
 - Docker Engine with Docker Compose v2 for container development
-- Xcode command-line tools and Swift Package Manager for the macOS app
+- Xcode 26 or newer (macOS SDK 26+) and Swift Package Manager for the macOS app
 - Multipass only when reproducing the isolated Linux/Docker test environment
 
 ## Go services and helper
@@ -58,6 +58,13 @@ From the Mac, open `http://$VM_IP:8080/admin`. In the menu app, use the same bas
 Assigning `VM_IP` is silent; the `printf` line confirms the detected address. The non-loopback binding is an explicit insecure choice for the private Multipass network. The Compose default remains loopback-only when `OPENCODEX_DEV_BIND` is omitted. `--force-recreate` replaces a loopback-bound container that Multipass may have restarted from an earlier run.
 
 ## macOS app
+
+Use Xcode 26 or newer for both local and release builds. On macOS Tahoe,
+SwiftUI selects the menu window's presentation using the executable's linked
+SDK. Builds linked against SDK 15.5 use a square legacy backdrop over the
+native rounded surface. The build script checks the SDK in every architecture
+of the finished menu executable so an older toolchain or cached output cannot
+reintroduce this defect. The deployment target remains macOS 13.0.
 
 Build and install a local app, reusing its existing location:
 

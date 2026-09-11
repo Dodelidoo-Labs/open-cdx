@@ -54,6 +54,10 @@ func NewProxy(store *storage.Store, accountManager *accounts.Manager, catalogMan
 }
 
 func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Request, device DeviceContext) {
+	loggedWriter, finishLog := proxy.startRequestLog(writer, request, device)
+	defer finishLog()
+	writer = loggedWriter
+	entry := loggedWriter.entry
 	if request.Method != http.MethodPost {
 		writeProxyError(writer, http.StatusMethodNotAllowed, "method_not_allowed", "only POST is supported")
 		return
@@ -63,11 +67,13 @@ func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Re
 		writeProxyError(writer, http.StatusRequestEntityTooLarge, "request_too_large", "request body exceeds the router limit")
 		return
 	}
+	entry.RequestBytes = int64(len(body))
 	var rawDocument map[string]json.RawMessage
 	if err = json.Unmarshal(body, &rawDocument); err != nil {
 		writeProxyError(writer, http.StatusBadRequest, "invalid_json", "request body must be a JSON object")
 		return
 	}
+	requestLogMetadata(entry, rawDocument)
 	var modelID string
 	_ = json.Unmarshal(rawDocument["model"], &modelID)
 	if modelID == "" {
@@ -75,6 +81,7 @@ func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Re
 		return
 	}
 	providerName, upstreamModel := catalog.RouteIdentity(modelID)
+	entry.Provider, entry.UpstreamModel = providerName, logText(upstreamModel, 256)
 	forwardBody := body
 	if providerName != "openai" {
 		rawDocument["model"], _ = json.Marshal(upstreamModel)
@@ -116,7 +123,7 @@ func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Re
 			return
 		}
 	}
-	response, err := proxy.attempt(request.Context(), request, target, forwardBody)
+	response, err := proxy.loggedAttempt(request.Context(), request, target, forwardBody, entry)
 	if err != nil {
 		if request.Context().Err() != nil {
 			return
@@ -132,7 +139,7 @@ func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Re
 		credential, refreshErr := proxy.accounts.ForceRefreshCredential(request.Context(), target.account.ID, target.credential.AccessToken)
 		if refreshErr == nil {
 			target.credential = credential
-			response, err = proxy.attempt(request.Context(), request, target, forwardBody)
+			response, err = proxy.loggedAttempt(request.Context(), request, target, forwardBody, entry)
 		}
 		if refreshErr != nil || err != nil {
 			if request.Context().Err() != nil {
@@ -155,7 +162,7 @@ func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Re
 		nextTarget, selectErr := proxy.resolveTarget(request.Context(), "openai", modelID, upstreamModel, request.URL.Path, device.ID, affinity, target.account.ID)
 		if selectErr == nil {
 			target = nextTarget
-			response, err = proxy.attempt(request.Context(), request, target, forwardBody)
+			response, err = proxy.loggedAttempt(request.Context(), request, target, forwardBody, entry)
 		}
 		if selectErr != nil || err != nil {
 			if request.Context().Err() != nil {
@@ -183,11 +190,23 @@ func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Re
 		}
 	}
 	writer.WriteHeader(response.StatusCode)
-	collector := newTailCollector(256 << 10)
-	_, copyErr := copyStreaming(writer, io.TeeReader(response.Body, collector))
+	collector := response.Body.(*logResponseBody).collector
+	_, copyErr := copyStreaming(writer, response.Body)
 	inputTokens, outputTokens := collector.usage()
 	_ = proxy.store.RecordUsage(context.WithoutCancel(request.Context()), device.ID, target.provider, modelID, target.account.ID, inputTokens, outputTokens)
 	streamHealthy := streamEndedNormally(request.Context(), collector, copyErr)
+	if copyErr != nil && !collector.terminalResponseSeen() {
+		entry.Outcome = "error"
+		entry.ErrorType, entry.ErrorMessage = "stream_disconnected", "The upstream response stream disconnected"
+		var streamErr *streamCopyError
+		if request.Context().Err() != nil || (errors.As(copyErr, &streamErr) && streamErr.direction == streamCopyToDownstream) {
+			entry.Outcome = "cancelled"
+			entry.ErrorType, entry.ErrorMessage = "client_disconnected", "The client disconnected before the response completed"
+		}
+	} else if copyErr == nil && strings.Contains(response.Header.Get("Content-Type"), "text/event-stream") && !collector.terminalResponseSeen() {
+		entry.Outcome = "incomplete"
+		entry.ErrorType, entry.ErrorMessage = "stream_incomplete", "The stream ended without a terminal response event"
+	}
 	proxy.status.Update(device.ID, func(status *RouteStatus) {
 		status.Connected = streamHealthy
 		status.State = map[bool]string{true: "connected", false: "degraded"}[streamHealthy]
@@ -386,9 +405,20 @@ type tailCollector struct {
 func newTailCollector(limit int) *tailCollector { return &tailCollector{limit: limit} }
 
 func (collector *tailCollector) Write(data []byte) (int, error) {
-	collector.data = append(collector.data, data...)
-	if len(collector.data) > collector.limit {
-		collector.data = append([]byte(nil), collector.data[len(collector.data)-collector.limit:]...)
+	if collector.limit <= 0 {
+		return len(data), nil
+	}
+	if cap(collector.data) < collector.limit {
+		collector.data = make([]byte, 0, collector.limit)
+	}
+	if len(data) >= collector.limit {
+		collector.data = append(collector.data[:0], data[len(data)-collector.limit:]...)
+	} else {
+		if excess := len(collector.data) + len(data) - collector.limit; excess > 0 {
+			copy(collector.data, collector.data[excess:])
+			collector.data = collector.data[:len(collector.data)-excess]
+		}
+		collector.data = append(collector.data, data...)
 	}
 	return len(data), nil
 }
@@ -508,6 +538,9 @@ func publicRouteError(err error) string {
 }
 
 func writeProxyError(writer http.ResponseWriter, status int, code, message string) {
+	if logged, ok := writer.(*logResponseWriter); ok {
+		logged.entry.ErrorType, logged.entry.ErrorMessage = code, logText(message, 2048)
+	}
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(status)
 	_ = json.NewEncoder(writer).Encode(map[string]any{"error": map[string]string{"type": code, "message": message}})

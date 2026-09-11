@@ -57,7 +57,25 @@ struct AccountQuotaWindowStatus: Codable {
     }
 }
 
+struct AccountResetTicket: Codable {
+    var id: String?
+    var expiresAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case expiresAt = "expires_at"
+    }
+}
+
 struct AccountAllowanceStatus: Codable {
+    var id = ""
+    var resetTickets: [AccountResetTicket]?
+    var displayID: String { id.isEmpty ? maskedEmail : id }
+
+    func availableResetTickets(at date: Date) -> [AccountResetTicket] {
+        let tickets = resetTickets ?? Array(repeating: AccountResetTicket(), count: min(1000, max(0, resetCredits)))
+        return tickets.filter { $0.expiresAt.map { $0 > date } ?? true }
+    }
     var maskedEmail = ""
     var plan = ""
     var status = ""
@@ -69,7 +87,8 @@ struct AccountAllowanceStatus: Codable {
     var resetCredits = 0
 
     enum CodingKeys: String, CodingKey {
-        case plan, status, paused, primary
+        case id, plan, status, paused, primary
+        case resetTickets = "reset_tickets"
         case maskedEmail = "masked_email"
         case quotaRemaining = "quota_remaining"
         case quotaResetAt = "quota_reset_at"
@@ -81,6 +100,8 @@ struct AccountAllowanceStatus: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? ""
+        resetTickets = try container.decodeIfPresent([AccountResetTicket].self, forKey: .resetTickets)
         maskedEmail = try container.decodeIfPresent(String.self, forKey: .maskedEmail) ?? ""
         plan = try container.decodeIfPresent(String.self, forKey: .plan) ?? ""
         status = try container.decodeIfPresent(String.self, forKey: .status) ?? ""
@@ -254,6 +275,7 @@ final class HelperModel: ObservableObject {
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
     @Published private(set) var configured = false
     @Published private(set) var accountLoginInProgress = false
+    @Published private(set) var resetAccountID: String?
     @Published private(set) var activityPulsePhase = false
     @Published private(set) var usageReconciliationInProgress = false
     @Published private(set) var telemetryResetInProgress = false
@@ -271,6 +293,7 @@ final class HelperModel: ObservableObject {
     private var started = false
     private var historyPromptVisible = false
     private var operationGeneration: UInt = 0
+    private var resetStatusGeneration: UInt = 0
     private let historyImportDecisionKey = "usageHistoryImportDecisionMade"
 
     private static let confirmationDuration: TimeInterval = 7
@@ -383,6 +406,49 @@ final class HelperModel: ObservableObject {
     func openDashboard() {
         runHelper(["open-dashboard"]) { [weak self] result in
             if !result.success { self?.setErrorOperation(result.error) }
+        }
+    }
+
+    func consumeReset(account: AccountAllowanceStatus, ticket: AccountResetTicket) {
+        guard status.connected, resetAccountID == nil, !account.id.isEmpty,
+              let current = status.accounts.first(where: { $0.id == account.id }),
+              current.availableResetTickets(at: Date()).contains(where: { $0.id == ticket.id }),
+              ticket.expiresAt.map({ $0 > Date() }) ?? true else { return }
+        // Persist uncertain attempts so reopening the HUD or app cannot turn a
+        // network retry into a second redemption.
+        let attemptKey = "resetAttempt:\(configuredRouterURL):\(account.id):\(ticket.id ?? "next")"
+        let key = UserDefaults.standard.string(forKey: attemptKey) ?? UUID().uuidString
+        UserDefaults.standard.set(key, forKey: attemptKey)
+        resetStatusGeneration &+= 1
+        resetAccountID = account.id
+        setOperation("Applying one reset to \(account.maskedEmail)…")
+        var arguments = ["consume-reset", "--account", account.id, "--idempotency-key", key, "--confirm"]
+        if let creditID = ticket.id, !creditID.isEmpty { arguments += ["--credit", creditID] }
+        runHelper(arguments, timeout: 90) { [weak self] result in
+            guard let self else { return }
+            self.resetStatusGeneration &+= 1
+            self.resetAccountID = nil
+            guard result.success, let data = result.output.data(using: .utf8),
+                  let response = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let outcome = response["outcome"] as? String,
+                  ["reset", "alreadyRedeemed", "nothingToReset", "noCredit"].contains(outcome) else {
+                self.setErrorOperation("Could not confirm the reset. Click the same ticket to retry safely.")
+                self.refreshStatus()
+                return
+            }
+            UserDefaults.standard.removeObject(forKey: attemptKey)
+            if let status = response["status"], let statusData = try? JSONSerialization.data(withJSONObject: status) {
+                _ = self.applyStatusData(statusData)
+            }
+            let message: String
+            switch outcome {
+            case "reset": message = "One reset applied to \(account.maskedEmail)."
+            case "alreadyRedeemed": message = "This reset was already applied."
+            case "nothingToReset": message = "No eligible allowance needs resetting. Your ticket was kept."
+            default: message = "No reset remains available for this account."
+            }
+            self.setConfirmationOperation(message + ((response["quotas_refreshed"] as? Bool == false) ? " Usage refresh is pending." : ""))
+            self.refreshStatus()
         }
     }
 
@@ -517,6 +583,8 @@ final class HelperModel: ObservableObject {
     }
 
     func refreshStatus() {
+        guard resetAccountID == nil else { return }
+        let generation = resetStatusGeneration
         configured = helperConfigurationExists
         updateHelperHealthURL()
         guard configured else {
@@ -524,7 +592,7 @@ final class HelperModel: ObservableObject {
             return
         }
         runHelper(["status"], timeout: 10) { [weak self] result in
-            guard let self else { return }
+            guard let self, self.resetStatusGeneration == generation else { return }
             guard result.success, let data = result.output.data(using: .utf8) else {
                 self.status.connected = false
                 self.status.activeRequests = 0

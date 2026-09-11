@@ -190,7 +190,7 @@ func TestClientCancellationBeforeUpstreamHeadersDoesNotDegradeRoute(t *testing.T
 		<-request.Context().Done()
 		return nil, request.Context().Err()
 	})
-	proxy, _, _ := proxyFixture(t, &http.Client{Transport: transport}, "https://upstream.invalid", []routeFixture{{stable: "stream-account", quota: 1, models: []string{"gpt-stream"}}})
+	proxy, store, _ := proxyFixture(t, &http.Client{Transport: transport}, "https://upstream.invalid", []routeFixture{{stable: "stream-account", quota: 1, models: []string{"gpt-stream"}}})
 	ctx, cancel := context.WithCancel(context.Background())
 	request := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-stream","stream":true}`)).WithContext(ctx)
 	done := make(chan struct{})
@@ -202,6 +202,10 @@ func TestClientCancellationBeforeUpstreamHeadersDoesNotDegradeRoute(t *testing.T
 	cancel()
 	<-done
 
+	page, err := store.RequestLogs(context.Background(), storage.RequestLogFilter{})
+	if err != nil || len(page.Logs) != 1 || page.Logs[0].Outcome != "cancelled" {
+		t.Fatalf("cancelled request log was lost: %#v %v", page, err)
+	}
 	status := proxy.status.Get("device")
 	if !status.Connected || status.State != "connected" || status.LastError != "" {
 		t.Fatalf("client cancellation degraded the upstream route: %#v", status)

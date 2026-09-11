@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Dodelidoo-Labs/open-cdx/internal/providers/openai"
 )
 
 type LocalStatus struct {
@@ -36,15 +38,17 @@ type LocalStatus struct {
 }
 
 type AccountAllowance struct {
-	MaskedEmail    string            `json:"masked_email"`
-	Plan           string            `json:"plan,omitempty"`
-	Status         string            `json:"status"`
-	Paused         bool              `json:"paused"`
-	Primary        bool              `json:"primary,omitempty"`
-	QuotaRemaining float64           `json:"quota_remaining"`
-	QuotaResetAt   *time.Time        `json:"quota_reset_at,omitempty"`
-	QuotaWindows   []AllowanceWindow `json:"quota_windows,omitempty"`
-	ResetCredits   int               `json:"reset_credits,omitempty"`
+	ID             string               `json:"id"`
+	ResetTickets   []openai.ResetTicket `json:"reset_tickets,omitempty"`
+	MaskedEmail    string               `json:"masked_email"`
+	Plan           string               `json:"plan,omitempty"`
+	Status         string               `json:"status"`
+	Paused         bool                 `json:"paused"`
+	Primary        bool                 `json:"primary,omitempty"`
+	QuotaRemaining float64              `json:"quota_remaining"`
+	QuotaResetAt   *time.Time           `json:"quota_reset_at,omitempty"`
+	QuotaWindows   []AllowanceWindow    `json:"quota_windows,omitempty"`
+	ResetCredits   int                  `json:"reset_credits,omitempty"`
 }
 
 type AllowanceWindow struct {
@@ -116,6 +120,7 @@ func (daemon *Daemon) Run(ctx context.Context) error {
 	mux.Handle("POST /control/catalog/refresh", daemon.controlAuth(http.HandlerFunc(daemon.controlCatalogRefresh)))
 	mux.Handle("POST /control/catalog/restart-ack", daemon.controlAuth(http.HandlerFunc(daemon.controlCatalogRestartAck)))
 	mux.Handle("POST /control/catalog/codex-started", daemon.controlAuth(http.HandlerFunc(daemon.controlCodexStarted)))
+	mux.Handle("POST /control/accounts/{id}/resets/consume", daemon.controlAuth(http.HandlerFunc(daemon.controlConsumeReset)))
 	mux.Handle("POST /control/quotas/refresh", daemon.controlAuth(http.HandlerFunc(daemon.controlQuotaRefresh)))
 	mux.Handle("POST /control/quit", daemon.controlAuth(http.HandlerFunc(daemon.controlQuit)))
 	daemon.server = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 0, WriteTimeout: 0, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20}
@@ -394,13 +399,15 @@ func (daemon *Daemon) refreshStatus(ctx context.Context) error {
 	defer daemon.remoteStatusMu.Unlock()
 	var remoteStatus struct {
 		Accounts []struct {
-			MaskedEmail    string    `json:"masked_email"`
-			Plan           string    `json:"plan"`
-			Status         string    `json:"status"`
-			Paused         bool      `json:"paused"`
-			Primary        bool      `json:"primary"`
-			QuotaRemaining float64   `json:"quota_remaining"`
-			QuotaResetAt   time.Time `json:"quota_reset_at"`
+			ID             string               `json:"id"`
+			ResetTickets   []openai.ResetTicket `json:"reset_tickets"`
+			MaskedEmail    string               `json:"masked_email"`
+			Plan           string               `json:"plan"`
+			Status         string               `json:"status"`
+			Paused         bool                 `json:"paused"`
+			Primary        bool                 `json:"primary"`
+			QuotaRemaining float64              `json:"quota_remaining"`
+			QuotaResetAt   time.Time            `json:"quota_reset_at"`
 			QuotaWindows   []struct {
 				Label             string    `json:"label"`
 				Remaining         float64   `json:"remaining"`
@@ -451,6 +458,7 @@ func (daemon *Daemon) refreshStatus(ctx context.Context) error {
 		status.Accounts = make([]AccountAllowance, 0, len(remoteStatus.Accounts))
 		for _, account := range remoteStatus.Accounts {
 			allowance := AccountAllowance{
+				ID: account.ID, ResetTickets: account.ResetTickets,
 				MaskedEmail: account.MaskedEmail, Plan: account.Plan, Status: account.Status,
 				Paused: account.Paused, Primary: account.Primary, QuotaRemaining: account.QuotaRemaining,
 				QuotaResetAt: nonZeroTimePointer(account.QuotaResetAt), ResetCredits: account.ResetCredits,

@@ -212,6 +212,21 @@ final class HelperModelTests: XCTestCase {
         XCTAssertTrue(message.contains("Other machines’ history will be preserved"))
     }
 
+    func testResetTicketsDecodeAndDisappearAtExpiration() throws {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let account = try decoder.decode(AccountAllowanceStatus.self, from: Data(#"{"id":"account-b","reset_credits":3,"reset_tickets":[{"id":"expires","expires_at":"2026-09-10T12:00:00Z"},{"id":"stays"},{}]}"#.utf8))
+        let boundary = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-09-10T12:00:00Z"))
+        XCTAssertEqual(account.id, "account-b")
+        XCTAssertEqual(account.availableResetTickets(at: boundary.addingTimeInterval(-1)).count, 3)
+        XCTAssertEqual(account.availableResetTickets(at: boundary).count, 2)
+        XCTAssertEqual(account.availableResetTickets(at: boundary).first?.id, "stays")
+        let absent = try decoder.decode(AccountAllowanceStatus.self, from: Data(#"{"reset_credits":0}"#.utf8))
+        XCTAssertTrue(absent.availableResetTickets(at: boundary).isEmpty)
+        let emptyDetails = try decoder.decode(AccountAllowanceStatus.self, from: Data(#"{"reset_credits":2,"reset_tickets":[]}"#.utf8))
+        XCTAssertTrue(emptyDetails.availableResetTickets(at: boundary).isEmpty)
+    }
+
     @MainActor
     func testAllowanceFixtureRenders() throws {
         var pro = AccountAllowanceStatus()
@@ -219,6 +234,9 @@ final class HelperModelTests: XCTestCase {
         pro.plan = "pro"
         pro.status = "ready"
         pro.primary = true
+        pro.id = "preview-pro"
+        pro.resetCredits = 2
+        pro.resetTickets = [AccountResetTicket(id: "one"), AccountResetTicket(id: "two")]
         pro.quotaWindows = [
             AccountQuotaWindowStatus(
                 label: "Weekly",
@@ -268,7 +286,7 @@ final class HelperModelTests: XCTestCase {
 
         let fixture = VStack(spacing: 0) {
             Divider().padding(.horizontal, 12)
-            AccountAllowanceSection(accounts: [pro, plus], connected: true)
+            AccountAllowanceSection(accounts: [pro, plus], connected: true, onReset: { _, _ in })
             Divider().padding(.horizontal, 12)
             Text("Open Dashboard")
                 .frame(maxWidth: .infinity, alignment: .leading)

@@ -153,7 +153,7 @@ struct RouterMenuView: View {
     }
 
     private var accountsSection: some View {
-        AccountAllowanceSection(accounts: model.status.accounts, connected: model.status.connected)
+        AccountAllowanceSection(accounts: model.status.accounts, connected: model.status.connected, resetInProgress: model.resetAccountID != nil, onReset: model.consumeReset)
     }
 
     private var routerStatusIcon: String {
@@ -189,6 +189,8 @@ struct RouterMenuView: View {
 struct AccountAllowanceSection: View {
     let accounts: [AccountAllowanceStatus]
     let connected: Bool
+    var resetInProgress = false
+    var onReset: ((AccountAllowanceStatus, AccountResetTicket) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -198,7 +200,7 @@ struct AccountAllowanceSection: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                AccountAllowanceList(accounts: accounts)
+                AccountAllowanceList(accounts: accounts, canReset: connected && !resetInProgress, onReset: onReset)
             }
         }
         .padding(.horizontal, 16)
@@ -254,11 +256,13 @@ private struct StatusSummaryRow: View {
 
 struct AccountAllowanceList: View {
     let accounts: [AccountAllowanceStatus]
+    var canReset = false
+    var onReset: ((AccountAllowanceStatus, AccountResetTicket) -> Void)?
 
     var body: some View {
         VStack(spacing: 12) {
-            ForEach(Array(accounts.enumerated()), id: \.offset) { _, account in
-                AccountAllowanceRow(account: account)
+            ForEach(accounts, id: \.displayID) { account in
+                AccountAllowanceRow(account: account, canReset: canReset, onReset: onReset)
             }
         }
     }
@@ -266,6 +270,10 @@ struct AccountAllowanceList: View {
 
 struct AccountAllowanceRow: View {
     let account: AccountAllowanceStatus
+    var canReset = false
+    var onReset: ((AccountAllowanceStatus, AccountResetTicket) -> Void)?
+    @State private var selectedTicket: AccountResetTicket?
+    @State private var showingResetConfirmation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -274,6 +282,52 @@ struct AccountAllowanceRow: View {
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.middle)
+                TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                    let tickets = account.availableResetTickets(at: timeline.date)
+                    HStack(spacing: 2) {
+                        ForEach(Array(tickets.enumerated()), id: \.offset) { index, ticket in
+                            Button {
+                                selectedTicket = ticket
+                                showingResetConfirmation = true
+                            } label: {
+                                Image(systemName: "ticket.fill")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(Color.accentColor)
+                                    .frame(width: 22, height: 24)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!canReset || account.id.isEmpty || onReset == nil)
+                            .help(ticket.expiresAt.map { "Apply one reset · expires \($0.formatted())" } ?? "Apply one banked reset")
+                            .accessibilityLabel("Reset ticket \(index + 1) of \(tickets.count) for \(account.maskedEmail)")
+                        }
+                    }
+                }
+                .popover(isPresented: $showingResetConfirmation, arrowEdge: .bottom) {
+                    TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("Apply one reset?", systemImage: "ticket.fill")
+                                .font(.headline)
+                            Text("Use one banked reset for \(account.maskedEmail).")
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text("This uses one ticket to reset an eligible Codex allowance.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            HStack {
+                                Spacer()
+                                Button("Cancel") { showingResetConfirmation = false }
+                                    .keyboardShortcut(.cancelAction)
+                                Button("Apply Reset") {
+                                    showingResetConfirmation = false
+                                    if let ticket = selectedTicket { onReset?(account, ticket) }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(!canReset || !account.availableResetTickets(at: timeline.date).contains(where: { $0.id == selectedTicket?.id }))
+                            }
+                        }
+                        .padding(16)
+                        .frame(width: 280)
+                    }
+                }
                 Spacer(minLength: 10)
                 Text(accountTypeDescription)
                     .font(.caption2)

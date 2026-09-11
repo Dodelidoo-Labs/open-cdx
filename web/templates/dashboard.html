@@ -33,6 +33,12 @@
         <span class="material-symbols-outlined nav-icon" aria-hidden="true">bar_chart</span>
         <span>Telemetry</span>
       </button>
+      <button class="tab" id="logs-tab" type="button" role="tab" aria-controls="logs" aria-selected="false" tabindex="-1" data-tab="logs">
+        <span class="material-symbols-outlined nav-icon" aria-hidden="true">menu</span><span>Logs</span>
+      </button>
+      <button class="tab" id="instructions-tab" type="button" role="tab" aria-controls="instructions" aria-selected="false" tabindex="-1" data-tab="instructions">
+        <span class="material-symbols-outlined nav-icon" aria-hidden="true">drag_indicator</span><span>Instructions</span><span class="instruction-badge" data-instruction-badge hidden></span>
+      </button>
       </div>
       <div class="nav-group">
       <div class="nav-label">Route</div>
@@ -80,6 +86,42 @@
   <main class="workspace" id="content">
     <div class="workspace-inner">
       {{if .Message}}<div class="flash {{if .MessageError}}error{{end}}" role="status" data-flash><span>{{.Message}}</span><button class="flash-dismiss" type="button" data-flash-dismiss aria-label="Dismiss notification" title="Dismiss">&times;</button></div>{{end}}
+
+      <div id="instructions" role="tabpanel" aria-labelledby="instructions-tab" data-tab-panel="instructions" hidden>
+        <section class="page-head"><div><h1 class="page-title">Instruction history</h1><p class="page-dek">Track the instructions supplied in OpenAI’s Codex catalogs, from the first baseline onward.</p></div><div class="page-actions"><button class="btn btn-secondary" type="button" data-instruction-seen>Mark all seen</button><button class="btn btn-secondary" type="button" data-instruction-refresh>Refresh history</button></div></section>
+        <p class="section-note">Tracks base instructions, instruction-named fields, and model messages including templates, variables, and policies. Updates to other catalog fields or third-party catalogs create no entries. Client versions identify the catalog request; different versions can return different instructions.</p>
+        <form class="toolbar instruction-filters" data-instruction-filters>
+          <label>Model<input class="select" name="model" placeholder="Exact model ID"></label>
+          <label>Account<select class="select" name="account"><option value="">All accounts</option>{{range .Accounts}}<option value="{{.ID}}">{{.Plan}} · {{.MaskedEmail}}</option>{{end}}</select></label>
+          <label>Events<select class="select" name="kind"><option value="">Changes and baselines</option><option value="changed">Changes only</option><option value="baseline">Baselines only</option></select></label>
+          <button class="btn btn-secondary" type="submit">Apply filters</button>
+        </form>
+        <p class="muted" role="status" aria-live="polite" data-instruction-status>Loading history…</p>
+        <p class="muted" role="status" aria-live="polite" data-instruction-notice></p>
+        <div class="log-table-wrap"><table class="log-table"><thead><tr><th>Observed</th><th>Model</th><th>Account / plan</th><th>Catalog client version</th><th>Event</th><th>Fields</th><th>Details</th></tr></thead><tbody data-instruction-rows></tbody></table></div>
+        <div class="log-pagination"><button class="btn btn-secondary" type="button" data-instruction-newest>Newest</button><button class="btn btn-secondary" type="button" data-instruction-older disabled>Older entries</button><span class="muted">50 entries per page · history survives catalog refreshes</span></div>
+        <dialog class="instruction-dialog" data-instruction-dialog aria-labelledby="instruction-dialog-title"><div class="catalog-conflict-head"><div><h2 id="instruction-dialog-title" data-instruction-title>Instruction changes</h2><p class="muted" data-instruction-detail-summary></p></div><button class="btn btn-secondary" type="button" data-instruction-close>Close</button></div><div data-instruction-detail></div></dialog>
+      </div>
+
+      <div id="logs" role="tabpanel" aria-labelledby="logs-tab" data-tab-panel="logs" data-csrf="{{.CSRF}}" hidden>
+        <section class="page-head">
+          <div><p class="eyebrow">Observe</p><h1>Request logs</h1><p class="muted">Every completed proxy request, with routing, usage, and failure details.</p></div>
+          <div class="page-actions"><a class="btn" href="/admin/logs/export">Download all logs</a><button class="btn" type="button" data-log-import>Import logs</button><input type="file" accept=".ndjson,.jsonl,application/x-ndjson" data-log-file hidden></div>
+        </section>
+        <p class="muted">Logs start when requests pass through this router. Local history reconciliation cannot restore them. Download a backup before resetting the server; import it here afterward. Prompts and generated output are excluded.</p>
+        <form class="toolbar log-filters" data-log-filters>
+          <label>Provider<select class="select" name="provider"><option value="">All providers</option><option value="openai">OpenAI</option><option value="openrouter">OpenRouter</option><option value="ollama">Ollama</option></select></label>
+          <label>Outcome<select class="select" name="outcome"><option value="">All outcomes</option><option value="success">Success</option><option value="error">Error</option><option value="cancelled">Cancelled</option><option value="incomplete">Incomplete</option></select></label>
+          <label>Model<input class="select" name="model" placeholder="Exact model ID"></label>
+          <label>Machine<select class="select" name="device"><option value="">All machines</option>{{range .Devices}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
+          <button class="btn" type="submit">Apply filters</button><button class="btn" type="button" data-log-refresh>Refresh</button>
+        </form>
+        <p class="muted" role="status" aria-live="polite" data-log-status>Loading logs…</p>
+        <p role="status" aria-live="polite" data-log-import-status></p>
+        <div class="log-table-wrap"><table class="log-table"><thead><tr><th>Started</th><th>Model / effort</th><th>Provider / account</th><th>Machine</th><th>Input / cached</th><th>Output / reasoning</th><th>Tokens/s</th><th>Status</th><th>Duration</th><th>Details</th></tr></thead><tbody data-log-rows></tbody></table></div>
+        <div class="log-pagination"><button class="btn" type="button" data-log-newest>Newest</button><button class="btn" type="button" data-log-older disabled>Older requests</button><span class="muted">50 requests per page · newest requests first</span></div>
+        <dialog class="log-dialog" data-log-dialog aria-labelledby="log-dialog-title"><div class="log-dialog-head"><h2 id="log-dialog-title">Request details</h2><button class="btn" type="button" data-log-close>Close</button></div><div data-log-detail></div></dialog>
+      </div>
 
       <div id="home" role="tabpanel" aria-labelledby="home-tab" data-tab-panel="home" data-telemetry>
         <section class="page-head">
@@ -208,7 +250,7 @@
                 {{end}}
               </div>
               <div class="account-summary">
-                <div class="account-identity"><div class="account-name" data-account-name>{{.MaskedEmail}}</div><div class="account-sub" data-account-summary>{{if .Primary}}Primary{{else}}Fallback{{end}} · {{.Plan}} plan{{if gt .ResetCredits 0}} · {{number .ResetCredits}} reset credits{{end}}</div></div>
+                <div class="account-identity"><div class="account-name-line"><div class="account-name" data-account-name>{{.MaskedEmail}}</div><span class="reset-tickets" data-reset-tickets>{{range .ResetTickets}}<button class="reset-ticket" type="button" data-reset-credit="{{.ID}}" data-reset-expires="{{if .ExpiresAt}}{{.ExpiresAt.Format "2006-01-02T15:04:05Z07:00"}}{{end}}" aria-label="Apply one banked reset" title="Apply one banked reset" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v5a2 2 0 0 0 0 4v5H3v-5a2 2 0 0 0 0-4V5Z"/><path d="M15 7v2m0 2v2m0 2v2"/></svg></button>{{end}}</span></div><div class="account-sub" data-account-summary>{{if .Primary}}Primary{{else}}Fallback{{end}} · {{.Plan}} plan</div></div>
                 <div class="account-reset"><div class="state {{if .Paused}}warn{{else if eq .Status "ready"}}good{{else}}bad{{end}}" data-account-status>{{if .Paused}}Paused{{else}}{{.Status}}{{end}}</div><div class="account-sub" data-account-reset>{{if .CodexResetAt}}Codex resets <time datetime="{{.CodexResetAt}}" data-local-datetime>{{.CodexReset}}</time>{{else}}Reset time unavailable{{end}}</div></div>
                 <div class="detail-actions">
                   <form class="inline" method="post" action="/admin/accounts/{{.ID}}/{{if .Paused}}resume{{else}}pause{{end}}" data-account-pause-form><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="return_tab" value="accounts"><button class="icon-btn btn-secondary" type="submit" aria-label="{{if .Paused}}Resume routing{{else}}Pause routing{{end}}" title="{{if .Paused}}Resume routing{{else}}Pause routing{{end}}" data-account-pause-button><span class="material-symbols-outlined" aria-hidden="true">{{if .Paused}}play_arrow{{else}}pause{{end}}</span></button></form>
@@ -292,7 +334,13 @@
           </div>
         </section>
         <section class="section">
-          {{if .Conflicts}}<aside class="conflicts"><h3>Native definition conflicts</h3><p class="muted">Two OpenAI accounts returned different complete definitions for the same model. The primary account’s definition was retained without merging fields.</p>{{range .Conflicts}}<p><strong>{{.Model}}</strong> · {{.Detail}}</p>{{end}}</aside>{{end}}
+          {{if .ConflictError}}<aside class="conflicts" role="status"><h3>Catalog comparison unavailable</h3><p>{{.ConflictError}}</p></aside>{{end}}
+          {{if .Conflicts}}<aside class="conflicts"><h3>Native definition conflicts · {{len .Conflicts}} {{if eq (len .Conflicts) 1}}model{{else}}models{{end}}</h3><p class="muted">OpenAI accounts returned different definitions for these models. Each comparison shows all differing fields and marks the complete definition retained for routing.</p>{{range .Conflicts}}<div class="catalog-conflict-row"><p><strong>{{.Model}}</strong><span class="muted"> · {{.Detail}}</span></p><button type="button" class="btn btn-secondary" data-catalog-conflict="{{.Model}}" aria-haspopup="dialog" aria-controls="catalog-conflict-dialog" aria-label="View discrepancies for {{.Model}}">Details</button></div>{{end}}</aside>{{end}}
+          <dialog id="catalog-conflict-dialog" class="catalog-conflict-dialog" data-catalog-conflict-dialog aria-labelledby="catalog-conflict-title">
+            <div class="catalog-conflict-head"><div><h2 id="catalog-conflict-title" data-catalog-conflict-title>Catalog discrepancies</h2><p class="muted" data-catalog-conflict-summary></p></div><button type="button" class="btn btn-secondary" data-catalog-conflict-close>Close</button></div>
+            <p role="status" aria-live="polite" data-catalog-conflict-status></p>
+            <div data-catalog-conflict-content></div>
+          </dialog>
           {{if .Models}}<div class="data-scroll catalog-scroll" tabindex="0" aria-label="All discovered models; scroll to browse"><table class="data-table" data-sort-table><thead><tr><th aria-sort="none"><button type="button" data-sort="provider" data-direction="none">Provider</button></th><th aria-sort="none"><button type="button" data-sort="model" data-direction="none">Model</button></th><th aria-sort="none"><button type="button" data-sort="state" data-direction="none">State</button></th><th>Detail</th></tr></thead><tbody>{{range .Models}}<tr data-model-row data-provider="{{.Provider}}" data-model="{{.Model}}" data-state="{{.State}}"><td>{{.Provider}}</td><td class="num">{{.Model}}</td><td><span class="state {{if eq .State "available"}}good{{else}}bad{{end}}">{{.State}}</span></td><td class="catalog-detail">{{if .Detail}}{{.Detail}}{{else}}—{{end}}</td></tr>{{end}}</tbody></table></div><p class="empty catalog-empty" data-catalog-empty hidden>No models match these filters.</p>{{else}}<p class="empty">No provider catalog has been fetched.</p>{{end}}
         </section>
       </div>
@@ -301,6 +349,18 @@
 </div>
 <script src="/assets/telemetry-ranges.js?v={{.AssetVersion}}" defer></script>
 <script src="/assets/telemetry-devices.js?v={{.AssetVersion}}" defer></script>
+<script src="/assets/instruction-diff.js?v={{.AssetVersion}}" defer></script>
+<script src="/assets/instruction-history.js?v={{.AssetVersion}}" defer></script>
+<script src="/assets/catalog-conflicts.js?v={{.AssetVersion}}" defer></script>
+<script src="/assets/request-logs.js?v={{.AssetVersion}}" defer></script>
+<dialog class="reset-confirmation" data-reset-dialog aria-labelledby="reset-dialog-title">
+  <h2 id="reset-dialog-title">Apply one reset?</h2>
+  <p data-reset-description></p>
+  <p class="muted">This uses one ticket to reset an eligible Codex allowance.</p>
+  <p role="status" aria-live="polite" data-reset-result></p>
+  <div class="reset-confirmation-actions"><button class="btn btn-secondary" type="button" data-reset-cancel>Cancel</button><button class="btn btn-primary" type="button" data-reset-apply>Apply Reset</button></div>
+</dialog>
+<script src="/assets/reset-tickets.js?v={{.AssetVersion}}" defer></script>
 <script src="/assets/dashboard.js?v={{.AssetVersion}}" defer></script>
 </body>
 </html>

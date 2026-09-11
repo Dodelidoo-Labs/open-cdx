@@ -95,6 +95,27 @@ CREATE TABLE IF NOT EXISTS catalog_exclusions (
     PRIMARY KEY (provider, model_id)
 );
 
+CREATE TABLE IF NOT EXISTS instruction_contents (
+    hash TEXT PRIMARY KEY,
+    content_gzip BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS instruction_catalog_state (
+    account_id TEXT PRIMARY KEY,
+    fields_json BLOB NOT NULL,
+    client_version TEXT NOT NULL DEFAULT '',
+    observed_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS instruction_revisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id TEXT NOT NULL,
+    model TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('baseline','changed')),
+    metadata BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS instruction_revisions_model_idx ON instruction_revisions(model,id);
+CREATE INDEX IF NOT EXISTS instruction_revisions_account_idx ON instruction_revisions(account_id,id);
+CREATE INDEX IF NOT EXISTS instruction_revisions_kind_idx ON instruction_revisions(kind,id);
+
 CREATE TABLE IF NOT EXISTS catalog_conflicts (
     model_id TEXT PRIMARY KEY,
     detail TEXT NOT NULL,
@@ -126,6 +147,22 @@ CREATE TABLE IF NOT EXISTS usage_aggregate (
     reasoning_output_tokens INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (day, provider, model_id, account_id, routing, device_id, recorded_at)
 );
+
+CREATE TABLE IF NOT EXISTS request_logs (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    started_at TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    metadata BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS request_logs_time_idx ON request_logs(started_at, id);
+CREATE INDEX IF NOT EXISTS request_logs_provider_idx ON request_logs(provider, started_at, id);
+CREATE INDEX IF NOT EXISTS request_logs_model_idx ON request_logs(model, started_at, id);
+CREATE INDEX IF NOT EXISTS request_logs_device_idx ON request_logs(device_id, started_at, id);
+CREATE INDEX IF NOT EXISTS request_logs_outcome_idx ON request_logs(outcome, started_at, id);
 
 CREATE TABLE IF NOT EXISTS allowance_observations (
     source TEXT NOT NULL CHECK(source IN ('live','history')),

@@ -43,6 +43,8 @@ OpenCDX has two separately distributed parts:
 - See router health and account quota at a glance from the macOS menu bar.
 - Keep OpenAI and provider credentials in encrypted router storage; paired Macs receive only revocable device credentials.
 - Track daily request and token totals without storing prompts or responses.
+- Track changes to Codex catalog instructions with [instruction history](docs/instruction-history.md), unread updates, and per-field diffs.
+- Inspect per-request errors, model settings, token usage, timing, and routing attempts in [Logs](docs/request-logs.md), with portable backup and restore.
 - Reconcile aggregate usage from an existing local Codex history without sending conversation content to the router.
 
 ## Screenshots
@@ -176,7 +178,7 @@ Back up the router database volume and `docker/secrets/master_key` together befo
 - OpenAI access and refresh tokens and provider API keys exist only in encrypted router storage and transient router memory.
 - The helper binds only to the Mac's loopback interface and keeps its device credential in Keychain.
 - Prompts and responses are streamed and are not logged or stored by OpenCDX.
-- Telemetry contains aggregate request and token counts, not conversation content.
+- Telemetry contains aggregate request and token counts. Request logs retain selected metadata and bounded provider diagnostics, excluding conversation bodies.
 - Production Mac-to-router traffic must use HTTPS. Plain HTTP on a LAN is available only through an explicit development override.
 
 Read the complete [security model](docs/security.md) for credential ownership, network boundaries, header filtering, retry rules, backup, and revocation.

@@ -20,7 +20,7 @@ AES-256-GCM envelopes use per-record random nonces and authenticated associated 
 
 ## Request privacy
 
-The helper reverse proxy does not parse inference request bodies. The router reads only the JSON model route and supported-control fields needed for routing/validation. It does not log request or response bodies. A bounded in-memory response tail is used only to extract aggregate token counts and is then discarded.
+The helper reverse proxy does not parse inference request bodies. The router reads only the JSON model route and supported-control fields needed for routing/validation. It does not log request or response bodies. A bounded in-memory response tail extracts token counts and selected response diagnostics and is then discarded. Administrator-only [request logs](request-logs.md) retain model controls, timings, opaque request/thread/session/account/device identifiers, masked account labels, token counts, outcomes, and bounded provider error messages. Credential patterns in diagnostics are redacted; provider error text can still include provider-supplied context. User prompt and generated-output fields and arbitrary headers are excluded. Separately, [instruction history](instruction-history.md) retains compressed versions of provider-supplied catalogue instructions and model-message policies; it does not inspect conversation prompts. Log exports contain the same metadata and should be kept private.
 
 Native OpenAI request bodies remain byte-for-byte unchanged. Third-party catalog entries use an intentionally empty instruction template required by Codex's catalog schema; the router does not author or inject a provider persona, system prompt, or model-name instruction.
 
@@ -28,7 +28,7 @@ Daily telemetry contains provider, routed model, opaque internal account key, re
 
 The dashboard and paired-device reset operations delete only those aggregate
 rows and their reconciliation metadata. They do not access Codex rollout files
-and do not delete accounts, devices, providers, catalogs, or routing state.
+and do not delete accounts, devices, providers, catalogs, routing state, or request logs.
 
 Dashboard cost figures are estimates. The router refreshes the unauthenticated public OpenRouter model catalog, applies exact published input/output token prices to matching routed model IDs, and leaves unmatched models visibly unpriced. It does not present subscription usage as a bill or invent a cost for local Ollama execution.
 
