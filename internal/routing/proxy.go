@@ -206,6 +206,11 @@ func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Re
 	} else if copyErr == nil && strings.Contains(response.Header.Get("Content-Type"), "text/event-stream") && !collector.terminalResponseSeen() {
 		entry.Outcome = "incomplete"
 		entry.ErrorType, entry.ErrorMessage = "stream_incomplete", "The stream ended without a terminal response event"
+	} else if response.StatusCode < http.StatusBadRequest {
+		// Clients can close the connection as soon as they receive completion.
+		// Preserve that result before finishLog checks for cancellation; body
+		// metadata collected on Close still overrides failed/incomplete responses.
+		entry.Outcome = "success"
 	}
 	proxy.status.Update(device.ID, func(status *RouteStatus) {
 		status.Connected = streamHealthy

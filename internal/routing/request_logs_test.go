@@ -115,6 +115,71 @@ func TestRequestLogsPersistAfterClientDisconnect(t *testing.T) {
 	}
 }
 
+func TestRequestLogsPreserveResponseOutcomeAfterCancellation(t *testing.T) {
+	for _, test := range []struct {
+		name, body, contentType, outcome, errorType string
+		cancelOnClose                               bool
+	}{
+		{"completed stream", "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":4,\"output_tokens\":2}}}\n\n", "text/event-stream", "success", "", false},
+		{"done marker", "data: [DONE]\n\n", "text/event-stream", "success", "", false},
+		{"complete JSON", `{"id":"resp_123","status":"completed"}`, "application/json", "success", "", false},
+		{"cancellation during cleanup", `{"id":"resp_123"}`, "application/json", "success", "", true},
+		{"failed stream", "data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\"}}\n\n", "text/event-stream", "error", "response_failed", false},
+		{"incomplete stream", "data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\"}}\n\n", "text/event-stream", "incomplete", "response_incomplete", false},
+		{"interrupted stream", "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n", "text/event-stream", "cancelled", "client_disconnected", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": {test.contentType}},
+					Body:       &cancelAfterResponseBody{Reader: strings.NewReader(test.body), cancel: cancel, cancelOnClose: test.cancelOnClose},
+					Request:    request,
+				}, nil
+			})
+			proxy, store, _ := proxyFixture(t, &http.Client{Transport: transport}, "https://upstream.invalid", []routeFixture{{stable: "account", models: []string{"gpt-native"}}})
+			request := httptest.NewRequest("POST", "/v1/responses", strings.NewReader(`{"model":"gpt-native","stream":true}`)).WithContext(ctx)
+			writer := httptest.NewRecorder()
+			proxy.ServeDeviceHTTP(writer, request, DeviceContext{ID: "device"})
+			if ctx.Err() == nil || writer.Body.String() != test.body {
+				t.Fatal("expected cancellation after forwarding the response")
+			}
+			page, err := store.RequestLogs(context.Background(), storage.RequestLogFilter{})
+			if err != nil || len(page.Logs) != 1 {
+				t.Fatalf("logs: %#v %v", page, err)
+			}
+			entry := page.Logs[0]
+			if entry.Status != http.StatusOK || entry.Outcome != test.outcome || entry.ErrorType != test.errorType {
+				t.Fatalf("response outcome after cancellation: %#v", entry)
+			}
+		})
+	}
+}
+
+// Simulate a client closing its stream after receiving the available response,
+// either while the proxy is still reading or during response cleanup.
+type cancelAfterResponseBody struct {
+	io.Reader
+	cancel        context.CancelFunc
+	cancelOnClose bool
+}
+
+func (body *cancelAfterResponseBody) Read(p []byte) (int, error) {
+	n, err := body.Reader.Read(p)
+	if err == io.EOF && !body.cancelOnClose {
+		body.cancel()
+		return n, context.Canceled
+	}
+	return n, err
+}
+
+func (body *cancelAfterResponseBody) Close() error {
+	body.cancel()
+	return nil
+}
+
 func TestResponseTailRemainsBounded(t *testing.T) {
 	collector := newTailCollector(32)
 	var all string

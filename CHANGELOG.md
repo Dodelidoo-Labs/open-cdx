@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-09-11
+
+### Fixed
+
+- Preserve successful request log outcomes when a client closes the connection
+  after receiving response completion. Actual interruptions, provider failures,
+  and incomplete responses retain their respective outcomes. Update the router
+  server to apply this fix to new requests; existing log entries are unchanged,
+  and the macOS companion does not require an update for this fix.
+
 ## [1.4.0] - 2026-09-11
 
 ### Added
@@ -82,6 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timezone and daylight-saving changes. Show overlapping daily-only history as
   unavailable for rolling totals instead of presenting incomplete counts.
 
-[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.4.1...HEAD
+[1.4.1]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.2.0...v1.3.0
