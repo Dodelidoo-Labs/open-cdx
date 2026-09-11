@@ -77,16 +77,17 @@ func (account Account) QuotaAvailable(now time.Time) bool {
 }
 
 type AccountInput struct {
-	Credential         OpenAICredential
-	MaskedEmail        string
-	Plan               string
-	Status             string
-	QuotaUsedPercent   float64
-	QuotaResetAt       time.Time
-	ResetCredits       int
-	RawQuota           json.RawMessage
-	RawCatalogSnapshot json.RawMessage
-	EntitledModels     []string
+	CatalogClientVersion string
+	Credential           OpenAICredential
+	MaskedEmail          string
+	Plan                 string
+	Status               string
+	QuotaUsedPercent     float64
+	QuotaResetAt         time.Time
+	ResetCredits         int
+	RawQuota             json.RawMessage
+	RawCatalogSnapshot   json.RawMessage
+	EntitledModels       []string
 }
 
 type Device struct {
@@ -138,11 +139,12 @@ func (provider ProviderConfig) AllowHTTP() bool {
 }
 
 type CatalogSnapshot struct {
-	Provider  string
-	AccountID string
-	ETag      string
-	Raw       json.RawMessage
-	FetchedAt time.Time
+	ClientVersion string
+	Provider      string
+	AccountID     string
+	ETag          string
+	Raw           json.RawMessage
+	FetchedAt     time.Time
 }
 
 type CatalogExclusion struct {

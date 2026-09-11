@@ -1,7 +1,6 @@
 package catalog
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -223,20 +222,27 @@ func ParseTranslatedSnapshot(raw []byte) (providers.Discovery, error) {
 }
 
 func mergeNativeAccounts(accounts []storage.Account) ([]json.RawMessage, map[string]string, error) {
-	type chosenEntry struct {
-		raw       json.RawMessage
-		primary   bool
-		accountID string
+	entries, details, err := mergeNativeAccountsDetailed(accounts)
+	if err != nil {
+		return nil, nil, err
 	}
-	chosen := make(map[string]chosenEntry)
-	conflicts := make(map[string]string)
+	conflicts := make(map[string]string, len(details))
+	for _, detail := range details {
+		conflicts[detail.Model] = fmt.Sprintf("%d differing fields across %d account definitions; one complete upstream definition was retained", len(detail.Fields), len(detail.Sources))
+	}
+	return entries, conflicts, nil
+}
+
+func mergeNativeAccountsDetailed(accounts []storage.Account) ([]json.RawMessage, []NativeConflict, error) {
+	definitions := make(map[string][]nativeDefinition)
+	chosen := make(map[string]int)
 	for _, account := range accounts {
 		if account.Paused || account.Status != "ready" || len(account.RawCatalogSnapshot) == 0 {
 			continue
 		}
-		entitled := make(map[string]struct{}, len(account.EntitledModels))
+		entitled := make(map[string]bool, len(account.EntitledModels))
 		for _, modelID := range account.EntitledModels {
-			entitled[modelID] = struct{}{}
+			entitled[modelID] = true
 		}
 		var snapshot struct {
 			Models []json.RawMessage `json:"models"`
@@ -244,57 +250,58 @@ func mergeNativeAccounts(accounts []storage.Account) ([]json.RawMessage, map[str
 		if err := json.Unmarshal(account.RawCatalogSnapshot, &snapshot); err != nil {
 			return nil, nil, errors.New("stored native catalog snapshot was invalid")
 		}
-		for _, rawModel := range snapshot.Models {
+		for index, rawModel := range snapshot.Models {
 			var identity struct {
 				Slug string `json:"slug"`
 			}
 			if err := json.Unmarshal(rawModel, &identity); err != nil || identity.Slug == "" {
 				return nil, nil, errors.New("stored native catalog entry omitted its slug")
 			}
-			if _, eligible := entitled[identity.Slug]; !eligible {
+			if !entitled[identity.Slug] {
 				continue
 			}
-			existing, found := chosen[identity.Slug]
-			if !found {
-				chosen[identity.Slug] = chosenEntry{raw: append(json.RawMessage(nil), rawModel...), primary: account.Primary, accountID: account.ID}
-				continue
+			value, err := decodeDefinition(rawModel)
+			if err != nil {
+				return nil, nil, errors.New("stored native catalog entry was invalid")
 			}
-			if !jsonEqual(existing.raw, rawModel) {
-				conflicts[identity.Slug] = "account catalogs contain conflicting complete definitions; one upstream definition was retained"
-				if account.Primary && !existing.primary {
-					chosen[identity.Slug] = chosenEntry{raw: append(json.RawMessage(nil), rawModel...), primary: true, accountID: account.ID}
-				}
+			sources := definitions[identity.Slug]
+			if len(sources) == 0 || (account.Primary && !sources[chosen[identity.Slug]].source.Primary) {
+				chosen[identity.Slug] = len(sources)
 			}
+			definitions[identity.Slug] = append(sources, nativeDefinition{raw: rawModel, value: value,
+				source: ConflictSource{AccountID: account.ID, Account: account.MaskedEmail, Plan: account.Plan,
+					Primary: account.Primary, CatalogEntry: index + 1}})
 		}
 	}
-	identifiers := make([]string, 0, len(chosen))
-	for modelID := range chosen {
+	identifiers := make([]string, 0, len(definitions))
+	for modelID := range definitions {
 		identifiers = append(identifiers, modelID)
 	}
+	sort.Strings(identifiers)
+	conflicts := []NativeConflict{}
+	for _, modelID := range identifiers {
+		if len(definitions[modelID]) < 2 {
+			continue
+		}
+		conflict := definitionConflict(modelID, definitions[modelID], chosen[modelID])
+		if len(conflict.Fields) > 0 {
+			conflicts = append(conflicts, conflict)
+		}
+	}
 	sort.SliceStable(identifiers, func(left, right int) bool {
-		leftPriority := modelPriority(chosen[identifiers[left]].raw)
-		rightPriority := modelPriority(chosen[identifiers[right]].raw)
+		leftID, rightID := identifiers[left], identifiers[right]
+		leftPriority := modelPriority(definitions[leftID][chosen[leftID]].raw)
+		rightPriority := modelPriority(definitions[rightID][chosen[rightID]].raw)
 		if leftPriority == rightPriority {
-			return identifiers[left] < identifiers[right]
+			return leftID < rightID
 		}
 		return leftPriority < rightPriority
 	})
 	entries := make([]json.RawMessage, 0, len(identifiers))
 	for _, modelID := range identifiers {
-		entries = append(entries, chosen[modelID].raw)
+		entries = append(entries, definitions[modelID][chosen[modelID]].raw)
 	}
 	return entries, conflicts, nil
-}
-
-func jsonEqual(left, right []byte) bool {
-	var leftValue, rightValue any
-	return json.Unmarshal(left, &leftValue) == nil && json.Unmarshal(right, &rightValue) == nil &&
-		bytes.Equal(mustCanonical(leftValue), mustCanonical(rightValue))
-}
-
-func mustCanonical(value any) []byte {
-	encoded, _ := json.Marshal(value)
-	return encoded
 }
 
 func modelPriority(raw []byte) int {

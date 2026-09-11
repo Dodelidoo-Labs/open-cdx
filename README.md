@@ -43,6 +43,7 @@ OpenCDX has two separately distributed parts:
 - See router health and account quota at a glance from the macOS menu bar.
 - Keep OpenAI and provider credentials in encrypted router storage; paired Macs receive only revocable device credentials.
 - Track daily request and token totals without storing prompts or responses.
+- Track changes to Codex catalog instructions with [instruction history](docs/instruction-history.md), unread updates, and per-field diffs.
 - Inspect per-request errors, model settings, token usage, timing, and routing attempts in [Logs](docs/request-logs.md), with portable backup and restore.
 - Reconcile aggregate usage from an existing local Codex history without sending conversation content to the router.
 

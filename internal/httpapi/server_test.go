@@ -360,7 +360,7 @@ func TestAdminAccountsLiveIsConditionalLightweightAndPrivacyMinimal(t *testing.T
 		},
 		MaskedEmail: "a***@example.com", Plan: "plus", Status: "ready", QuotaUsedPercent: 20,
 		QuotaResetAt: resetAt, ResetCredits: 2,
-		RawQuota: rawQuota, RawCatalogSnapshot: json.RawMessage(`{"raw_catalog_marker":"RAW_CATALOG_SECRET"}`), EntitledModels: []string{"SECRET_MODEL"},
+		RawQuota: rawQuota, RawCatalogSnapshot: json.RawMessage(`{"models":[],"raw_catalog_marker":"RAW_CATALOG_SECRET"}`), EntitledModels: []string{"SECRET_MODEL"},
 	}, false)
 	if err != nil {
 		t.Fatal(err)

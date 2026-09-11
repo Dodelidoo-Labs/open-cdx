@@ -10,12 +10,15 @@ import (
 )
 
 func (store *Store) PutCatalogSnapshot(ctx context.Context, snapshot CatalogSnapshot) error {
-	_, err := store.db.ExecContext(ctx, `
-		INSERT INTO catalog_snapshots(provider, account_id, etag, raw_json, fetched_at) VALUES(?,?,?,?,?)
-		ON CONFLICT(provider,account_id) DO UPDATE SET etag=excluded.etag, raw_json=excluded.raw_json,
-		fetched_at=excluded.fetched_at`, snapshot.Provider, snapshot.AccountID, snapshot.ETag,
-		[]byte(snapshot.Raw), unixTime(snapshot.FetchedAt))
-	return err
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err = store.putCatalogSnapshotTx(ctx, tx, snapshot); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (store *Store) CatalogSnapshots(ctx context.Context, provider string) ([]CatalogSnapshot, error) {

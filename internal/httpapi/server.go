@@ -180,6 +180,13 @@ func (server *Server) routes() http.Handler {
 	mux.Handle("GET /admin/logs/export", server.admin(http.HandlerFunc(server.adminExportRequestLogs)))
 	mux.Handle("POST /admin/logs/import", server.admin(http.HandlerFunc(server.adminImportRequestLogs)))
 	mux.Handle("GET /admin/logs/{id}", server.admin(http.HandlerFunc(server.adminRequestLog)))
+	mux.Handle("GET /admin/instructions", server.admin(http.HandlerFunc(server.adminInstructionHistory)))
+	mux.Handle("GET /admin/instructions/status", server.admin(http.HandlerFunc(server.adminInstructionStatus)))
+	mux.Handle("GET /admin/instructions/{id}", server.admin(http.HandlerFunc(server.adminInstructionRevision)))
+	mux.HandleFunc("GET /assets/instruction-diff.js", staticAsset("instruction-diff.js", "text/javascript; charset=utf-8"))
+	mux.HandleFunc("GET /assets/instruction-history.js", staticAsset("instruction-history.js", "text/javascript; charset=utf-8"))
+	mux.Handle("GET /admin/catalog/conflicts", server.admin(http.HandlerFunc(server.adminCatalogConflict)))
+	mux.HandleFunc("GET /assets/catalog-conflicts.js", staticAsset("catalog-conflicts.js", "text/javascript; charset=utf-8"))
 	mux.Handle("GET /admin/telemetry", server.admin(http.HandlerFunc(server.adminTelemetry)))
 	mux.Handle("GET /admin/accounts/live", server.admin(http.HandlerFunc(server.adminAccountsLive)))
 	mux.Handle("GET /admin/devices/live", server.admin(http.HandlerFunc(server.adminDevicesLive)))
@@ -1068,6 +1075,7 @@ type dashboardPage struct {
 	Devices                 []deviceView
 	Models                  []modelView
 	Conflicts               []conflictView
+	ConflictError           string
 	AvailableModelCount     int
 	ExcludedModelCount      int
 }
@@ -1238,12 +1246,13 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 			page.ExcludedModelCount++
 		}
 	}
-	conflicts, err := server.store.Conflicts(ctx)
+	conflicts, err := catalog.NativeConflicts(accounts)
 	if err != nil {
-		return page, err
+		page.ConflictError = "Stored account catalogs could not be compared: " + err.Error()
 	}
-	for model, detail := range conflicts {
-		page.Conflicts = append(page.Conflicts, conflictView{Model: model, Detail: detail})
+	for _, conflict := range conflicts {
+		page.Conflicts = append(page.Conflicts, conflictView{Model: conflict.Model,
+			Detail: fmt.Sprintf("%d differing fields across %d account definitions", len(conflict.Fields), len(conflict.Sources))})
 	}
 	sort.Slice(page.Conflicts, func(left, right int) bool { return page.Conflicts[left].Model < page.Conflicts[right].Model })
 	return page, nil
@@ -1419,7 +1428,7 @@ func redirectMessage(writer http.ResponseWriter, request *http.Request, message 
 	}
 	tab := request.FormValue("return_tab")
 	switch tab {
-	case "home", "logs", "accounts", "providers", "devices", "catalog":
+	case "home", "logs", "instructions", "accounts", "providers", "devices", "catalog":
 	default:
 		tab = "home"
 	}

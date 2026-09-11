@@ -84,10 +84,7 @@ func (store *Store) PutAccount(ctx context.Context, input AccountInput, replace 
 		}
 	}
 	if len(input.RawCatalogSnapshot) > 0 {
-		if _, err = transaction.ExecContext(ctx, `
-			INSERT INTO catalog_snapshots(provider, account_id, raw_json, fetched_at) VALUES('openai',?,?,?)
-			ON CONFLICT(provider,account_id) DO UPDATE SET raw_json=excluded.raw_json, fetched_at=excluded.fetched_at`,
-			accountID, []byte(input.RawCatalogSnapshot), now.Unix()); err != nil {
+		if err = store.putCatalogSnapshotTx(ctx, transaction, CatalogSnapshot{Provider: "openai", AccountID: accountID, Raw: input.RawCatalogSnapshot, FetchedAt: now, ClientVersion: input.CatalogClientVersion}); err != nil {
 			return Account{}, false, err
 		}
 	}
@@ -294,7 +291,7 @@ func (store *Store) UpdateAccountQuota(ctx context.Context, accountID, plan stri
 	return requireChanged(result)
 }
 
-func (store *Store) UpdateAccountCatalog(ctx context.Context, accountID string, raw json.RawMessage, modelIDs []string) error {
+func (store *Store) UpdateAccountCatalog(ctx context.Context, accountID string, raw json.RawMessage, modelIDs []string, clientVersions ...string) error {
 	if len(raw) == 0 {
 		return errors.New("catalog snapshot is empty")
 	}
@@ -318,11 +315,11 @@ func (store *Store) UpdateAccountCatalog(ctx context.Context, accountID string, 
 			return err
 		}
 	}
-	_, err = transaction.ExecContext(ctx, `
-		INSERT INTO catalog_snapshots(provider, account_id, raw_json, fetched_at) VALUES('openai',?,?,?)
-		ON CONFLICT(provider,account_id) DO UPDATE SET raw_json=excluded.raw_json, fetched_at=excluded.fetched_at`,
-		accountID, []byte(raw), time.Now().Unix())
-	if err != nil {
+	version := ""
+	if len(clientVersions) > 0 {
+		version = clientVersions[0]
+	}
+	if err = store.putCatalogSnapshotTx(ctx, transaction, CatalogSnapshot{Provider: "openai", AccountID: accountID, Raw: raw, FetchedAt: time.Now().UTC(), ClientVersion: version}); err != nil {
 		return err
 	}
 	return transaction.Commit()
