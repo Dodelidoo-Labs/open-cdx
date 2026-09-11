@@ -45,6 +45,15 @@ codesign -d --verbose=4 "dist/OpenCDX Router.app/Contents/Resources/router-helpe
 The explicit ad-hoc identity above is only for build validation. Installed local
 builds must use a stable Apple-issued signing identity.
 
+The menu executable must link against macOS SDK 26 or newer, including both
+slices of universal releases. `scripts/build-macos-app.sh` verifies the finished
+binary's `LC_BUILD_VERSION` metadata with `vtool`; the minimum supported macOS
+version stays at 13.0. On Tahoe, open the HUD over a patterned background and
+check that its glass surface has native rounded corners, with no square inner
+frame or separate translucent strip below. Repeat after account rows change
+the menu height. An SDK 15.5-linked build exercises the defective legacy
+presentation even when running on Tahoe.
+
 The suite covers OAuth state/PKCE, duplicate detection, encrypted persistence, refresh single-flight, native entry preservation, entitlement selection, sticky affinity, quota failover, partial-stream no-retry, headers/auth replacement, capability-driven OpenRouter catalog mapping, account-collapsed token telemetry, Codex-local patch exposure, unsupported/no-op reasoning handling, Ollama hosted-search suppression, atomic catalogs, device lifecycle, error redaction, HTTP policy, and helper local tokens.
 
 ## Spark allowance in the macOS menu

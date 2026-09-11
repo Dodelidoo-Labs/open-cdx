@@ -179,6 +179,19 @@ build_menu_app() {
     cp "$SWIFT_BIN_DIR/OpenCDXRouterMenu" "$STAGED_MENU"
     SPARKLE_PACKAGE_ROOT="$SWIFT_BUILD_ROOT/native/artifacts/sparkle/Sparkle"
   fi
+
+  # Tahoe selects MenuBarExtra's rendering path using the linked SDK. Older
+  # SDKs produce a square legacy backdrop over the native rounded surface.
+  # Check the actual executable (every slice), including reused build outputs.
+  MENU_BUILD_METADATA=$(xcrun vtool -show-build "$STAGED_MENU")
+  if ! printf '%s\n' "$MENU_BUILD_METADATA" | awk '
+    $1 == "sdk" { count++; if ($2 + 0 < 26) unsupported = 1 }
+    END { exit (count == 0 || unsupported) }
+  '; then
+    echo "The menu app must link against macOS SDK 26 or newer for correct HUD rendering on Tahoe." >&2
+    echo "Select Xcode 26 or newer and rebuild. The deployment target remains macOS 13.0." >&2
+    exit 1
+  fi
 }
 
 stage_sparkle_framework() {
