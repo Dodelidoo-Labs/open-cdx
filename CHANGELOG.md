@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-11
+
+### Added
+
+- Inspect authenticated inference requests in the dashboard's **Logs** view,
+  including model settings, token usage, timings, routing attempts, and errors.
+  Export and restore logs with portable, duplicate-safe backups.
+- Track provider-supplied Codex catalog instructions with per-account baselines,
+  persistent history, unread update notifications, and complete per-field diffs.
+- Compare differing model catalog fields across accounts and identify the
+  complete upstream definition retained for routing.
+- Apply one banked Codex reset from an account's ticket in the macOS menu or
+  Accounts dashboard, or through the authenticated API and helper command.
+  Confirm the account before redemption; retries reuse an idempotency key,
+  expired tickets disappear, and quota data refreshes afterward. Update both
+  the server and macOS companion to redeem resets from the menu.
+
+### Changed
+
+- Retain selected request metadata and bounded, credential-redacted provider
+  diagnostics without storing conversation bodies. Request logs and catalog
+  instruction history survive telemetry resets and have no automatic expiration;
+  include the router database in backups and monitor its disk usage. Log exports
+  contain private operational metadata and do not include instruction history.
+- Use Xcode 26 and macOS SDK 26 or newer for macOS builds, with an SDK check on
+  every executable architecture. The minimum supported macOS version remains 13.0.
+
+### Fixed
+
+- Use the native rounded menu surface on macOS Tahoe by linking the application
+  with the current SDK, eliminating the square legacy backdrop.
+
 ## [1.3.0] - 2026-09-10
 
 ### Added
@@ -50,5 +82,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timezone and daylight-saving changes. Show overlapping daily-only history as
   unavailable for rolling totals instead of presenting incomplete counts.
 
-[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.2.0...v1.3.0
