@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-09-16
+
+### Fixed
+
+- Remove the router's 64 MiB request-body cap for inference and compaction.
+  Large requests, including conversations with retained images, can now reach
+  the provider without OpenCDX rejecting them with HTTP 413. Provider limits
+  still apply.
+- Report interrupted request-body reads as read failures instead of incorrectly
+  reporting that the request exceeds a size limit.
+
+Update the router server to apply these fixes, then resume affected threads;
+their saved history does not need to be recreated. The macOS companion is
+rebuilt for this release, but updating the companion alone does not fix HTTP 413.
+
 ## [1.4.1] - 2026-09-11
 
 ### Fixed
@@ -92,7 +107,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timezone and daylight-saving changes. Show overlapping daily-only history as
   unavailable for rolling totals instead of presenting incomplete counts.
 
-[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.4.2...HEAD
+[1.4.2]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.2.0...v1.3.0

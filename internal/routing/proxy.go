@@ -20,8 +20,6 @@ import (
 	"github.com/Dodelidoo-Labs/open-cdx/internal/storage"
 )
 
-const maxRequestBody = 64 << 20
-
 type Proxy struct {
 	store       *storage.Store
 	accounts    *accounts.Manager
@@ -62,12 +60,14 @@ func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Re
 		writeProxyError(writer, http.StatusMethodNotAllowed, "method_not_allowed", "only POST is supported")
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(request.Body, maxRequestBody+1))
-	if err != nil || len(body) > maxRequestBody {
-		writeProxyError(writer, http.StatusRequestEntityTooLarge, "request_too_large", "request body exceeds the router limit")
+	// Leave inference payload limits to the provider. Image-bearing Codex
+	// requests can be large even while they fit the model's context window.
+	body, err := io.ReadAll(request.Body)
+	entry.RequestBytes = int64(len(body))
+	if err != nil {
+		writeProxyError(writer, http.StatusBadRequest, "request_read_failed", "request body could not be read")
 		return
 	}
-	entry.RequestBytes = int64(len(body))
 	var rawDocument map[string]json.RawMessage
 	if err = json.Unmarshal(body, &rawDocument); err != nil {
 		writeProxyError(writer, http.StatusBadRequest, "invalid_json", "request body must be a JSON object")

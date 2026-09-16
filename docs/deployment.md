@@ -70,6 +70,11 @@ For Tailscale, use a certificate-backed Tailscale DNS name or place Caddy on the
 
 The HTTPS requirement applies to Mac-to-router traffic. If the router connects to an Ollama server elsewhere on a trusted LAN, that provider has a separate **Allow HTTP** option. It is off by default and should be enabled only for that deliberate upstream connection. Loopback HTTP remains allowed without the option.
 
+OpenCDX imposes no request-body size cap on `/v1/responses` or
+`/v1/responses/compact`; provider limits still apply. The router buffers request
+bodies in memory for routing and retries, so memory usage grows with payload
+size and concurrent requests.
+
 ## Persistence and backup
 
 The `router_data` named volume contains SQLite metadata, encrypted credentials, catalogs, quota state, devices, routing affinity, and aggregate telemetry. `docker/secrets/master_key` decrypts the stored credential envelopes.

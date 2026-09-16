@@ -3,6 +3,7 @@ package routing
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"net/http"
@@ -68,6 +69,55 @@ func TestNativeProxyPreservesBodyAndMetadataWhileReplacingAuthentication(t *test
 		if receivedHeaders.Get(name) != value {
 			t.Fatalf("required Codex metadata header %s changed: %q", name, receivedHeaders.Get(name))
 		}
+	}
+}
+
+func TestNativeProxyForwardsLargeInferenceBodies(t *testing.T) {
+	// Embedded images can exceed the former 64 MiB cap without exhausting the
+	// model context. Both inference and compaction must reach the provider.
+	body := `{"model":"gpt-native","input":[{"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,` + strings.Repeat("A", 65<<20) + `"}]}]}`
+	wantDigest := sha256.Sum256([]byte(body))
+	for _, path := range []string{"/v1/responses", "/v1/responses/compact"} {
+		t.Run(path, func(t *testing.T) {
+			var attempts int
+			transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				attempts++
+				digest := sha256.New()
+				n, err := io.Copy(digest, request.Body)
+				if err != nil || n != int64(len(body)) || !bytes.Equal(digest.Sum(nil), wantDigest[:]) {
+					t.Fatalf("large body changed: received %d bytes, error %v", n, err)
+				}
+				if wantPath := strings.TrimPrefix(path, "/v1"); request.URL.Path != wantPath {
+					t.Fatalf("upstream path = %q, want %q", request.URL.Path, wantPath)
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"id":"ok"}`)), Request: request}, nil
+			})
+			proxy, store, _ := proxyFixture(t, &http.Client{Transport: transport}, "https://upstream.invalid", []routeFixture{{stable: "account", models: []string{"gpt-native"}}})
+			writer := httptest.NewRecorder()
+			proxy.ServeDeviceHTTP(writer, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)), DeviceContext{ID: "device"})
+			if writer.Code != http.StatusOK || attempts != 1 {
+				t.Fatalf("large request: status %d, attempts %d, response %s", writer.Code, attempts, writer.Body.String())
+			}
+			page, err := store.RequestLogs(context.Background(), storage.RequestLogFilter{})
+			if err != nil || len(page.Logs) != 1 || page.Logs[0].RequestBytes != int64(len(body)) {
+				t.Fatalf("large request byte count missing from logs: %#v, %v", page, err)
+			}
+		})
+	}
+}
+
+func TestProxyReportsRequestReadFailure(t *testing.T) {
+	proxy, store, _ := proxyFixture(t, &http.Client{}, "https://unused.invalid", nil)
+	partial := []byte(`{"model":"gpt-native"`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", &oneChunkThenError{chunk: partial})
+	writer := httptest.NewRecorder()
+	proxy.ServeDeviceHTTP(writer, request, DeviceContext{ID: "device"})
+	if writer.Code != http.StatusBadRequest || !strings.Contains(writer.Body.String(), "request_read_failed") {
+		t.Fatalf("read failure: status %d, response %s", writer.Code, writer.Body.String())
+	}
+	page, err := store.RequestLogs(context.Background(), storage.RequestLogFilter{})
+	if err != nil || len(page.Logs) != 1 || page.Logs[0].RequestBytes != int64(len(partial)) || len(page.Logs[0].Attempts) != 0 {
+		t.Fatalf("read failure log: %#v, %v", page, err)
 	}
 }
 
