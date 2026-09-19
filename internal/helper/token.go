@@ -13,7 +13,7 @@ import (
 	secure "github.com/Dodelidoo-Labs/open-cdx/internal/crypto"
 )
 
-const localTokenLifetime = 5 * time.Minute
+const LocalTokenLifetime = 5 * time.Minute
 
 func IssueLocalToken(secret string, now time.Time) (string, error) {
 	if len(secret) < 32 {
@@ -23,7 +23,7 @@ func IssueLocalToken(secret string, now time.Time) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	payload := fmt.Sprintf("v1.%d.%s", now.UTC().Add(localTokenLifetime).Unix(), nonce)
+	payload := fmt.Sprintf("v1.%d.%s", now.UTC().Add(LocalTokenLifetime).Unix(), nonce)
 	return payload + "." + signLocal(secret, payload), nil
 }
 
@@ -37,7 +37,7 @@ func VerifyLocalToken(secret, token string, now time.Time) bool {
 		return false
 	}
 	nowUnix := now.UTC().Unix()
-	if expires < nowUnix-30 || expires > nowUnix+int64((localTokenLifetime+time.Minute).Seconds()) {
+	if expires < nowUnix-30 || expires > nowUnix+int64((LocalTokenLifetime+time.Minute).Seconds()) {
 		return false
 	}
 	payload := strings.Join(parts[:3], ".")

@@ -66,12 +66,10 @@ struct RouterMenuView: View {
 
             VStack(spacing: 2) {
                 if #available(macOS 14.0, *) {
-                    SettingsLink {
-                        MenuActionLabel("Settings…", systemImage: "gearshape")
-                    }
-                    .buttonStyle(.plain)
+                    OpenSettingsButton()
                 } else {
                     MenuActionButton("Settings…", systemImage: "gearshape") {
+                        NSApp.activate(ignoringOtherApps: true)
                         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
                     }
                 }
@@ -516,6 +514,20 @@ private struct AllowanceProgressBar: View {
 
     private func clamped(_ value: Double) -> Double {
         min(max(value, 0), 100)
+    }
+}
+
+@available(macOS 14.0, *)
+private struct OpenSettingsButton: View {
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        MenuActionButton("Settings…", systemImage: "gearshape") {
+            // Opening the menu-bar HUD does not activate the app. Activate it
+            // explicitly so Settings appears in front of other apps' windows.
+            NSApp.activate(ignoringOtherApps: true)
+            openSettings()
+        }
     }
 }
 

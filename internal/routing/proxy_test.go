@@ -21,13 +21,14 @@ import (
 )
 
 func TestNativeProxyPreservesBodyAndMetadataWhileReplacingAuthentication(t *testing.T) {
-	requestBody := []byte("{ \"model\" : \"gpt-native\", \"input\" : [ { \"role\":\"user\", \"content\":\"private\" } ] }")
+	requestBody := []byte("{ \"model\" : \"gpt-native\", \"prompt_cache_key\" : \"cache-scope\", \"input\" : [ { \"role\":\"user\", \"content\":\"private\" } ] }")
 	var receivedBody []byte
 	var receivedHeaders http.Header
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		receivedBody, _ = io.ReadAll(request.Body)
 		receivedHeaders = request.Header.Clone()
 		writer.Header().Set("Content-Type", "application/json")
+		writer.Header().Set("X-Codex-Turn-State", "upstream-turn-state")
 		_, _ = writer.Write([]byte(`{"id":"response","usage":{"input_tokens":4,"output_tokens":2}}`))
 	}))
 	defer upstream.Close()
@@ -39,7 +40,10 @@ func TestNativeProxyPreservesBodyAndMetadataWhileReplacingAuthentication(t *test
 	requiredMetadata := map[string]string{
 		"X-Codex-Test-Metadata": "preserve-me", "X-Codex-Turn-Metadata": "turn-metadata",
 		"X-Oai-Attestation": "attestation", "Originator": "codex_cli_rs", "Version": "codex-cli 9.9",
-		"User-Agent": "codex-cli/test", "Thread-Id": "thread-sticky", "Session-Id": "session",
+		// Codex can share a cache scope across distinct threads. Keep cache and
+		// transcript identities distinct while forwarding both unchanged.
+		"User-Agent": "codex-cli/test", "Thread-Id": "thread-sticky", "Session-Id": "cache-scope",
+		"X-Client-Request-Id": "thread-sticky", "X-Codex-Turn-State": "previous-turn-state",
 		"OpenAI-Beta": "responses=experimental", "X-OpenAI-Subagent": "review",
 		"X-OpenAI-Memgen-Request": "true", "X-OpenAI-Internal-Codex-Responses-Lite": "true",
 		"X-ResponsesAPI-Feature": "daybreak",
@@ -51,6 +55,9 @@ func TestNativeProxyPreservesBodyAndMetadataWhileReplacingAuthentication(t *test
 	proxy.ServeDeviceHTTP(writer, request, DeviceContext{ID: "device"})
 	if writer.Code != http.StatusOK {
 		t.Fatalf("proxy returned %d: %s", writer.Code, writer.Body.String())
+	}
+	if writer.Header().Get("X-Codex-Turn-State") != "upstream-turn-state" {
+		t.Fatal("upstream sticky-routing state did not reach the client")
 	}
 	usage, err := store.Usage(context.Background(), time.Time{})
 	if err != nil || len(usage) != 1 || usage[0].DeviceID != "device" || usage[0].InputTokens != 4 || usage[0].OutputTokens != 2 {

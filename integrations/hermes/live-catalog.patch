@@ -1,0 +1,1026 @@
+diff --git a/hermes_cli/models_endpoint_catalog.py b/hermes_cli/models_endpoint_catalog.py
+new file mode 100644
+--- /dev/null
++++ b/hermes_cli/models_endpoint_catalog.py
+@@ -0,0 +1,77 @@
++"""Preserve custom endpoint catalog metadata alongside its credential-scoped ID cache."""
++from __future__ import annotations
++
++import json
++import re
++
++
++class CatalogJSON(dict):
++    def __init__(self, value: dict, cache_control: str = ''):
++        super().__init__(value)
++        self.cache_ttl_seconds = None
++        if isinstance(cache_control, str):
++            if re.search(r'(?:^|,)\s*(?:no-cache|no-store)\b', cache_control):
++                self.cache_ttl_seconds = 0
++            elif match := re.search(r'(?:^|,)\s*max-age=(\d+)', cache_control):
++                self.cache_ttl_seconds = int(match[1])
++
++
++def read_catalog_response(response):
++    value = json.loads(response.read().decode())
++    if isinstance(value, dict):
++        return CatalogJSON(value, getattr(response, 'headers', {}).get('Cache-Control', ''))
++    return value
++
++
++class EndpointModels(list):
++    """Successful /models result, including an authoritative empty catalog."""
++    def __init__(self, items: list, cache_ttl_seconds=None):
++        fields = ('id', 'name', 'context_length', 'reasoning', 'supported_reasoning_levels',
++                  'default_reasoning_level', 'service_tiers', 'default_service_tier', 'input_modalities')
++        self.metadata = {
++            item['id']: {key: item[key] for key in fields if key in item}
++            for item in items if isinstance(item, dict) and isinstance(item.get('id'), str) and item['id']
++        }
++        super().__init__(self.metadata)
++        self.cache_ttl_seconds = cache_ttl_seconds
++
++
++def catalog_capabilities(metadata: dict) -> dict:
++    """Only explicit declarations override generic heuristics; no invented effort levels."""
++    caps = {}
++    reasoning = metadata.get('reasoning')
++    efforts = reasoning.get('supported_efforts') if isinstance(reasoning, dict) else None
++    if isinstance(efforts, list) and all(isinstance(e, str) for e in efforts):
++        caps.update(reasoning=any(e != 'none' for e in efforts),
++                    supported_efforts=efforts, can_disable_reasoning='none' in efforts)
++        default = reasoning.get('default_effort')
++        if isinstance(default, str) and default in efforts:
++            caps['default_effort'] = default
++    if isinstance(metadata.get('service_tiers'), list):
++        caps['fast'] = any(t == 'priority' or (isinstance(t, dict) and t.get('id') == 'priority')
++                           for t in metadata['service_tiers'])
++    return caps
++
++
++def endpoint_model_metadata(model: str, base_url: str, config: dict | None = None):
++    """Read the route's live catalog using the same profile/credential cache as its picker."""
++    from hermes_cli.config import get_compatible_custom_providers
++    from hermes_cli.model_switch_providers import _entry_credentials, _entry_api_mode
++    from hermes_cli.model_switch import _extra_headers_from_config, _scoped_key_env
++    from hermes_cli.models import cached_fetch_api_models
++    if not model or not base_url:
++        return None
++    entries = [entry for entry in get_compatible_custom_providers(config)
++               if str(entry.get('base_url') or '').rstrip('/') == str(base_url).rstrip('/')]
++    # A URL alone cannot choose between tenants with different credentials.
++    if len(entries) != 1:
++        return None
++    for entry in entries:
++        if entry.get('discover_models', True) is False:
++            continue
++        key, env, _ = _entry_credentials(entry, 'key_env', 'api_key_env')
++        models = cached_fetch_api_models(key or _scoped_key_env(env), base_url,
++                                        api_mode=_entry_api_mode(entry),
++                                        headers=_extra_headers_from_config(entry) or None)
++        return models.metadata.get(model) if isinstance(models, EndpointModels) else None
++    return None
+diff --git a/hermes_cli/models.py b/hermes_cli/models.py
+--- a/hermes_cli/models.py
++++ b/hermes_cli/models.py
+@@ -85,7 +85,8 @@
+     call time so monkeypatching ``_urlopen_model_catalog_request`` still applies). Raises on failure."""
+     req = urllib.request.Request(url, headers=headers or {})
+     with (opener or _urlopen_model_catalog_request)(req, timeout=timeout, **open_kwargs) as resp:
+-        return json.loads(resp.read().decode())
++        from hermes_cli.models_endpoint_catalog import read_catalog_response
++        return read_catalog_response(resp)
+ 
+ 
+ def _read_json_cache(path: Path, *, errors=Exception) -> Optional[dict]:
+@@ -2325,8 +2326,12 @@
+             continue
+         if _neg_key is not None:
+             _probe_neg_cache.pop(_neg_key, None)
++        from hermes_cli.models_endpoint_catalog import EndpointModels
++        items = data.get("data")
++        if not isinstance(items, list):
++            continue
+         return _probe_result(
+-            [m.get("id", "") for m in data.get("data", [])], url, candidate_base.rstrip("/"),
++            EndpointModels(items, getattr(data, "cache_ttl_seconds", None)), url, candidate_base.rstrip("/"),
+             alternate_base if alternate_base != candidate_base else normalized, is_fallback)
+ 
+     if _neg_key is not None and not reachable:
+@@ -2521,11 +2526,18 @@
+     without minting a command token before cache admission."""
+     from hermes_cli.model_switch_providers import _NativePickerModelList
+ 
++    from hermes_cli.models_endpoint_catalog import EndpointModels
++
+     def _catalog(entry):
++        if "metadata" in entry:
++            return EndpointModels(list(entry["metadata"].values()), entry.get("cache_ttl_seconds"))
+         return (_NativePickerModelList if entry.get("native_catalog") else list)(entry["models"])
+ 
+     def _entry(live, at=None):
+-        return {**_cache_entry(fp, live, at), "native_catalog": isinstance(live, _NativePickerModelList)}
++        result = {**_cache_entry(fp, live, at), "native_catalog": isinstance(live, _NativePickerModelList)}
++        if isinstance(live, EndpointModels):
++            result.update(metadata=live.metadata, cache_ttl_seconds=live.cache_ttl_seconds)
++        return result
+ 
+     def _live():
+         if fetch_models is not None:
+@@ -2547,7 +2559,10 @@
+     entry = cache.get(cache_key)
+     now = time.time()
+     native_row = isinstance(entry, dict) and entry.get("native_catalog") is True
+-    valid = not force_refresh and _cache_entry_valid(entry, fp, allow_empty=native_row)
++    endpoint_row = isinstance(entry, dict) and isinstance(entry.get("metadata"), dict)
++    if endpoint_row and isinstance(entry.get("cache_ttl_seconds"), (int, float)):
++        ttl_seconds = min(ttl_seconds, max(0, entry["cache_ttl_seconds"]))
++    valid = not force_refresh and _cache_entry_valid(entry, fp, allow_empty=native_row or endpoint_row)
+ 
+     if valid:
+         age = now - entry["at"]
+@@ -2556,14 +2571,14 @@
+         # An empty native catalog is authoritative only inside the TTL (as in
+         # cached_provider_model_ids): never stale-serve it, or an Ollama that was model-less at
+         # first open keeps an empty row for the whole stale window after models are pulled.
+-        if entry["models"] and age < _PROVIDER_MODELS_STALE_SERVE_MAX:
++        if entry["models"] and age < _PROVIDER_MODELS_STALE_SERVE_MAX and (cache_only or not endpoint_row):
+             # Stale-while-revalidate: serve now, refresh off-thread for the next open. cache_only
+             # opens (GUI pickers that must not block on a stopped local server) take the same
+             # non-blocking refresh: without it a locally loaded model stayed invisible for the
+             # whole 7-day stale window unless the user found "Refresh Models" (#71169 class).
+             def _refresh_custom():
+                 live = _live()
+-                return _entry(live) if live or isinstance(live, _NativePickerModelList) else None
++                return _entry(live) if live or isinstance(live, (_NativePickerModelList, EndpointModels)) else None
+ 
+             _spawn_swr_refresh(cache_key, _refresh_custom)
+             return _catalog(entry)
+@@ -2572,7 +2587,7 @@
+         return None
+ 
+     live = _live()
+-    if live or isinstance(live, _NativePickerModelList):
++    if live or isinstance(live, (_NativePickerModelList, EndpointModels)):
+         stored = _entry(live, now)
+         _store_cache_entry(cache_key, stored, cache)
+         return _catalog(stored)
+diff --git a/hermes_cli/model_switch_providers.py b/hermes_cli/model_switch_providers.py
+--- a/hermes_cli/model_switch_providers.py
++++ b/hermes_cli/model_switch_providers.py
+@@ -16,6 +16,7 @@
+ from agent.command_token_source import build_command_token_provider, materialize_probe_api_key
+ from hermes_cli.providers import custom_provider_aliases, custom_provider_slug, get_label
+ from utils import base_url_host_matches
++from hermes_cli.models_endpoint_catalog import EndpointModels
+ 
+ # Log-record parity with the origin module.
+ logger = logging.getLogger("hermes_cli.model_switch")
+@@ -155,7 +156,7 @@
+         api_url = _normalize_openai_base_url(api_url)
+     generic_models = (cached_fetch_api_models if cache else fetch_api_models)(
+         api_key, api_url, timeout=timeout, headers=resolved_headers, api_mode=api_mode)
+-    return generic_models if generic_models or use_native else None
++    return generic_models if generic_models or use_native or isinstance(generic_models, EndpointModels) else None
+ 
+ 
+ # Process-level guard: the prewarm thread is spawned at most once per process, otherwise a
+@@ -596,7 +597,7 @@
+             )
+             if has_explicit_models and isinstance(cached_models, _NativePickerModelList):
+                 return None, False
+-            if cached_models or isinstance(cached_models, _NativePickerModelList):
++            if cached_models or isinstance(cached_models, (_NativePickerModelList, EndpointModels)):
+                 return cached_models, isinstance(cached_models, _NativePickerModelList) and not cached_models
+         except (ImportError, OSError, RuntimeError, TimeoutError, TypeError, ValueError, http.client.HTTPException):
+             pass
+@@ -724,7 +725,9 @@
+         self.results.append({
+             "slug": slug, "name": name, "is_current": is_current, "is_user_defined": True,
+             "models": models if shown is None else shown, "total_models": len(models), "source": source,
+-            "api_url": api_url, "native_catalog_empty": native_catalog_empty})
++            "api_url": api_url, "native_catalog_empty": native_catalog_empty,
++            "model_metadata": getattr(models, "metadata", {}),
++            "catalog_authoritative": isinstance(models, EndpointModels)})
+         self.seen_slugs.add(slug.lower())
+ 
+     def record_section3_pair(self, name: str, url_norm: str) -> bool:
+@@ -1237,7 +1240,7 @@
+     # provider's row.
+     if current_model:
+         for row in results:
+-            if not row.get("is_current") or row.get("native_catalog_empty"):
++            if not row.get("is_current") or row.get("native_catalog_empty") or row.get("catalog_authoritative"):
+                 continue
+             models = row.get("models") or []
+             if current_model not in models:
+diff --git a/hermes_cli/inventory.py b/hermes_cli/inventory.py
+--- a/hermes_cli/inventory.py
++++ b/hermes_cli/inventory.py
+@@ -291,6 +291,7 @@
+ 
+     for row in rows:
+         slug = row.get("slug") or ""
++        metadata = row.pop("model_metadata", {})
+         caps: dict[str, dict[str, Any]] = {}
+         read_reasoning_catalog = _reasoning_catalog_reader(slug.lower())
+ 
+@@ -318,6 +319,8 @@
+                 elif detail:
+                     entry["can_disable_reasoning"] = not detail.get("mandatory")
+ 
++            from hermes_cli.models_endpoint_catalog import catalog_capabilities
++            entry.update(catalog_capabilities(metadata.get(model, {})))
+             caps[model] = entry
+ 
+         row["capabilities"] = caps
+diff --git a/hermes_cli/config_providers.py b/hermes_cli/config_providers.py
+--- a/hermes_cli/config_providers.py
++++ b/hermes_cli/config_providers.py
+@@ -528,7 +528,9 @@
+         ctx = _positive_int(entry.get("context_length"))
+         if ctx is not None:
+             return ctx
+-    return None
++    from hermes_cli.models_endpoint_catalog import endpoint_model_metadata
++    metadata = endpoint_model_metadata(model, base_url, config)
++    return _positive_int(metadata.get("context_length")) if metadata else None
+ 
+ 
+ def get_custom_provider_model_capability(
+diff --git a/hermes_cli/web_routers/config_env.py b/hermes_cli/web_routers/config_env.py
+--- a/hermes_cli/web_routers/config_env.py
++++ b/hermes_cli/web_routers/config_env.py
+@@ -718,6 +718,21 @@
+     headers = {"Accept": "application/json"}
+     if body.api_key and body.api_key.strip():
+         headers["Authorization"] = f"Bearer {body.api_key.strip()}"
++    else:
++        # Reuse saved credentials only for the saved URL; editing the form must
++        # never send a stored credential to a different destination.
++        provider_key, entry = _resolve_custom_endpoint_entry(load_config().get("providers"), body.id or body.name)
++        if entry is not None and str(entry.get("base_url") or "").rstrip("/") == base_url:
++            from hermes_cli.runtime_provider import resolve_runtime_provider
++            from agent.command_token_source import materialize_probe_api_key
++            try:
++                runtime = await asyncio.to_thread(resolve_runtime_provider, requested=provider_key)
++                if str(runtime.get("base_url") or "").rstrip("/") == base_url:
++                    key = await asyncio.to_thread(materialize_probe_api_key, runtime.get("api_key"))
++                    if key:
++                        headers["Authorization"] = f"Bearer {key}"
++            except Exception:
++                return {"ok": False, "reachable": True, "message": "Could not obtain the saved endpoint credential.", "models": []}
+ 
+     try:
+         async with _endpoint_probe_client(url, 8.0) as client:
+diff --git a/agent/transports/codex.py b/agent/transports/codex.py
+--- a/agent/transports/codex.py
++++ b/agent/transports/codex.py
+@@ -36,11 +36,11 @@
+ 
+ 
+ def _bounded_prompt_cache_key(value: Any) -> Optional[str]:
+-    """Return a provider-safe (<=64 char) cache key without changing session identity."""
++    """Return a header-safe ASCII (<=64 char) cache key without changing session identity."""
+     key = "" if value is None else str(value).strip()
+     if not key:
+         return None
+-    return key if len(key) <= 64 else "pck_" + hashlib.sha256(key.encode("utf-8", errors="replace")).hexdigest()[:24]
++    return key if len(key) <= 64 and key.isascii() and key.isprintable() else "pck_" + hashlib.sha256(key.encode("utf-8", errors="replace")).hexdigest()[:24]
+ 
+ 
+ def _bound_prompt_cache_key_field(container: Any) -> None:
+@@ -55,10 +55,46 @@
+ 
+ def _merge_extra_headers(kwargs: dict[str, Any], **headers: str) -> None:
+     """Merge ``headers`` into a str-coerced copy of ``kwargs['extra_headers']`` (SDK kwarg -> HTTP headers)."""
++    from openai import Omit
+     existing = kwargs.get("extra_headers")
+-    merged = {str(k): str(v) for k, v in existing.items() if k and v is not None} if isinstance(existing, dict) else {}
++    merged = {str(k): v if isinstance(v, Omit) else str(v)
++              for k, v in existing.items() if k and v is not None} if isinstance(existing, dict) else {}
++    replaced = {k.lower() for k in headers}
++    merged = {k: v for k, v in merged.items() if k.lower() not in replaced}
+     merged.update(headers)
+     kwargs["extra_headers"] = merged
++
++
++def _apply_codex_affinity_headers(
++    kwargs: dict[str, Any], *, session_id: Any,
++    client_default_headers: Optional[dict] = None,
++) -> None:
++    """Keep ChatGPT cache affinity and transcript identity aligned with official Codex."""
++    _bound_prompt_cache_key_field(kwargs)
++    _bound_prompt_cache_key_field(kwargs.get("extra_body"))
++    # Official Codex: ChatGPT routes caches by session-id; thread-id and
++    # x-client-request-id retain the physical transcript identity.
++    extra_body = kwargs.get("extra_body")
++    effective_cache_key = (
++        extra_body.get("prompt_cache_key", kwargs.get("prompt_cache_key"))
++        if isinstance(extra_body, dict) else kwargs.get("prompt_cache_key")
++    )
++    headers = {
++        "thread-id": str(session_id) if session_id else None,
++        "session-id": effective_cache_key,
++        "x-client-request-id": str(session_id) if session_id else None,
++    }
++    headers = {k: v for k, v in headers.items() if v}
++    _merge_extra_headers(kwargs, **headers)
++    # The SDK merges defaults case-sensitively *before* HTTP normalization.
++    # Omit stale defaults, including cache affinity when the body deliberately has no key.
++    from openai import Omit
++    defaults = client_default_headers or {}
++    affinity_names = {"session-id", "thread-id", "x-client-request-id"}
++    for name in set(defaults) | set(kwargs["extra_headers"]):
++        lower = name.lower()
++        if lower == "session_id" or (lower in affinity_names and (name != lower or lower not in headers)):
++            kwargs["extra_headers"][name] = Omit()
+ 
+ 
+ # Client-side ``web_search`` on xAI Responses collides with Grok's native tool
+@@ -364,6 +400,13 @@
+     """
+     try:
+         from providers import get_provider_profile
++        from hermes_cli.models_endpoint_catalog import endpoint_model_metadata
++
++        metadata = endpoint_model_metadata(str(model or ""), str(base_url or ""))
++        reasoning = metadata.get("reasoning") if metadata else None
++        efforts = reasoning.get("supported_efforts") if isinstance(reasoning, dict) else None
++        if isinstance(efforts, list):
++            return tuple(efforts) if any(e != "none" for e in efforts) else ()
+ 
+         name = str(provider or "").strip().lower()
+         declared = None
+@@ -575,14 +618,15 @@
+ 
+         params: instructions: str — system prompt (extracted from messages[0] if not given)
+         reasoning_config: dict | None — {effort, enabled} session_id: str | None — transcript/session id;
+-        drives the Codex ``session_id`` header, and is the cache-scope fallback when no ``cache_scope_id``
++        drives the Codex ``thread-id`` and ``x-client-request-id`` headers, and is the cache-scope fallback when no ``cache_scope_id``
+         is given cache_scope_id: str | None — rotation-stable logical scope id (compression-lineage root;
+         see agent/prompt_cache_scope.py). Preferred over session_id when deriving the prompt_cache_key
+-        content hash and the xAI x-grok-conv-id header; the Codex x-client-request-id header mirrors the
++        content hash and the xAI x-grok-conv-id header; the Codex session-id header mirrors the
+         resulting body key. Keeps the cache warm across context-compression session rotation (#79017)
+         max_tokens: int | None — max_output_tokens timeout: float | None — per-request timeout forwarded to
+         the SDK request_overrides: dict | None — extra kwargs merged in provider: str | None — provider name
+-        for backend-specific logic base_url: str | None — endpoint URL base_url_hostname: str | None —
++        for backend-specific logic requested_provider: str | None — configured provider name before
++        custom-provider resolution; base_url: str | None — endpoint URL base_url_hostname: str | None —
+         hostname for backend detection is_github_responses: bool — Copilot/GitHub models backend
+         is_codex_backend: bool — chatgpt.com/backend-api/codex is_xai_responses: bool — xAI/Grok backend
+         github_reasoning_extra: dict | None — Copilot reasoning params
+@@ -663,6 +707,7 @@
+         _sanitize_astra_request_kwargs(kwargs, model, params.get("base_url"))
+ 
+         _bound_prompt_cache_key_field(kwargs)
++        _bound_prompt_cache_key_field(kwargs.get("extra_body"))
+ 
+         # Older xAI models reject ``service_tier`` (HTTP 400); only Grok 4.6 accepts Priority Processing.
+         # Grok 4.6 accepts Priority Processing, but continue stripping stale or unsupported tier values on
+@@ -680,17 +725,17 @@
+         else:
+             kwargs.pop("timeout", None)
+ 
+-        if is_codex_backend:
+-            # SDK kwarg -> HTTP headers. ``session_id`` = raw physical id (transcript
+-            # identity); ``x-client-request-id`` mirrors the body cache key so both agree.
+-            headers = {
+-                "session_id": str(session_id) if session_id else None,
+-                "x-client-request-id": kwargs.get("prompt_cache_key") or _bounded_prompt_cache_key(_cache_scope),
+-            }
+-            headers = {k: v for k, v in headers.items() if v}
+-            if headers:
+-                _merge_extra_headers(kwargs, **headers)
+-        elif params.get("max_tokens") is not None:
++        # openCDX consumes Codex affinity headers but also serves OpenRouter/Ollama:
++        # header support must not enable ChatGPT-only replay/compaction semantics.
++        is_opencdx = params.get("provider") == "opencdx" or (
++            params.get("provider") == "custom" and params.get("requested_provider") == "opencdx"
++        )
++        if is_codex_backend or is_opencdx:
++            _apply_codex_affinity_headers(
++                kwargs, session_id=session_id,
++                client_default_headers=params.get("client_default_headers"),
++            )
++        if not is_codex_backend and params.get("max_tokens") is not None:
+             kwargs["max_output_tokens"] = params["max_tokens"]
+ 
+         if is_xai_responses and session_id:
+diff --git a/tui_gateway/contracts/config_free_tier_control.py b/tui_gateway/contracts/config_free_tier_control.py
+--- a/tui_gateway/contracts/config_free_tier_control.py
++++ b/tui_gateway/contracts/config_free_tier_control.py
+@@ -242,6 +242,8 @@
+     fast: bool
+     reasoning: bool
+     can_disable_reasoning: bool | None = None
++    supported_efforts: list[str] | None = None
++    default_effort: str | None = None
+ 
+ 
+ class ModelOptionProvider(OpenModel):
+diff --git a/apps/shared/src/gateway-contract.generated.ts b/apps/shared/src/gateway-contract.generated.ts
+--- a/apps/shared/src/gateway-contract.generated.ts
++++ b/apps/shared/src/gateway-contract.generated.ts
+@@ -740,6 +740,8 @@
+   fast: boolean
+   reasoning: boolean
+   can_disable_reasoning?: boolean | null
++  supported_efforts?: string[] | null
++  default_effort?: string | null
+ }
+ /** ``hermes_cli/inventory.py::_apply_pricing`` — formatted $/Mtok strings (``""`` unknown, ``"free"``); the sale fields are Nous Portal-only. */
+ export interface ModelPricing {
+diff --git a/apps/shared/src/gateway-contract.openrpc.json b/apps/shared/src/gateway-contract.openrpc.json
+--- a/apps/shared/src/gateway-contract.openrpc.json
++++ b/apps/shared/src/gateway-contract.openrpc.json
+@@ -15286,6 +15286,33 @@
+             ],
+             "default": null,
+             "title": "Can Disable Reasoning"
++          },
++          "supported_efforts": {
++            "anyOf": [
++              {
++                "items": {
++                  "type": "string"
++                },
++                "type": "array"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "default": null,
++            "title": "Supported Efforts"
++          },
++          "default_effort": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "default": null,
++            "title": "Default Effort"
+           }
+         },
+         "required": [
+diff --git a/apps/desktop/src/app/shell/model-edit-submenu.tsx b/apps/desktop/src/app/shell/model-edit-submenu.tsx
+--- a/apps/desktop/src/app/shell/model-edit-submenu.tsx
++++ b/apps/desktop/src/app/shell/model-edit-submenu.tsx
+@@ -65,6 +65,7 @@
+    *  routes, whose upstream rejects a disable — the toggle is hidden rather
+    *  than offered as a control that silently does nothing. */
+   canDisableReasoning?: boolean
++  supportedEfforts?: readonly string[]
+   /** The profile's configured default effort — what an unset row inherits.
+    *  Passed in (not read from a store) so this submenu stays pure. */
+   defaultEffort: string
+@@ -107,6 +108,7 @@
+  *  per-row submenu, the composer's reasoning pill in its own top-level menu. */
+ export function ModelOptionsContent({
+   canDisableReasoning,
++  supportedEfforts,
+   defaultEffort,
+   effort,
+   fastControl,
+@@ -118,7 +120,11 @@
+   const { t } = useI18n()
+   const copy = t.shell.modelOptions
+ 
+-  const effortValue = resolveReasoningEffort(effort, defaultEffort)
++  const availableEfforts: readonly string[] = supportedEfforts?.filter(value => value !== 'none') ?? REASONING_EFFORTS
++  const requestedEffort = resolveReasoningEffort(effort, defaultEffort)
++  const effortValue = availableEfforts.includes(requestedEffort)
++    ? requestedEffort
++    : availableEfforts.includes(defaultEffort) ? defaultEffort : availableEfforts[0] ?? ''
+   const thinkingOn = isThinkingEnabled(effort, defaultEffort)
+   const showThinkingToggle = reasoning && canDisableReasoning !== false
+ 
+@@ -171,14 +177,14 @@
+           <DropdownMenuSeparator className="mx-0" />
+           <DropdownMenuLabel className={dropdownMenuSectionLabel}>{copy.effort}</DropdownMenuLabel>
+           <DropdownMenuRadioGroup onValueChange={value => onSetOptions({ effort: value })} value={effortValue}>
+-            {REASONING_EFFORTS.map(value => (
++            {availableEfforts.map(value => (
+               <DropdownMenuRadioItem
+                 className={dropdownMenuRow}
+                 key={value}
+                 onSelect={event => event.preventDefault()}
+                 value={value}
+               >
+-                {copy[value]}
++                {copy[value as keyof typeof copy] ?? value}
+               </DropdownMenuRadioItem>
+             ))}
+           </DropdownMenuRadioGroup>
+diff --git a/apps/desktop/src/app/shell/model-catalog-menu.tsx b/apps/desktop/src/app/shell/model-catalog-menu.tsx
+--- a/apps/desktop/src/app/shell/model-catalog-menu.tsx
++++ b/apps/desktop/src/app/shell/model-catalog-menu.tsx
+@@ -574,7 +574,8 @@
+                         </DropdownMenuSubTrigger>
+                         <ModelEditSubmenu
+                           canDisableReasoning={caps?.can_disable_reasoning ?? undefined}
+-                          defaultEffort={defaultEffort}
++                          supportedEfforts={caps?.supported_efforts ?? undefined}
++                          defaultEffort={caps?.default_effort ?? defaultEffort}
+                           effort={effEffort}
+                           fastControl={fastControl}
+                           isActive={isCurrent}
+diff --git a/apps/desktop/src/app/shell/reasoning-menu-panel.tsx b/apps/desktop/src/app/shell/reasoning-menu-panel.tsx
+--- a/apps/desktop/src/app/shell/reasoning-menu-panel.tsx
++++ b/apps/desktop/src/app/shell/reasoning-menu-panel.tsx
+@@ -40,7 +40,8 @@
+   return (
+     <ModelOptionsContent
+       canDisableReasoning={caps?.can_disable_reasoning ?? undefined}
+-      defaultEffort={defaultEffort}
++      supportedEfforts={caps?.supported_efforts ?? undefined}
++      defaultEffort={caps?.default_effort ?? defaultEffort}
+       effort={controller.current.effort}
+       fastControl={resolveFastControl(
+         currentModel || model,
+diff --git a/apps/desktop/src/app/shell/use-model-menu-controller.ts b/apps/desktop/src/app/shell/use-model-menu-controller.ts
+--- a/apps/desktop/src/app/shell/use-model-menu-controller.ts
++++ b/apps/desktop/src/app/shell/use-model-menu-controller.ts
+@@ -69,6 +69,7 @@
+   // never repaint that fallback once the catalog resolved.
+   const modelOptions = useQuery({
+     queryKey: modelOptionsQueryKey(profile, activeSessionId, ownerConnectionId),
++    refetchInterval: 60_000,
+     queryFn: (): Promise<ModelOptionsResult> =>
+       requestModelOptions({ gateway, profile, request: requestGateway, sessionId: activeSessionId })
+   })
+diff --git a/apps/desktop/src/app/shell/model-edit-submenu.test.tsx b/apps/desktop/src/app/shell/model-edit-submenu.test.tsx
+--- a/apps/desktop/src/app/shell/model-edit-submenu.test.tsx
++++ b/apps/desktop/src/app/shell/model-edit-submenu.test.tsx
+@@ -24,6 +24,7 @@
+ 
+ // Render the submenu inside an open menu/sub so its content (switches) mounts.
+ function renderSubmenu(opts: {
++  supportedEfforts?: readonly string[]
+   defaultEffort?: string
+   effort?: string
+   fastControl: FastControl
+@@ -38,6 +39,7 @@
+         <DropdownMenuSub open>
+           <DropdownMenuSubTrigger>edit</DropdownMenuSubTrigger>
+           <ModelEditSubmenu
++            supportedEfforts={opts.supportedEfforts}
+             defaultEffort={opts.defaultEffort ?? 'medium'}
+             effort={opts.effort ?? 'medium'}
+             fastControl={opts.fastControl}
+@@ -129,3 +131,14 @@
+     expect(onSelectModel).toHaveBeenCalledWith('m1-fast')
+   })
+ })
++
++
++describe('advertised reasoning levels', () => {
++  it('uses updated catalog levels instead of the generic effort ladder', () => {
++    renderSubmenu({ supportedEfforts: ['low', 'high'], fastControl: { kind: 'none' }, onSetOptions: vi.fn(), reasoning: true })
++    expect(screen.getAllByRole('menuitemradio').map(row => row.textContent)).toEqual(['Low', 'High'])
++    cleanup()
++    renderSubmenu({ supportedEfforts: ['medium'], fastControl: { kind: 'none' }, onSetOptions: vi.fn(), reasoning: true })
++    expect(screen.getAllByRole('menuitemradio').map(row => row.textContent)).toEqual(['Medium'])
++  })
++})
+diff --git a/tests/hermes_cli/test_endpoint_catalog_metadata.py b/tests/hermes_cli/test_endpoint_catalog_metadata.py
+new file mode 100644
+--- /dev/null
++++ b/tests/hermes_cli/test_endpoint_catalog_metadata.py
+@@ -0,0 +1,66 @@
++"""Custom endpoint discovery must refresh membership and capabilities as one catalog."""
++import io
++import json
++from unittest.mock import patch
++
++from hermes_cli import models
++from hermes_cli.inventory import _apply_capabilities
++from hermes_cli.model_switch_providers import _finalize_picker_rows
++from hermes_cli.models_endpoint_catalog import EndpointModels
++
++
++def test_live_catalog_changes_reach_picker_and_request_metadata(monkeypatch, tmp_path):
++    from hermes_cli.config import save_config
++    from hermes_cli.config_providers import get_custom_provider_context_length
++    from hermes_cli.inventory import load_picker_context, build_models_payload
++    from agent.transports.codex import _profile_declared_efforts
++
++    state = [{'id': 'old', 'context_length': 1000,
++              'reasoning': {'supported_efforts': ['low', 'high'], 'default_effort': 'low'}}]
++    calls = []
++    class Response(io.BytesIO):
++        headers = {'Cache-Control': 'private, no-cache'}
++    def request(req, **kwargs):
++        calls.append(req.get_header('Authorization'))
++        return Response(json.dumps({'object': 'list', 'data': state}).encode())
++    monkeypatch.setattr(models, '_urlopen_model_catalog_request', request)
++    cfg = {'model': {'provider': 'relay', 'default': 'old'}, 'providers': {
++        'relay': {'base_url': 'http://127.0.0.1:9876/v1', 'api_mode': 'codex_responses',
++                  'key_cmd': "printf '%s' '{\"access_token\":\"local-token\",\"expires_in\":300}'"}}}
++    save_config(cfg)
++    def picker():
++        payload = build_models_payload(load_picker_context(), explicit_only=True, capabilities=True,
++                                       probe_current_custom_provider=True, non_blocking_catalogs=True)
++        return next(r for r in payload['providers'] if r['slug'] == 'relay')
++    first = picker()
++    assert first['models'] == ['old']
++    assert first['capabilities']['old']['supported_efforts'] == ['low', 'high']
++    assert get_custom_provider_context_length('old', 'http://127.0.0.1:9876/v1', config=cfg) == 1000
++    assert _profile_declared_efforts('custom', 'old', 'http://127.0.0.1:9876/v1') == ('low', 'high')
++    state[:] = [{'id': 'new', 'context_length': 2000,
++                 'reasoning': {'supported_efforts': ['medium'], 'default_effort': 'medium'}}]
++    second = picker()
++    assert second['models'] == ['new']  # selected "old" must not be resurrected
++    assert set(second['capabilities']) == {'new'}
++    assert second['capabilities']['new']['supported_efforts'] == ['medium']
++    assert get_custom_provider_context_length('new', 'http://127.0.0.1:9876/v1', config=cfg) == 2000
++    state[0]['reasoning'] = {'supported_efforts': ['none'], 'default_effort': 'none'}
++    third = picker()
++    assert third['capabilities']['new']['reasoning'] is False
++    state.clear()
++    assert picker()['models'] == []
++    assert calls and all(c == 'Bearer local-token' for c in calls)
++    assert 'models' not in cfg['providers']['relay']
++
++
++def test_catalog_cache_keeps_metadata_scoped_to_credentials(monkeypatch):
++    catalog = EndpointModels([{'id': 'a', 'reasoning': {'supported_efforts': ['high']}}], 60)
++    fetch = lambda key, *a, **kw: catalog if key == 'tenant-a' else EndpointModels([], 60)
++    monkeypatch.setattr(models, 'fetch_api_models', fetch)
++    a = models.cached_fetch_api_models('tenant-a', 'https://relay.invalid/v1')
++    b = models.cached_fetch_api_models('tenant-b', 'https://relay.invalid/v1')
++    assert a == ['a'] and b == []
++    monkeypatch.setattr(models, 'fetch_api_models', lambda *a, **kw: (_ for _ in ()).throw(AssertionError('unexpected fetch')))
++    cached = models.cached_fetch_api_models('tenant-a', 'https://relay.invalid/v1')
++    assert cached.metadata == a.metadata
++    assert models.cached_fetch_api_models('tenant-b', 'https://relay.invalid/v1') == []
+diff --git a/tests/hermes_cli/test_endpoint_command_validation.py b/tests/hermes_cli/test_endpoint_command_validation.py
+new file mode 100644
+--- /dev/null
++++ b/tests/hermes_cli/test_endpoint_command_validation.py
+@@ -0,0 +1,29 @@
++"""Desktop endpoint tests use saved command credentials only at their saved destination."""
++import pytest
++from hermes_cli.web_models import CustomEndpointUpdate
++from hermes_cli.web_routers import config_env
++
++
++@pytest.mark.asyncio
++async def test_probe_uses_saved_command_only_for_matching_url(monkeypatch):
++    from hermes_cli.config import save_config
++    url = 'http://127.0.0.1:9876/v1'
++    save_config({'providers': {'relay': {'base_url': url, 'api_mode': 'codex_responses',
++                 'key_cmd': "printf '%s' '{\"access_token\":\"command-token\",\"expires_in\":300}'"}}})
++    sent=[]
++    class Response:
++        status_code=200
++        is_success=True
++        def json(self): return {'data': [{'id': 'model'}]}
++    class Client:
++        async def __aenter__(self): return self
++        async def __aexit__(self, *args): pass
++        async def get(self, target, headers):
++            sent.append((target, headers.copy()))
++            return Response()
++    monkeypatch.setattr(config_env,'_endpoint_probe_client',lambda *args: Client())
++    for target in [url, 'https://different.invalid/v1']:
++        result=await config_env.validate_custom_endpoint(CustomEndpointUpdate(id='relay',name='relay',base_url=target,model='model'))
++        assert result['ok']
++    assert sent[0][1]['Authorization']=='Bearer command-token'
++    assert 'Authorization' not in sent[1][1]
+diff --git a/agent/chat_completion_helpers.py b/agent/chat_completion_helpers.py
+--- a/agent/chat_completion_helpers.py
++++ b/agent/chat_completion_helpers.py
+@@ -1355,7 +1355,10 @@
+         cache_scope_id=cache_scope_id, base_url=agent.base_url,
+         max_tokens=ephemeral_out if ephemeral_out is not None else agent.max_tokens,
+         timeout=agent._resolved_api_call_timeout(), request_overrides=request_overrides,
+-        provider=getattr(agent, "provider", None), is_github_responses=is_github_responses,
++        provider=getattr(agent, "provider", None),
++        requested_provider=getattr(agent, "requested_provider", None),
++        client_default_headers=getattr(agent, "_client_kwargs", {}).get("default_headers"),
++        is_github_responses=is_github_responses,
+         is_codex_backend=is_codex_backend, is_xai_responses=is_xai_responses,
+         github_reasoning_extra=agent._github_models_reasoning_extra_body() if is_github_responses else None,
+         replay_encrypted_reasoning=bool(getattr(agent, "_codex_reasoning_replay_enabled", True)),
+diff --git a/agent/codex_responses_adapter.py b/agent/codex_responses_adapter.py
+--- a/agent/codex_responses_adapter.py
++++ b/agent/codex_responses_adapter.py
+@@ -913,7 +913,9 @@
+     extra_headers = _optional_dict(api_kwargs, "extra_headers") or {}
+     if not all(_nonblank(key) for key in extra_headers):
+         raise ValueError("Codex Responses request 'extra_headers' keys must be non-empty strings.")
+-    normalized_headers = {key.strip(): str(value) for key, value in extra_headers.items() if value is not None}
++    from openai import Omit
++    normalized_headers = {key.strip(): value if isinstance(value, Omit) else str(value)
++                          for key, value in extra_headers.items() if value is not None}
+     if normalized_headers:
+         normalized["extra_headers"] = normalized_headers
+     # extra_body is verbatim: xAI carries ``prompt_cache_key`` as a body-level
+diff --git a/agent/auxiliary_client.py b/agent/auxiliary_client.py
+--- a/agent/auxiliary_client.py
++++ b/agent/auxiliary_client.py
+@@ -1351,9 +1351,10 @@
+ class _CodexCompletionsAdapter:
+     """Drop-in shim routing chat.completions.create() kwargs through Codex Responses streaming."""
+ 
+-    def __init__(self, real_client: OpenAI, model: str):
++    def __init__(self, real_client: OpenAI, model: str, provider: str = ""):
+         self._client = real_client
+         self._model = model
++        self._provider = provider
+ 
+     def _build_responses_kwargs(self, kwargs: Dict[str, Any]) -> Tuple[Dict[str, Any], str, Any]:
+         """chat.completions kwargs → Responses API kwargs, ``(resp_kwargs, model, timeout)``; mirrors codex.py::build_kwargs."""
+@@ -1503,6 +1504,22 @@
+         # Last, like the main transport: caller extra_body must not put a rejected Astra field back.
+         from agent.transports.codex import _sanitize_astra_request_kwargs
+         _sanitize_astra_request_kwargs(resp_kwargs, model, host)
++        # Auxiliary Responses bypasses the main transport. Reuse its header builder;
++        # only inherit named main-route identity when the complete endpoint matches.
++        from hermes_cli.route_identity import normalize_route_base_url
++        from agent.transports.codex import _apply_codex_affinity_headers
++        main_base = _runtime_main_value("base_url")
++        main_opencdx = (
++            _runtime_main_value("requested_provider") == "opencdx"
++            and _runtime_main_value("provider") in {"custom", "opencdx"}
++            and bool(main_base)
++            and normalize_route_base_url(host) == normalize_route_base_url(main_base)
++        )
++        if route.is_codex_backend or self._provider in {"opencdx", "openai-codex"} or main_opencdx:
++            _apply_codex_affinity_headers(
++                resp_kwargs, session_id=_runtime_main_value("session_id"),
++                client_default_headers=getattr(self._client, "default_headers", None),
++            )
+         return resp_kwargs, model, timeout
+ 
+     def create(self, **kwargs) -> Any:
+@@ -1614,9 +1631,9 @@
+ class CodexAuxiliaryClient:
+     """OpenAI-client-compatible wrapper routing through the Codex Responses API (.api_key/.base_url for introspection)."""
+ 
+-    def __init__(self, real_client: OpenAI, model: str):
++    def __init__(self, real_client: OpenAI, model: str, provider: str = ""):
+         self._real_client = real_client
+-        self.chat = _ChatShim(_CodexCompletionsAdapter(real_client, model))
++        self.chat = _ChatShim(_CodexCompletionsAdapter(real_client, model, provider))
+         self.api_key = real_client.api_key
+         self.base_url = real_client.base_url
+ 
+@@ -4787,7 +4804,7 @@
+         logger.debug("resolve_provider_client: wrapping client in CodexAuxiliaryClient "
+                      "(api_mode=%s, model=%s, base_url=%s)",
+                      req.api_mode or "auto-detected", final_model_str, base_url_str[:60] if base_url_str else "")
+-        return CodexAuxiliaryClient(client_obj, final_model_str)
++        return CodexAuxiliaryClient(client_obj, final_model_str, provider=req.provider)
+     # A profile that declares the Messages wire (commandcode-anthropic) is on it whatever the URL
+     # looks like; the same declaration gates ``_reasoning_config`` in _build_call_kwargs.
+     api_mode = req.api_mode or _profile_declared_messages_wire(req.provider)
+@@ -5051,7 +5068,7 @@
+     client = _named_custom_openai_wire_client(custom_base, custom_key, entry_headers)
+     # codex_responses, or auto-detect via _wrap_transport (which reads the task-level api_mode).
+     if entry_api_mode == "codex_responses":
+-        client = CodexAuxiliaryClient(client, final_model)
++        client = CodexAuxiliaryClient(client, final_model, provider=provider)
+     else:
+         client = _wrap_transport(req, client, final_model, custom_base, custom_key)
+     return _route_client(req, client, final_model)
+diff --git a/tests/agent/test_codex_affinity_headers.py b/tests/agent/test_codex_affinity_headers.py
+new file mode 100644
+--- /dev/null
++++ b/tests/agent/test_codex_affinity_headers.py
+@@ -0,0 +1,100 @@
++"""Codex cache routing must match the actual SDK body without changing backend identity."""
++import json
++
++import httpx
++import pytest
++from openai import OpenAI
++
++from agent.chat_completion_helpers import build_api_kwargs
++from agent.codex_responses_adapter import classify_responses_route
++from agent.transports.codex import ResponsesApiTransport
++
++
++@pytest.mark.parametrize("model", ["gpt-5.4", "openrouter/openai/gpt-oss-20b", "ollama/llama3.1:8b"])
++def test_opencdx_runtime_headers_follow_cache_scope_on_wire(tmp_path, model):
++    from hermes_cli.config import save_config
++    from hermes_cli.runtime_provider import resolve_runtime_provider
++    from hermes_state import SessionDB
++    from run_agent import AIAgent
++
++    save_config({"model": {"provider": "opencdx", "default": model}, "providers": {
++        "opencdx": {"base_url": "http://127.0.0.1:17464/v1", "api_key": "local-test",
++                    "api_mode": "codex_responses", "discover_models": False,
++                    "extra_headers": {"Session-Id": "stale", "THREAD-ID": "stale",
++                                      "X-Client-Request-Id": "stale", "session_id": "legacy"}}}})
++    runtime = resolve_runtime_provider(requested="opencdx")
++    assert runtime["provider"] == "custom"
++    db = SessionDB(db_path=tmp_path / "state.db")
++    db.create_session("root", source="cli", model=model)
++    agent = AIAgent(model=model, provider=runtime["provider"], requested_provider="opencdx",
++                    base_url=runtime["base_url"], api_key=runtime["api_key"], api_mode=runtime["api_mode"],
++                    enabled_toolsets=[], quiet_mode=True, skip_context_files=True, skip_memory=True,
++                    session_id="root", max_tokens=123)
++    agent._session_db = db
++    captured = []
++    def capture(request):
++        captured.append((request.headers, json.loads(request.content)))
++        return httpx.Response(200, json={"id": "resp_test", "object": "response", "output": [],
++                                       "status": "completed", "model": model, "created_at": 0})
++    try:
++        with OpenAI(api_key="local-test", base_url=runtime["base_url"],
++                    default_headers=agent._client_kwargs.get("default_headers"),
++                    http_client=httpx.Client(transport=httpx.MockTransport(capture))) as client:
++            messages = [{"role": "system", "content": "Stable instructions"}, {"role": "user", "content": "First"}]
++            for sid in ("root", "root", "rotated"):
++                if sid == "rotated":
++                    db.end_session("root", "compression")
++                    db.create_session(sid, source="cli", model=model, parent_session_id="root")
++                agent.session_id = sid
++                kwargs = build_api_kwargs(agent, messages, [])
++                assert not classify_responses_route(agent).is_codex_backend
++                assert "context_management" not in kwargs
++                assert kwargs["max_output_tokens"] == 123
++                client.responses.create(**agent._get_transport().preflight_kwargs(kwargs))
++                messages += [{"role": "assistant", "content": "Answer"}, {"role": "user", "content": "Next"}]
++        for (headers, body), sid in zip(captured, ("root", "root", "rotated")):
++            assert headers.get_list("session-id") == [body["prompt_cache_key"]]
++            assert headers.get_list("thread-id") == headers.get_list("x-client-request-id") == [sid]
++            assert headers["thread-id"] == headers["x-client-request-id"] == sid
++            assert "session_id" not in headers
++        assert len({body["prompt_cache_key"] for _, body in captured}) == 1
++    finally:
++        db.close()
++
++
++@pytest.mark.parametrize("provider,requested,codex,enabled", [
++    ("openai-codex", "openai-codex", True, True),
++    ("custom", "opencdx", False, True),
++    ("opencdx", None, False, True),
++    ("custom", "other", False, False),
++    ("openrouter", "opencdx", False, False),
++])
++@pytest.mark.parametrize("override,top_level", [("k" * 80, "top"), ("café", "top"), ("a\nb", "top"), ("", None), (None, None)])
++def test_affinity_activation_and_effective_override(provider, requested, codex, enabled, override, top_level):
++    overrides = {"prompt_cache_key": top_level, "extra_body": {"prompt_cache_key": override},
++                 "extra_headers": {"Session-Id": "stale", "Thread-Id": "stale", "X-Test": "keep"}}
++    transport = ResponsesApiTransport()
++    kwargs = transport.build_kwargs(model="gpt-5.4", messages=[{"role": "user", "content": "Hi"}],
++                                    session_id="physical", cache_scope_id="logical", provider=provider,
++                                    requested_provider=requested, is_codex_backend=codex,
++                                    request_overrides=overrides)
++    captured = []
++    def capture(request):
++        captured.append((request.headers, json.loads(request.content)))
++        return httpx.Response(200, json={"id": "resp_test", "object": "response", "output": [],
++                                       "status": "completed", "model": "gpt-5.4", "created_at": 0})
++    with OpenAI(api_key="test", base_url="https://endpoint.invalid/v1",
++                http_client=httpx.Client(transport=httpx.MockTransport(capture))) as client:
++        client.responses.create(**transport.preflight_kwargs(kwargs))
++    headers, body = captured[0]
++    assert headers["x-test"] == "keep"
++    if enabled:
++        if "prompt_cache_key" in body:
++            assert headers.get_list("session-id") == [body["prompt_cache_key"]]
++            assert len(body["prompt_cache_key"]) <= 64
++        else:
++            assert "session-id" not in headers
++        assert headers["thread-id"] == headers["x-client-request-id"] == "physical"
++    else:
++        assert headers["session-id"] == "stale"
++        assert "x-client-request-id" not in headers
+diff --git a/tests/agent/test_auxiliary_codex_affinity.py b/tests/agent/test_auxiliary_codex_affinity.py
+new file mode 100644
+--- /dev/null
++++ b/tests/agent/test_auxiliary_codex_affinity.py
+@@ -0,0 +1,54 @@
++"""Auxiliary Responses must retain the same cache/header contract as main turns."""
++import json
++
++import httpx
++import pytest
++from openai import OpenAI
++
++from agent import auxiliary_client as aux
++
++
++@pytest.mark.parametrize("provider,base,expected", [
++    ("opencdx", "http://127.0.0.1:17464/v1", True),
++    ("custom", "http://127.0.0.1:17464/v1", True),
++    ("custom", "http://127.0.0.1:17464/other/v1", False),
++    ("custom", "https://chatgpt.com/backend-api/codex", True),
++])
++def test_auxiliary_resolver_affinity_is_endpoint_scoped(provider, base, expected):
++    from hermes_cli.config import save_config
++    save_config({"model": {"provider": "opencdx", "default": "gpt-5.4"}, "providers": {
++        "opencdx": {"base_url": "http://127.0.0.1:17464/v1", "api_key": "local-test",
++                    "api_mode": "codex_responses", "discover_models": False,
++                    "extra_headers": {"Session-Id": "stale", "Thread-Id": "stale"}}}})
++    token = aux.set_runtime_main("custom", "gpt-5.4", requested_provider="opencdx",
++                                base_url="http://127.0.0.1:17464/v1", session_id="thread",
++                                cache_scope="stable-scope")
++    wrapper = None
++    try:
++        wrapper, _ = aux.resolve_provider_client(provider, model="gpt-5.4", explicit_base_url=base,
++                                                 explicit_api_key="local-test", api_mode="codex_responses")
++        assert isinstance(wrapper, aux.CodexAuxiliaryClient)
++        payload, _, _ = wrapper.chat.completions._build_responses_kwargs({
++            "messages": [{"role": "system", "content": "Stable instructions"},
++                         {"role": "user", "content": "Summarize"}]})
++        seen = []
++        def capture(request):
++            seen.append((request.headers, json.loads(request.content)))
++            return httpx.Response(200, json={"id": "resp_test", "object": "response", "output": [],
++                                           "status": "completed", "model": "gpt-5.4", "created_at": 0})
++        with OpenAI(api_key="local-test", base_url=base,
++                    default_headers=wrapper._real_client._custom_headers,
++                    http_client=httpx.Client(transport=httpx.MockTransport(capture))) as client:
++            client.responses.create(**payload)
++        headers, body = seen[0]
++        if expected:
++            assert headers.get_list("session-id") == [body["prompt_cache_key"]]
++            assert headers.get_list("thread-id") == headers.get_list("x-client-request-id") == ["thread"]
++        else:
++            assert "session-id" not in headers
++            assert "thread-id" not in headers
++        assert "context_management" not in body
++    finally:
++        if wrapper is not None:
++            wrapper.close()
++        aux.reset_runtime_main(token)
+diff --git a/tests/agent/test_prompt_cache_scope.py b/tests/agent/test_prompt_cache_scope.py
+--- a/tests/agent/test_prompt_cache_scope.py
++++ b/tests/agent/test_prompt_cache_scope.py
+@@ -275,7 +275,7 @@
+         k3 = transport.build_kwargs(**base, session_id="rotated-1")
+         assert k3["prompt_cache_key"] != k1["prompt_cache_key"]
+ 
+-    def test_codex_session_header_keeps_physical_id(self):
++    def test_codex_thread_headers_keep_physical_id(self):
+         """Transcript identity (#57012 contract) must NOT be rewritten."""
+         from agent.transports.codex import ResponsesApiTransport
+ 
+@@ -291,9 +291,10 @@
+             cache_scope_id="root-sess",
+             is_codex_backend=True,
+         )
+-        assert kwargs["extra_headers"]["session_id"] == "rotated-1"
++        assert kwargs["extra_headers"]["thread-id"] == "rotated-1"
++        assert kwargs["extra_headers"]["x-client-request-id"] == "rotated-1"
+         # Routing header mirrors the body's scoped cache key.
+-        assert kwargs["extra_headers"]["x-client-request-id"] == kwargs[
++        assert kwargs["extra_headers"]["session-id"] == kwargs[
+             "prompt_cache_key"
+         ]
+ 
+diff --git a/tests/agent/transports/test_codex_transport.py b/tests/agent/transports/test_codex_transport.py
+--- a/tests/agent/transports/test_codex_transport.py
++++ b/tests/agent/transports/test_codex_transport.py
+@@ -810,17 +810,14 @@
+         headers = kw["extra_headers"]
+ 
+         assert headers["x-test"] == "1"
+-        # session_id header carries the raw physical id untouched regardless
+-        # of length (#57012); x-client-request-id mirrors the body's
+-        # effective (already-bounded) prompt_cache_key.
+-        assert headers["session_id"] == session_id
+-        assert headers["x-client-request-id"] == kw["prompt_cache_key"]
+-        assert len(headers["x-client-request-id"]) <= 64
++        # Transcript identity stays physical; cache affinity matches the bounded body key.
++        assert headers["thread-id"] == headers["x-client-request-id"] == session_id
++        assert headers["session-id"] == kw["prompt_cache_key"]
++        assert len(headers["session-id"]) <= 64
++        assert "session_id" not in headers
+ 
+     def test_codex_cache_scope_headers_normalize_cron_session_id(self, transport):
+-        """x-client-request-id shares a cache scope across cron re-fires of the
+-        same job (cron per-fire timestamp stripped, same as prompt_cache_key),
+-        while session_id stays the raw per-fire physical id (#57012)."""
++        """session-id shares cache scope across cron re-fires; thread-id stays physical."""
+         first_run = transport.build_kwargs(
+             model="gpt-5.4",
+             messages=[{"role": "user", "content": "Hi"}],
+@@ -843,11 +840,11 @@
+             is_codex_backend=True,
+         )["extra_headers"]
+ 
+-        assert first_run["session_id"] == "cron_job42_20260801_090000"
+-        assert second_run["session_id"] == "cron_job42_20260802_090000"
+-        assert first_run["x-client-request-id"].startswith("pck_")
+-        assert first_run["x-client-request-id"] == second_run["x-client-request-id"]
+-        assert first_run["x-client-request-id"] != other_job["x-client-request-id"]
++        assert first_run["thread-id"] == "cron_job42_20260801_090000"
++        assert second_run["thread-id"] == "cron_job42_20260802_090000"
++        assert first_run["session-id"].startswith("pck_")
++        assert first_run["session-id"] == second_run["session-id"]
++        assert first_run["session-id"] != other_job["session-id"]
+ 
+ 
+ 

@@ -21,13 +21,14 @@ import (
 )
 
 type Proxy struct {
-	store       *storage.Store
-	accounts    *accounts.Manager
-	catalog     *catalog.Manager
-	selector    *Selector
-	status      *StatusRegistry
-	httpClient  *http.Client
-	insecureDev bool
+	store          *storage.Store
+	accounts       *accounts.Manager
+	catalog        *catalog.Manager
+	selector       *Selector
+	status         *StatusRegistry
+	httpClient     *http.Client
+	insecureDev    bool
+	routingCookies openAIRoutingCookies
 }
 
 type DeviceContext struct {
@@ -307,6 +308,17 @@ func (proxy *Proxy) attempt(ctx context.Context, source *http.Request, target ro
 	request.ContentLength = int64(len(body))
 	if err = target.executor.PrepareRequest(request, target.credential, target.upstreamModel); err != nil {
 		return nil, err
+	}
+	if target.provider == "openai" {
+		// The selected account owns upstream routing state. A shared client jar
+		// would mix accounts, and following redirects could forward cookies or
+		// account headers to a destination we did not select.
+		client := *proxy.httpClient
+		client.Jar = proxy.routingCookies.forAccount(target.account.ID, request.URL)
+		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+		return client.Do(request)
 	}
 	return proxy.httpClient.Do(request)
 }

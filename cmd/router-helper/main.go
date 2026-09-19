@@ -233,6 +233,7 @@ func daemon(configPath string, args []string) error {
 
 func token(configPath string, args []string) error {
 	flags := flag.NewFlagSet("token", flag.ContinueOnError)
+	jsonOutput := flags.Bool("json", false, "print access_token and expires_in for clients with command credentials")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -244,7 +245,13 @@ func token(configPath string, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(value)
+	if *jsonOutput {
+		if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"access_token": value, "expires_in": int(helper.LocalTokenLifetime.Seconds())}); err != nil {
+			return err
+		}
+	} else {
+		fmt.Println(value)
+	}
 	notifyCodexStarted(configPath, secret, os.Getppid())
 	return nil
 }

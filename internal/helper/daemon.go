@@ -106,6 +106,7 @@ func (daemon *Daemon) Run(ctx context.Context) error {
 		return fmt.Errorf("start loopback helper: %w", err)
 	}
 	mux := http.NewServeMux()
+	mux.Handle("GET /v1/models", daemon.localAuth(http.HandlerFunc(daemon.models)))
 	proxy := daemon.trackInferenceActivity(daemon.responsesProxy())
 	mux.Handle("POST /v1/responses", daemon.localAuth(proxy))
 	mux.Handle("POST /v1/responses/compact", daemon.localAuth(proxy))

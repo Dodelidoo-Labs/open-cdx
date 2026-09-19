@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-09-18
+
+### Added
+
+- Expose authenticated `GET /v1/models` on the local helper, using the same
+  synchronized catalog as Codex. Model additions, removals, context limits,
+  reasoning levels, and service tiers are discovered without copied model lists.
+  Metadata changes update the ETag; hidden models and private instructions are
+  excluded.
+- Add `router-helper token --json` for clients that renew command credentials
+  using `access_token` and `expires_in`. The default bare-token output is unchanged.
+- Include a version-specific Hermes compatibility patch and setup/update guide
+  for live model discovery, advertised capabilities, and official Codex cache
+  headers on main and auxiliary requests. Hermes itself is not bundled or updated
+  by the OpenCDX release.
+
+### Fixed
+
+- Retain OpenAI's `__oailb` routing cookie in memory per account and HTTPS
+  upstream origin, honoring cookie scope and expiry. Authentication refresh
+  retains the account's routing state; quota failover cannot share it with another
+  account. Client cookies remain blocked and upstream cookies stay private.
+- Bring macOS Settings to the foreground when opened from the menu-bar HUD.
+
+### Changed
+
+- Return native OpenAI inference redirects without following them, preventing
+  selected-account credentials and routing cookies from reaching another
+  destination.
+
+Update the router server for the cookie-routing fix and the macOS companion for
+live discovery, JSON credentials, and the Settings fix. Existing Codex headers
+and request bodies remain intact. Hermes requires the separate
+[compatibility patch and update procedure](https://github.com/Dodelidoo-Labs/open-cdx/blob/v1.5.0/docs/hermes.md);
+restart its backend after installing Python changes, and rebuild Desktop when
+applying the full patch. Hermes updates may require adapting the patch.
+
 ## [1.4.2] - 2026-09-16
 
 ### Fixed
@@ -107,7 +144,8 @@ rebuilt for this release, but updating the companion alone does not fix HTTP 413
   timezone and daylight-saving changes. Show overlapping daily-only history as
   unavailable for rolling totals instead of presenting incomplete counts.
 
-[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.4.2...HEAD
+[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.4.2...v1.5.0
 [1.4.2]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.3.0...v1.4.0

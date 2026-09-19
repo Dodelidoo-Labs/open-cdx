@@ -36,6 +36,21 @@ Dashboard cost figures are estimates. The router refreshes the unauthenticated p
 
 The router removes hop-by-hop headers, cookies, forwarded credentials, device/local authorization, `ChatGPT-Account-ID`, FedRAMP selection, API keys, and OpenAI organization/project selection. It installs only the selected upstream authentication.
 
+For native OpenAI Responses requests, the router retains only the upstream
+`__oailb` infrastructure routing cookie and replays it to the same HTTPS ChatGPT
+origin. Cookie jars are held in memory separately for each selected account and
+exact origin; they honor cookie domain, path, expiry, deletion, and Secure rules.
+The first-party host allowlist matches Codex (`chatgpt.com` and its subdomains,
+`chat.openai.com`, and `chatgpt-staging.com` and its subdomains). Exact-origin
+isolation is deliberately stricter than cookie Domain scope. Other configured
+upstream hosts do not use this jar. No cookie values reach request logs, the
+database, local clients, OpenRouter, or Ollama. Router restarts discard the jars.
+Client-supplied cookies remain blocked, and upstream `Set-Cookie` remains
+stripped from client responses. Native inference redirects are returned without
+following them so selected-account credentials and cookies cannot move to an
+unselected destination. Cookies received on a pre-stream authentication or quota
+failure stay with that account when the router retries or selects a fallback.
+
 For native OpenAI routes, all other Codex feature metadata is preserved, including current `x-codex-*`, `originator`, `version`, `session-id`, `thread-id`, `OpenAI-Beta`, `User-Agent`, subagent/memory/lite flags, Responses API feature headers, and attestation when Codex supplies it. OpenAI-only feature and attestation headers are removed before OpenRouter or Ollama requests; provider-neutral HTTP metadata and each destination's own headers remain intact.
 
 ## Retry policy
