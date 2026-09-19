@@ -18,10 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   excluded.
 - Add `router-helper token --json` for clients that renew command credentials
   using `access_token` and `expires_in`. The default bare-token output is unchanged.
-- Include a version-specific Hermes compatibility patch and setup/update guide
-  for live model discovery, advertised capabilities, and official Codex cache
-  headers on main and auxiliary requests. Hermes itself is not bundled or updated
-  by the OpenCDX release.
 
 ### Fixed
 
@@ -39,10 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Update the router server for the cookie-routing fix and the macOS companion for
 live discovery, JSON credentials, and the Settings fix. Existing Codex headers
-and request bodies remain intact. Hermes requires the separate
-[compatibility patch and update procedure](https://github.com/Dodelidoo-Labs/open-cdx/blob/v1.5.0/docs/hermes.md);
-restart its backend after installing Python changes, and rebuild Desktop when
-applying the full patch. Hermes updates may require adapting the patch.
+and request bodies remain intact. Clients can use the documented local API;
+their implementations and update procedures are maintained separately.
 
 ## [1.4.2] - 2026-09-16
 

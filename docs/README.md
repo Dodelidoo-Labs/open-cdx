@@ -8,7 +8,7 @@ Start with the main [OpenCDX Router README](../README.md) if you are installing 
 |---|---|
 | [Deployment](deployment.md) | Production Docker installation, HTTPS, backups, upgrades, and environment settings |
 | [Helper and Codex setup](helper-and-codex.md) | Advanced pairing, account login, Codex configuration, usage reconciliation, helper commands, and uninstalling |
-| [Hermes](hermes.md) | Live model discovery, command credentials, and Hermes client compatibility |
+| [Client API](client-api.md) | Local Responses endpoint, live model discovery, and command credentials |
 | [Instruction history](instruction-history.md) | Instruction change notifications, historical diffs, and storage scope |
 | [Request logs](request-logs.md) | Per-request diagnostics, privacy, retention, and portable backup/restore |
 | [Banked resets](banked-resets.md) | Apply one earned Codex reset from the HUD, dashboard, or authenticated API |
