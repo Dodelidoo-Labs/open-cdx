@@ -14,6 +14,7 @@ type ActivityPoint struct {
 }
 
 type UsagePoint struct {
+	At                    string `json:"at,omitempty"`
 	DeviceID              string `json:"device_id"`
 	DeviceName            string `json:"device_name"`
 	Date                  string `json:"date"`
@@ -38,6 +39,8 @@ type Reconciliation struct {
 }
 
 type Report struct {
+	HourlyUsage       []UsagePoint            `json:"hourly_usage"`
+	AllowanceHistory  []AllowanceSeries       `json:"allowance_history"`
 	AllowanceResets   []AllowanceReset        `json:"allowance_resets"`
 	TimeZone          string                  `json:"time_zone"`
 	RollingUsage      map[string][]UsagePoint `json:"rolling_usage"`
@@ -58,7 +61,7 @@ func Build(aggregates []storage.UsageAggregate, reconciliation *storage.UsageRec
 		location = locations[0]
 	}
 	report := Report{
-		TimeZone: location.String(), RollingUsage: make(map[string][]UsagePoint), UntimedUsage: make([]UsagePoint, 0),
+		HourlyUsage: make([]UsagePoint, 0), TimeZone: location.String(), RollingUsage: make(map[string][]UsagePoint), UntimedUsage: make([]UsagePoint, 0),
 		GeneratedAt: now.UTC().Format(time.RFC3339Nano),
 		Activity:    make([]ActivityPoint, 0),
 		Usage:       make([]UsagePoint, 0),
@@ -76,6 +79,7 @@ func Build(aggregates []storage.UsageAggregate, reconciliation *storage.UsageRec
 	combined := make(map[usageKey]storage.UsageAggregate)
 	rolling := map[int]map[usageKey]UsagePoint{24: {}, 168: {}, 720: {}}
 	activity := make(map[string]int64)
+	hourly := make(map[usageKey]UsagePoint)
 	for _, aggregate := range aggregates {
 		recorded, err := time.Parse(time.RFC3339Nano, aggregate.RecordedAt)
 		precise := err == nil
@@ -115,6 +119,23 @@ func Build(aggregates []storage.UsageAggregate, reconciliation *storage.UsageRec
 					points[key] = current
 				}
 			}
+		}
+		if precise && !recorded.After(now) && !recorded.Before(now.Add(-24*time.Hour)) {
+			hour := recorded.UTC().Truncate(time.Hour).Format(time.RFC3339)
+			key := usageKey{hour, aggregate.Provider, aggregate.ModelID, aggregate.Source, aggregate.Routing, aggregate.DeviceID}
+			current, exists := hourly[key]
+			if !exists {
+				current = detail
+				current.At = hour
+			} else {
+				current.Requests += detail.Requests
+				current.InputTokens += detail.InputTokens
+				current.OutputTokens += detail.OutputTokens
+				current.CachedInputTokens += detail.CachedInputTokens
+				current.CacheWriteInputTokens += detail.CacheWriteInputTokens
+				current.ReasoningOutputTokens += detail.ReasoningOutputTokens
+			}
+			hourly[key] = current
 		}
 		if !precise {
 			report.UntimedUsage = append(report.UntimedUsage, detail)
@@ -184,5 +205,12 @@ func Build(aggregates []storage.UsageAggregate, reconciliation *storage.UsageRec
 		})
 		report.RollingUsage[strconv.Itoa(hours)] = rows
 	}
+	for _, point := range hourly {
+		report.HourlyUsage = append(report.HourlyUsage, point)
+	}
+	sort.Slice(report.HourlyUsage, func(i, j int) bool {
+		a, b := report.HourlyUsage[i], report.HourlyUsage[j]
+		return a.At+"\x00"+a.DeviceID+"\x00"+a.Provider+"\x00"+a.Model+"\x00"+a.Source+"\x00"+a.Routing < b.At+"\x00"+b.DeviceID+"\x00"+b.Provider+"\x00"+b.Model+"\x00"+b.Source+"\x00"+b.Routing
+	})
 	return report
 }

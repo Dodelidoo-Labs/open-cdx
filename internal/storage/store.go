@@ -114,6 +114,9 @@ func (store *Store) migrate(ctx context.Context) error {
 	if err = store.migrateReconciliationDevices(ctx); err != nil {
 		return err
 	}
+	if err = store.migrateAllowanceWindows(ctx); err != nil {
+		return err
+	}
 	_, err = store.db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS usage_device_idx ON usage_aggregate(device_id)")
 	if err != nil {
 		return err

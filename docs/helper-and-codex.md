@@ -172,7 +172,8 @@ observe the same reset. These are inferred transitions, not a unique account
 reset count. Future server quota polls retain account attribution; their cycle
 totals include only usage whose account is still known. Reconciled history has
 no account attribution and is excluded from those account totals. Main weekly
-Codex windows are tracked; five-hour and Spark limits are excluded.
+Codex windows supply these reset markers; five-hour and Spark limits are excluded
+from weekly reset detection.
 
 A reset deadline alone is not evidence of a reset. A subsequent window change
 is required. Early transitions are bounded by adjacent observations; the chart
@@ -180,3 +181,31 @@ uses the first new observation as their marker time. Cycle totals are approximat
 when boundaries are inferred, and daily-only records are excluded and flagged.
 Cached input is included in token totals; these counts are not allowance billing
 units. Clearing telemetry also clears the allowance observations.
+
+### Allowance history overlay
+
+On Telemetry, select **Show allowances** below the chart. It is off by default; the
+browser remembers the toggle, selected window, and hidden accounts. Choose an
+available window (for example, Weekly or 5 hours) and click account names to
+show or hide their lines. A fixed right axis shows remaining allowance from
+0–100%; the left axis continues to show tokens or requests. The 24-hour view
+uses hourly usage bars; longer ranges use calendar buckets.
+
+The line follows the selected range and timezone. Machine filtering changes
+usage, never the account balance. Hover or focus a usage bucket to see usage
+and nearby allowance readings, with the actual observation time. Token counts
+are not allowance billing units, and activity outside this router can also
+consume the same account balance.
+
+Only account-attributed server polls supply the lines. Existing live weekly
+readings remain available after migration; short-window history begins after
+upgrading the router. Imported machine history cannot identify the billed
+account and is excluded from the overlay. Only the main Codex rate-limit
+windows are included; independently metered additional limits such as Spark
+remain on Accounts. No allowance history is fabricated from token totals.
+
+Readings are normally collected every five minutes. The chart does not extend
+past the last observation or connect readings more than 15 minutes apart;
+single readings appear as dots. Window transitions appear at the first observed
+new balance, not an invented exact reset time. Clearing telemetry clears this
+history too. No companion-app change is needed.

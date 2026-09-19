@@ -957,7 +957,7 @@ func TestTimestampedHistoryValidationPreservesSeparateResponses(t *testing.T) {
 
 func TestTimeRangeAssetsAreServed(t *testing.T) {
 	server, _ := liveTestServer(t)
-	for _, path := range []string{"/assets/telemetry-ranges.js", "/assets/telemetry-devices.js"} {
+	for _, path := range []string{"/assets/telemetry-ranges.js", "/assets/telemetry-devices.js", "/assets/telemetry-allowance.js"} {
 		response := httptest.NewRecorder()
 		server.routes().ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
 		if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Type"), "javascript") {
@@ -1033,5 +1033,29 @@ func TestTelemetryViewerTimeZones(t *testing.T) {
 	stored, err := store.Usage(context.Background(), time.Time{})
 	if err != nil || len(stored) != 1 || stored[0].RecordedAt != rows[0].RecordedAt || server.location != time.UTC {
 		t.Fatalf("viewing timezone modified source data or server default: %#v %v", stored, err)
+	}
+}
+
+func TestTelemetryAllowanceHistoryRefreshesWithoutUsageAndExcludesMachineHistory(t *testing.T) {
+	server, store := liveTestServer(t)
+	first := telemetryResponse(t, server, "")
+	now := time.Now().UTC().Add(-time.Minute)
+	o := storage.AllowanceObservation{AccountID: "internal-account", ObservedAt: now, ResetAt: now.Add(time.Hour), Used: 42, WindowSeconds: 18000}
+	if err := store.RecordAllowanceObservation(context.Background(), o); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplaceUsage(context.Background(), "machine", nil, storage.UsageReconciliation{ReconciledAt: now}, []storage.AllowanceObservation{{ObservedAt: now, ResetAt: now.Add(time.Hour), Used: 99}}); err != nil {
+		t.Fatal(err)
+	}
+	response := telemetryResponse(t, server, first.Header().Get("ETag"))
+	if response.Code != http.StatusOK {
+		t.Fatalf("new quota observation did not invalidate response: %d", response.Code)
+	}
+	var report telemetry.Report
+	if err := json.Unmarshal(response.Body.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if len(report.AllowanceHistory) != 1 || report.AllowanceHistory[0].WindowSeconds != 18000 || len(report.AllowanceHistory[0].Points) != 1 || report.AllowanceHistory[0].Points[0].Remaining != 58 {
+		t.Fatalf("incorrect account history: %#v", report.AllowanceHistory)
 	}
 }

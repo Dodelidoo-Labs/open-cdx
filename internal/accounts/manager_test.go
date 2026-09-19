@@ -139,7 +139,7 @@ func TestQuotaAndCatalogRefreshesAreIndependent(t *testing.T) {
 		switch request.URL.Path {
 		case "/wham/usage":
 			quotaCalls.Add(1)
-			_, _ = writer.Write([]byte(`{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":10,"reset_at":2000000000}}}`))
+			_, _ = fmt.Fprintf(writer, `{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":10,"limit_window_seconds":18000,"reset_at":%d},"secondary_window":{"used_percent":40,"limit_window_seconds":604800,"reset_at":%d}}}`, time.Now().Add(5*time.Hour).Unix(), time.Now().Add(7*24*time.Hour).Unix())
 		case "/models":
 			catalogCalls.Add(1)
 			_, _ = writer.Write([]byte(`{"models":[{"slug":"gpt-test"}]}`))
@@ -165,6 +165,17 @@ func TestQuotaAndCatalogRefreshesAreIndependent(t *testing.T) {
 
 	if err = manager.RefreshQuotas(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	observations, err := store.AllowanceObservations(context.Background())
+	if err != nil || len(observations) != 2 {
+		t.Fatalf("quota poll did not preserve both allowance windows: %#v %v", observations, err)
+	}
+	windows := map[int64]float64{}
+	for _, observation := range observations {
+		windows[observation.WindowSeconds] = observation.Used
+	}
+	if windows[18000] != 10 || windows[604800] != 40 {
+		t.Fatalf("window readings mixed: %#v", windows)
 	}
 	if quotaCalls.Load() != 1 || catalogCalls.Load() != 0 {
 		t.Fatalf("quota refresh made quota=%d catalog=%d requests", quotaCalls.Load(), catalogCalls.Load())

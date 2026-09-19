@@ -171,7 +171,8 @@ CREATE TABLE IF NOT EXISTS allowance_observations (
     observed_at TEXT NOT NULL,
     reset_at TEXT NOT NULL,
     used_percent REAL NOT NULL,
-    PRIMARY KEY(source, account_id, device_id, observed_at, reset_at, used_percent)
+    window_seconds INTEGER NOT NULL DEFAULT 604800,
+    PRIMARY KEY(source, account_id, device_id, window_seconds, observed_at, reset_at, used_percent)
 );
 
 CREATE TABLE IF NOT EXISTS usage_reconciliation (

@@ -100,3 +100,28 @@ The built artifact is `dist/OpenCDX Router.app`. The install script atomically m
 Local helper state lives under `~/Library/Application Support/com.dodelidoo.opencdx`.
 
 See [Verification](verification.md) for the complete automated and manual test matrix. Release builds, notarization, Sparkle signing, and publication are documented separately in [Releases](releases.md).
+
+## Synthetic allowance preview
+
+The fixture in `scripts/testing/allowance-preview/` runs the actual dashboard
+and API with two paused synthetic accounts, two machines, short and weekly
+windows, a burst of usage, a missing collection interval, and allowance resets.
+It creates its own database and encryption key, and refuses to seed an existing
+data directory. Provider/OAuth URLs are deliberately unusable.
+
+```sh
+docker build -t opencdx-allowance-preview -f scripts/testing/allowance-preview/Dockerfile .
+docker run --rm --name opencdx-allowance-preview -p 127.0.0.1:18081:8080 \
+  -e OPENCODEX_PUBLIC_URL=http://127.0.0.1:18081 opencdx-allowance-preview
+```
+
+Open the browser at `http://127.0.0.1:18081/admin`; the demo-only administrator
+token is `opencdx-allowance-preview-only`. Select **24h**, then **Show allowances** to
+compare the sudden drain with the usage spike. Select **All** to see the longer
+history, resets and a gap. Try the window selector and machine filter.
+
+For a Multipass preview, run this container inside a dedicated disposable VM,
+publish port `8080:8080`, and set `OPENCODEX_PUBLIC_URL=http://VM_IP:8080`.
+Use a code-only copy of the repository. Do not mount real databases, secrets,
+Codex history, or helper state. Open the VM dashboard in a browser only;
+**do not connect the installed macOS app or helper to the preview**.

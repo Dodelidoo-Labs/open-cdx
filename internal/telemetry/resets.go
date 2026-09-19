@@ -36,7 +36,7 @@ type allowanceStream struct{ source, account, device string }
 func BuildAllowanceResets(observations []storage.AllowanceObservation, usage []storage.UsageAggregate, now time.Time) []AllowanceReset {
 	streams := make(map[allowanceStream][]storage.AllowanceObservation)
 	for _, o := range observations {
-		if o.ObservedAt.After(now) || o.Validate(now) != nil {
+		if o.WindowDuration() != 7*24*time.Hour || o.ObservedAt.After(now) || o.Validate(now) != nil {
 			continue
 		}
 		key := allowanceStream{o.Source, o.AccountID, o.DeviceID}

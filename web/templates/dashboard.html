@@ -210,6 +210,14 @@
             <div class="section-head"><div><h2 class="section-title" data-chart-title>Model usage by tokens</h2><p class="section-meta" data-chart-meta>Loading selected range…</p></div></div>
             <div class="chart-stack">
               <div class="chart-scroll"><div class="chart-shell" data-usage-chart="tokens"><div class="telemetry-loading">Loading token usage…</div></div></div>
+              <div class="allowance-legend" data-allowance-legend aria-label="Account allowance lines" hidden></div>
+              <div class="chart-footer">
+                <div data-cycle-details></div>
+                <div class="allowance-controls">
+                  <button type="button" class="allowance-toggle" data-allowance-toggle aria-pressed="false">Show allowances</button>
+                  <select class="allowance-window" data-allowance-window data-allowance-window-control aria-label="Allowance window" hidden></select>
+                </div>
+              </div>
               <div class="activity-calendar">
                 <div class="activity-head"><div><h3>Usage activity</h3><p>Last 12 months · daily inference requests</p></div></div>
                 <div data-heatmap><div class="telemetry-loading">Loading activity…</div></div>
@@ -348,6 +356,7 @@
   </main>
 </div>
 <script src="/assets/telemetry-ranges.js?v={{.AssetVersion}}" defer></script>
+<script src="/assets/telemetry-allowance.js?v={{.AssetVersion}}" defer></script>
 <script src="/assets/telemetry-devices.js?v={{.AssetVersion}}" defer></script>
 <script src="/assets/instruction-diff.js?v={{.AssetVersion}}" defer></script>
 <script src="/assets/instruction-history.js?v={{.AssetVersion}}" defer></script>

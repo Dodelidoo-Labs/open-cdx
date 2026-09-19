@@ -24,10 +24,10 @@ The helper reverse proxy does not parse inference request bodies. The router rea
 
 Native OpenAI request bodies remain byte-for-byte unchanged. Third-party catalog entries use an intentionally empty instruction template required by Codex's catalog schema; the router does not author or inject a provider persona, system prompt, or model-name instruction.
 
-Daily telemetry contains provider, routed model, opaque internal account key, request count, and token totals. The dashboard telemetry endpoint combines account rows and never returns the internal account key. It contains no prompts or responses.
+Daily telemetry contains provider, routed model, opaque internal account key, request count, and token totals. The dashboard combines account rows for usage series. Account-attributed allowance history and reset markers include opaque router account IDs and masked labels; they never include upstream account IDs or credentials. Telemetry contains no prompts or responses.
 
 The dashboard and paired-device reset operations delete only those aggregate
-rows and their reconciliation metadata. They do not access Codex rollout files
+rows, allowance observations, and their reconciliation metadata. They do not access Codex rollout files
 and do not delete accounts, devices, providers, catalogs, routing state, or request logs.
 
 Dashboard cost figures are estimates. The router refreshes the unauthenticated public OpenRouter model catalog, applies exact published input/output token prices to matching routed model IDs, and leaves unmatched models visibly unpriced. It does not present subscription usage as a bill or invent a cost for local Ollama execution.

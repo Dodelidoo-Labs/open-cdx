@@ -167,6 +167,7 @@ func (server *Server) routes() http.Handler {
 	mux.HandleFunc("GET /admin/login", server.loginPage)
 	mux.HandleFunc("GET /assets/telemetry-ranges.js", staticAsset("telemetry-ranges.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /assets/telemetry-devices.js", staticAsset("telemetry-devices.js", "text/javascript; charset=utf-8"))
+	mux.HandleFunc("GET /assets/telemetry-allowance.js", staticAsset("telemetry-allowance.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /assets/reset-tickets.js", staticAsset("reset-tickets.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /assets/dashboard.js", staticAsset("dashboard.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET /assets/dashboard.css", staticAsset("dashboard.css", "text/css; charset=utf-8"))
@@ -715,6 +716,7 @@ func (server *Server) adminTelemetry(writer http.ResponseWriter, request *http.R
 		}
 		report := telemetry.Build(usage, reconciliation, now, location)
 		report.AllowanceResets = telemetry.BuildAllowanceResets(observations, usage, now)
+		report.AllowanceHistory = telemetry.BuildAllowanceHistory(observations, now)
 		for _, observation := range observations {
 			if observation.ObservedAt.After(now) && observation.ObservedAt.Before(report.NextChangeAt) {
 				report.NextChangeAt = observation.ObservedAt

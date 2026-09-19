@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-09-19
+
+### Added
+
+- Add account allowance lines to Telemetry. Use **Show allowances** beside the
+  weekly transitions row, choose an available window, and click the account
+  legends below the chart to show or hide individual lines. Visibility and
+  window choices are remembered in the browser; the overlay is off by default.
+- Plot remaining allowance against a fixed 0–100% right axis using the selected
+  time range and timezone. Balances stay account-wide when usage is filtered
+  by machine. Missing readings remain gaps, and observed resets appear as jumps.
+- Record short-window allowance readings alongside existing weekly history.
+  Only account-attributed server polls supply the overlay; imported machine
+  history is not assigned to an account or converted into allowance estimates.
+- Add an isolated synthetic-data dashboard fixture for previewing allowance
+  drain, resets, collection gaps, and usage spikes without live credentials.
+
+### Changed
+
+- Show hourly usage bars in the 24-hour view so allowance drops can be compared
+  with activity at the same time. Shared tooltips include allowance values and
+  their observation times. Longer ranges retain calendar aggregation.
+- Keep allowance controls compact beneath the chart, with the window selector
+  visible only while the overlay is enabled.
+
+Update the router server to enable this feature. Existing live weekly readings
+are retained automatically; short-window history starts accumulating after the
+upgrade. No telemetry reset or macOS companion change is required.
+
 ## [1.5.0] - 2026-09-18
 
 ### Added
@@ -138,7 +167,8 @@ rebuilt for this release, but updating the companion alone does not fix HTTP 413
   timezone and daylight-saving changes. Show overlapping daily-only history as
   unavailable for rolling totals instead of presenting incomplete counts.
 
-[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.4.2...v1.5.0
 [1.4.2]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.4.0...v1.4.1

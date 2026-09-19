@@ -301,7 +301,7 @@ form { margin: 0; }
 .chart-stack { border-bottom: 1px solid var(--border); }
 .chart-scroll, .heatmap-scroll { min-width: 0; overflow-x: auto; scrollbar-width: thin; }
 .chart-shell { min-height: 214px; }
-.chart-shell svg { width: 100%; min-width: 760px; height: auto; display: block; }
+.chart-shell svg { width: 100%; min-width: 560px; height: auto; display: block; }
 .chart-shell text { fill: var(--muted); font: 10px var(--font-mono); }
 .chart-shell .grid-line { stroke: var(--border); stroke-width: 1; stroke-dasharray: 4 4; }
 .chart-shell .axis-line { stroke: color-mix(in oklch, var(--border) 55%, var(--muted)); stroke-width: 1; }
@@ -608,3 +608,22 @@ form { margin: 0; }
 .reset-confirmation::backdrop { background: rgb(0 0 0 / 25%); }
 .reset-confirmation h2 { margin-top: 0; font-size: 18px; }
 .reset-confirmation-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+
+/* Match the quiet cycle-details controls beneath the chart. */
+.chart-footer { display: flex; align-items: baseline; justify-content: space-between; gap: 8px 16px; margin: 0 12px 12px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.chart-footer [data-cycle-details] { min-width: 0; flex: 1; }
+.chart-footer .allowance-cycle-details { margin: 0; }
+.allowance-controls { display: flex; align-items: baseline; gap: 12px; flex-shrink: 0; margin-left: auto; }
+.allowance-toggle, .allowance-window { border: 0; border-radius: 0; padding: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.allowance-toggle:hover { color: var(--fg); }
+.allowance-window option { background: var(--surface); color: var(--fg); }
+.allowance-toggle:focus-visible, .allowance-window:focus-visible, .allowance-legend button:focus-visible { outline: 1px solid var(--muted); outline-offset: 4px; }
+.allowance-legend { display: flex; align-items: center; gap: 16px; margin: 0 12px 8px; overflow-x: auto; scrollbar-width: thin; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.allowance-legend button { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; border: 0; padding: 2px 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.allowance-legend button[aria-pressed="false"] { opacity: .5; text-decoration: line-through; }
+.allowance-legend i { width: 16px; border-top: 2px solid var(--allowance-color); }
+@media (max-width: 640px) { .chart-footer { flex-wrap: wrap; } .chart-footer [data-cycle-details] { flex-basis: 100%; } }
+.chart-shell .allowance-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; pointer-events: none; }
+.chart-shell .allowance-dot { pointer-events: none; }
+.chart-shell .allowance-axis { font-size: 11px; }
+.chart-shell .allowance-cursor { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }

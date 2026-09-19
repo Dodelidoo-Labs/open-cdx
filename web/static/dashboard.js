@@ -722,21 +722,130 @@
     return element;
   }
 
+  const allowanceToggle = telemetryRoot.querySelector("[data-allowance-toggle]");
+  const allowanceWindow = telemetryRoot.querySelector("[data-allowance-window]");
+  let allowancePreferences = {};
+  try {
+    allowancePreferences = JSON.parse(localStorage.getItem("opencdx-allowance-overlay")) || {};
+  } catch {}
+  let allowanceEnabled = allowancePreferences.enabled === true;
+  let allowanceSeconds = Number(allowancePreferences.window) || 604800;
+  const hiddenAllowanceAccounts = new Set(Array.isArray(allowancePreferences.hidden) ? allowancePreferences.hidden : []);
+  function saveAllowancePreferences() {
+    try {
+      localStorage.setItem(
+        "opencdx-allowance-overlay",
+        JSON.stringify({ enabled: allowanceEnabled, window: allowanceSeconds, hidden: [...hiddenAllowanceAccounts] }),
+      );
+    } catch {}
+  }
+  allowanceToggle.addEventListener("click", () => {
+    allowanceEnabled = !allowanceEnabled;
+    saveAllowancePreferences();
+    hideTooltip();
+    renderTelemetry();
+  });
+  allowanceWindow.addEventListener("change", () => {
+    allowanceSeconds = Number(allowanceWindow.value);
+    saveAllowancePreferences();
+    hideTooltip();
+    renderTelemetry();
+  });
+  function renderAllowanceControls(report, range) {
+    const windows = OpenCDXTelemetryAllowance.windows(report);
+    if (windows.length && !windows.some((w) => w.seconds === allowanceSeconds)) allowanceSeconds = windows[0].seconds;
+    const signature = JSON.stringify(windows);
+    if (allowanceWindow.dataset.options !== signature) {
+      allowanceWindow.replaceChildren(...windows.map((w) => new Option(w.label, w.seconds)));
+      allowanceWindow.dataset.options = signature;
+    }
+    allowanceWindow.value = String(allowanceSeconds);
+    allowanceToggle.setAttribute("aria-pressed", String(allowanceEnabled));
+    telemetryRoot.querySelector("[data-allowance-window-control]").hidden = !allowanceEnabled || !windows.length;
+    allowanceToggle.textContent = allowanceEnabled ? "Hide allowances" : "Show allowances";
+    const series = OpenCDXTelemetryAllowance.select(report, range, allowanceSeconds);
+    const legend = telemetryRoot.querySelector("[data-allowance-legend]");
+    legend.hidden = !allowanceEnabled || !series.length;
+    const legendSignature = JSON.stringify(series.map((s) => [s.account_id, s.label, s.color, hiddenAllowanceAccounts.has(s.account_id)]));
+    if (legend.dataset.accounts !== legendSignature) {
+      const focused = legend.contains(document.activeElement) ? document.activeElement.dataset.account : null;
+      legend.replaceChildren(
+        ...series.map((account) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.dataset.account = account.account_id;
+          button.setAttribute("aria-pressed", String(!hiddenAllowanceAccounts.has(account.account_id)));
+          const swatch = document.createElement("i");
+          swatch.style.setProperty("--allowance-color", account.color);
+          swatch.setAttribute("aria-hidden", "true");
+          // Masked emails can coincide. The short internal ID distinguishes them without exposing credentials.
+          const duplicates = series.filter((s) => s.label === account.label).length > 1;
+          button.append(
+            swatch,
+            document.createTextNode(`${account.label || "Account"}${duplicates ? ` · ${account.account_id.slice(-6)}` : ""}`),
+          );
+          button.addEventListener("click", () => {
+            if (hiddenAllowanceAccounts.has(account.account_id)) hiddenAllowanceAccounts.delete(account.account_id);
+            else hiddenAllowanceAccounts.add(account.account_id);
+            saveAllowancePreferences();
+            hideTooltip();
+            renderTelemetry();
+          });
+          return button;
+        }),
+      );
+      legend.dataset.accounts = legendSignature;
+      if (focused) [...legend.children].find((b) => b.dataset.account === focused)?.focus();
+    }
+    const visible = series.filter((s) => !hiddenAllowanceAccounts.has(s.account_id));
+    return allowanceEnabled ? visible : [];
+  }
+
   function renderUsageChart(range, report, mode, grouping) {
     const host = telemetryRoot.querySelector('[data-usage-chart="tokens"]');
     host.textContent = "";
-    const points = pointsForRange(report, range);
+    const cyclesHost = telemetryRoot.querySelector("[data-cycle-details]");
+    cyclesHost.replaceChildren();
+    const hourly = range.hours === 24 && Array.isArray(report.hourly_usage);
+    const points = hourly ? report.hourly_usage : pointsForRange(report, range);
     const resets = OpenCDXTelemetryRanges.resets(report, range);
+    const allowanceSeries = renderAllowanceControls(report, range);
+    const timeline = OpenCDXTelemetryAllowance.bounds(range, report.time_zone || "UTC");
     const spanDays = Math.max(1, Math.round((range.end - range.start) / 86400000) + 1);
     const buckets = new Map();
-    for (let date = range.start; date <= range.end; date = addDays(date, 1)) {
-      const bucket = bucketDetails(date, spanDays);
-      if (!buckets.has(bucket.key)) buckets.set(bucket.key, { ...bucket, series: new Map(), cached: new Map() });
+    if (hourly) {
+      const hourFormat = new Intl.DateTimeFormat(undefined, { timeZone: report.time_zone, hour: "2-digit", minute: "2-digit" });
+      const detailFormat = new Intl.DateTimeFormat(undefined, {
+        timeZone: report.time_zone,
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZoneName: "short",
+      });
+      for (let at = Math.floor(timeline.from / 3600000) * 3600000; at <= timeline.to; at += 3600000) {
+        const key = new Date(at).toISOString();
+        buckets.set(key, {
+          key,
+          label: hourFormat.format(at),
+          tooltip: detailFormat.format(at),
+          from: Math.max(at, timeline.from),
+          to: Math.min(at + 3600000, timeline.to),
+          series: new Map(),
+          cached: new Map(),
+        });
+      }
+    } else {
+      for (let date = range.start; date <= range.end; date = addDays(date, 1)) {
+        const bucket = bucketDetails(date, spanDays);
+        if (!buckets.has(bucket.key)) buckets.set(bucket.key, { ...bucket, firstDay: dateKey(date), series: new Map(), cached: new Map() });
+        buckets.get(bucket.key).afterDay = dateKey(addDays(date, 1));
+      }
     }
     const seriesTotals = new Map();
     points.forEach((point) => {
       const key = seriesKey(point, grouping);
-      const bucket = bucketDetails(utcDate(point.date), spanDays);
+      const bucket = hourly ? { key: new Date(point.at).toISOString() } : bucketDetails(utcDate(point.date), spanDays);
       const value = mode === "requests" ? point.requests : point.input_tokens + point.output_tokens;
       const target = buckets.get(bucket.key);
       if (!target) return;
@@ -750,8 +859,10 @@
       return seriesLabel(left, grouping).localeCompare(seriesLabel(right, grouping));
     });
     const bucketList = Array.from(buckets.values());
-    let maximum = niceMaximum(Math.max(0, ...bucketList.map((bucket) => Array.from(bucket.series.values()).reduce((sum, value) => sum + value, 0))));
-    if ((orderedSeries.length === 0 || maximum === 0) && resets.length === 0) {
+    let maximum = niceMaximum(
+      Math.max(0, ...bucketList.map((bucket) => Array.from(bucket.series.values()).reduce((sum, value) => sum + value, 0))),
+    );
+    if ((orderedSeries.length === 0 || maximum === 0) && resets.length === 0 && !allowanceSeries.some((s) => s.points.length)) {
       const empty = document.createElement("div");
       empty.className = "telemetry-empty";
       empty.textContent = orderedSeries.length === 0 ? "No usage in this period." : `No ${mode} were reported in this period.`;
@@ -760,15 +871,19 @@
     }
 
     maximum = Math.max(1, maximum);
-    const width = 1200;
+    const width = Math.max(560, host.clientWidth || 960);
     const height = 330;
     const left = 78;
-    const right = 20;
+    const right = allowanceEnabled ? 76 : 20;
     const top = 18;
     const bottom = 58;
     const plotWidth = width - left - right;
     const plotHeight = height - top - bottom;
-    const svg = svgElement("svg", { viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": `Stacked ${grouping} ${mode} usage chart` });
+    const svg = svgElement("svg", {
+      viewBox: `0 0 ${width} ${height}`,
+      role: "img",
+      "aria-label": `Stacked ${grouping} ${mode} usage chart`,
+    });
     for (let tick = 0; tick <= 4; tick += 1) {
       const value = (maximum / 4) * tick;
       const y = top + plotHeight - (plotHeight * tick) / 4;
@@ -778,11 +893,35 @@
       svg.appendChild(label);
     }
     svg.appendChild(svgElement("line", { x1: left, x2: width - right, y1: top + plotHeight, y2: top + plotHeight, class: "axis-line" }));
-    const slot = plotWidth / Math.max(bucketList.length, 1);
-    const barWidth = Math.max(3, Math.min(30, slot * 0.7));
+    const timeX = (at) => left + ((at - timeline.from) / (timeline.to - timeline.from)) * plotWidth;
+    bucketList.forEach((bucket) => {
+      if (!hourly) {
+        bucket.from = Math.max(timeline.from, OpenCDXTelemetryAllowance.dayStart(bucket.firstDay, report.time_zone));
+        bucket.to = Math.min(timeline.to, OpenCDXTelemetryAllowance.dayStart(bucket.afterDay, report.time_zone));
+      }
+      bucket.x = timeX(bucket.from);
+      bucket.width = timeX(bucket.to) - bucket.x;
+    });
+    const allowanceRows = (at) =>
+      allowanceSeries
+        .map((series) => {
+          const point = OpenCDXTelemetryAllowance.nearest(series.points, at);
+          return point
+            ? {
+                color: series.color,
+                label: `${series.label} · ${series.window_label}`,
+                value: `${formatNumber(point.remaining, 1)}% remaining`,
+                secondary: `Account-wide · observed ${new Intl.DateTimeFormat(undefined, { timeZone: report.time_zone, dateStyle: "medium", timeStyle: "short" }).format(new Date(point.at))}`,
+              }
+            : null;
+        })
+        .filter(Boolean);
+    const cursor = svgElement("line", { class: "allowance-cursor", y1: top, y2: top + plotHeight, visibility: "hidden" });
     const labelEvery = Math.max(1, Math.ceil(bucketList.length / 12));
     bucketList.forEach((bucket, index) => {
-      const x = left + index * slot + (slot - barWidth) / 2;
+      const slot = bucket.width;
+      const barWidth = Math.max(1, Math.min(30, slot * 0.7));
+      const x = bucket.x + (slot - barWidth) / 2;
       let stacked = 0;
       orderedSeries.forEach((key) => {
         const value = bucket.series.get(key) || 0;
@@ -792,20 +931,31 @@
         svg.appendChild(svgElement("rect", { x, y, width: barWidth, height: Math.max(segmentHeight, 0.6), fill: colorFor(key) }));
         stacked += segmentHeight;
       });
-      const values = orderedSeries.filter((key) => bucket.series.has(key)).map((key) => {
-        const value = bucket.series.get(key) || 0;
-        const cached = bucket.cached.get(key) || 0;
-        return {
-          color: colorFor(key),
-          label: seriesLabel(key, grouping),
-          numeric: value,
-          cached,
-        };
-      }).sort((a, b) => b.numeric - a.numeric);
+      const values = orderedSeries
+        .filter((key) => bucket.series.has(key))
+        .map((key) => {
+          const value = bucket.series.get(key) || 0;
+          const cached = bucket.cached.get(key) || 0;
+          return {
+            color: colorFor(key),
+            label: seriesLabel(key, grouping),
+            numeric: value,
+            cached,
+          };
+        })
+        .sort((a, b) => b.numeric - a.numeric);
       const total = values.reduce((sum, row) => sum + row.numeric, 0);
       const cachedTotal = values.reduce((sum, row) => sum + row.cached, 0);
-      const hit = svgElement("rect", { x: left + index * slot, y: top, width: Math.max(slot, 3), height: plotHeight, class: "bar-hit", tabindex: values.length ? 0 : -1, "aria-label": `${bucket.tooltip}, ${formatNumber(total)} ${mode}` });
-      if (values.length) {
+      const hit = svgElement("rect", {
+        x: bucket.x,
+        y: top,
+        width: Math.max(slot, 1),
+        height: plotHeight,
+        class: "bar-hit",
+        tabindex: values.length || allowanceSeries.length ? 0 : -1,
+        "aria-label": `${bucket.tooltip}, ${formatNumber(total)} ${mode}`,
+      });
+      if (values.length || allowanceSeries.length) {
         const tooltipRows = values.slice(0, 5).map(({ color, label, numeric, cached }) => ({
           color,
           label,
@@ -823,13 +973,29 @@
             secondary: mode === "tokens" && remainderCached > 0 ? `${formatNumber(remainderCached)} cached` : "",
           });
         }
-        const totalLabel = mode === "tokens"
-          ? `${formatNumber(total)} tokens${cachedTotal > 0 ? `\n${formatNumber(cachedTotal)} cached` : ""}`
-          : `${formatNumber(total)} requests`;
-        hit.addEventListener("pointerenter", (event) => showTooltip(bucket.tooltip, tooltipRows, totalLabel, event.clientX, event.clientY));
-        hit.addEventListener("pointermove", (event) => positionTooltip(event.clientX, event.clientY));
-        hit.addEventListener("pointerleave", hideTooltip);
-        hit.addEventListener("focus", () => showAnchoredTooltip(hit, bucket.tooltip, tooltipRows, totalLabel));
+        const totalLabel =
+          mode === "tokens"
+            ? `${formatNumber(total)} tokens${cachedTotal > 0 ? `\n${formatNumber(cachedTotal)} cached` : ""}`
+            : `${formatNumber(total)} requests`;
+        const rowsAt = (at) => [...tooltipRows, ...allowanceRows(at)];
+        const showAtPointer = (event) => {
+          const pointer = new DOMPoint(event.clientX, event.clientY).matrixTransform(svg.getScreenCTM().inverse());
+          const px = Math.max(left, Math.min(width - right, pointer.x));
+          const at = timeline.from + ((px - left) / plotWidth) * (timeline.to - timeline.from);
+          cursor.setAttribute("x1", px);
+          cursor.setAttribute("x2", px);
+          cursor.setAttribute("visibility", allowanceEnabled ? "visible" : "hidden");
+          showTooltip(`${bucket.tooltip} · usage totals`, rowsAt(at), totalLabel, event.clientX, event.clientY);
+        };
+        hit.addEventListener("pointerenter", showAtPointer);
+        hit.addEventListener("pointermove", showAtPointer);
+        hit.addEventListener("pointerleave", () => {
+          hideTooltip();
+          cursor.setAttribute("visibility", "hidden");
+        });
+        hit.addEventListener("focus", () =>
+          showAnchoredTooltip(hit, `${bucket.tooltip} · usage totals`, rowsAt((bucket.from + bucket.to) / 2), totalLabel),
+        );
         hit.addEventListener("blur", hideTooltip);
       }
       svg.appendChild(hit);
@@ -839,42 +1005,106 @@
         svg.appendChild(label);
       }
     });
-    const resetDate = (value) => new Intl.DateTimeFormat(undefined, { timeZone: report.time_zone || "UTC", dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+    if (allowanceEnabled) {
+      for (let tick = 0; tick <= 4; tick++) {
+        const label = svgElement("text", {
+          x: width - right + 10,
+          y: top + plotHeight - (plotHeight * tick) / 4 + 4,
+          class: "allowance-axis",
+        });
+        label.textContent = `${tick * 25}%`;
+        svg.appendChild(label);
+      }
+      const y = (remaining) => top + plotHeight * (1 - remaining / 100);
+      for (const series of allowanceSeries) {
+        for (const segment of OpenCDXTelemetryAllowance.segments(series.points)) {
+          let path = "";
+          segment.forEach((point, index) => {
+            const x = timeX(Date.parse(point.at));
+            if (index && Date.parse(point.reset_at) - Date.parse(segment[index - 1].reset_at) > 60000)
+              path += ` L ${x} ${y(segment[index - 1].remaining)}`;
+            path += `${index ? " L" : "M"} ${x} ${y(point.remaining)}`;
+          });
+          svg.appendChild(
+            svgElement("path", { d: path, stroke: series.color, class: "allowance-line", "data-account": series.account_id }),
+          );
+          if (segment.length === 1)
+            svg.appendChild(
+              svgElement("circle", {
+                cx: timeX(Date.parse(segment[0].at)),
+                cy: y(segment[0].remaining),
+                r: 2.5,
+                fill: series.color,
+                class: "allowance-dot",
+              }),
+            );
+        }
+      }
+      svg.appendChild(cursor);
+    }
+    const resetDate = (value) =>
+      new Intl.DateTimeFormat(undefined, { timeZone: report.time_zone || "UTC", dateStyle: "medium", timeStyle: "short" }).format(
+        new Date(value),
+      );
     const resetDescription = (reset) => {
       const tokens = reset.usage.reduce((sum, row) => sum + row.tokens, 0);
       const requests = reset.usage.reduce((sum, row) => sum + row.requests, 0);
-      const timing = reset.scheduled ? `Scheduled boundary ${resetDate(reset.at)}, transition observed ${resetDate(reset.observed_at)}`
+      const timing = reset.scheduled
+        ? `Scheduled boundary ${resetDate(reset.at)}, transition observed ${resetDate(reset.observed_at)}`
         : `Inferred between ${resetDate(reset.after)} and ${resetDate(reset.observed_at)}`;
-      const scope = reset.source === "history" ? "Machine history; account unknown (a switch can look like a reset)" : "Account quota; routed usage with known account only";
+      const scope =
+        reset.source === "history"
+          ? "Machine history; account unknown (a switch can look like a reset)"
+          : "Account quota; routed usage with known account only";
       return `${reset.label}: ${timing}. First observation: ${formatNumber(reset.observed_remaining)}% remaining. ${formatNumber(tokens)} recorded tokens / ${formatNumber(requests)} requests from ${resetDate(reset.at)} to ${reset.until ? resetDate(reset.until) : "latest telemetry (ongoing)"}. ${scope}. ${reset.usage.some((row) => row.untimed) ? "Incomplete: daily-only usage excluded. " : ""}Inferred boundaries make cycle totals approximate; totals cover the full interval, beyond the chart filter.`;
     };
     const resetBuckets = new Map();
     resets.forEach((reset) => {
       const day = OpenCDXTelemetryRanges.dayKey(reset.at, report.time_zone);
-      const key = bucketDetails(utcDate(day), spanDays).key;
+      const key = hourly
+        ? new Date(Math.floor(Date.parse(reset.at) / 3600000) * 3600000).toISOString()
+        : bucketDetails(utcDate(day), spanDays).key;
       if (!resetBuckets.has(key)) resetBuckets.set(key, []);
       resetBuckets.get(key).push(reset);
     });
     bucketList.forEach((bucket, index) => {
       const entries = resetBuckets.get(bucket.key);
       if (!entries) return;
-      const x = left + (index + 0.5) * slot;
-      const marker = svgElement("g", { class: "allowance-reset", tabindex: 0, role: "button", "aria-label": `${entries.length} weekly window transition${entries.length === 1 ? "" : "s"}, ${bucket.tooltip}. Activate for cycle details.` });
+      const x = bucket.x + bucket.width / 2;
+      const marker = svgElement("g", {
+        class: "allowance-reset",
+        tabindex: 0,
+        role: "button",
+        "aria-label": `${entries.length} weekly window transition${entries.length === 1 ? "" : "s"}, ${bucket.tooltip}. Activate for cycle details.`,
+      });
       marker.appendChild(svgElement("line", { x1: x, x2: x, y1: top + 14, y2: top + plotHeight }));
       marker.appendChild(svgElement("rect", { x: x - 12, y: top - 8, width: 24, height: 28 }));
       const glyph = svgElement("text", { x, y: top + 9, "text-anchor": "middle" });
       glyph.textContent = entries.length > 1 ? `↻${entries.length}` : "↻";
       marker.appendChild(glyph);
       const title = `${entries.length} weekly window transition${entries.length === 1 ? "" : "s"} · ${report.time_zone || "UTC"}`;
-      const rows = entries.slice(0, 2).map((reset) => ({ value: `${reset.label} · ${resetDate(reset.at)} · ${reset.scheduled ? "scheduled transition" : "inferred reset"}${reset.source === "history" ? " (account unknown)" : ""}. ${formatNumber(reset.usage.reduce((sum, row) => sum + row.tokens, 0))} recorded tokens until ${reset.until ? resetDate(reset.until) : "latest telemetry"}. Activate for bounds, requests and attribution.` }));
+      const rows = entries
+        .slice(0, 2)
+        .map((reset) => ({
+          value: `${reset.label} · ${resetDate(reset.at)} · ${reset.scheduled ? "scheduled transition" : "inferred reset"}${reset.source === "history" ? " (account unknown)" : ""}. ${formatNumber(reset.usage.reduce((sum, row) => sum + row.tokens, 0))} recorded tokens until ${reset.until ? resetDate(reset.until) : "latest telemetry"}. Activate for bounds, requests and attribution.`,
+        }));
       if (entries.length > 2) rows.push({ value: `${entries.length - 2} more; activate to see all cycle details.` });
       marker.addEventListener("pointerenter", (event) => showTooltip(title, rows, "", event.clientX, event.clientY));
       marker.addEventListener("pointerleave", hideTooltip);
       marker.addEventListener("focus", () => showAnchoredTooltip(marker, title, rows, ""));
       marker.addEventListener("blur", hideTooltip);
-      const expand = () => { hideTooltip(); details.open = true; cycleItems.get(entries[0]).focus(); };
+      const expand = () => {
+        hideTooltip();
+        details.open = true;
+        cycleItems.get(entries[0]).focus();
+      };
       marker.addEventListener("click", expand);
-      marker.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); expand(); } });
+      marker.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          expand();
+        }
+      });
       svg.appendChild(marker);
     });
     host.appendChild(svg);
@@ -895,13 +1125,14 @@
         list.appendChild(item);
       });
       details.append(summary, note, list);
-      host.appendChild(details);
+      cyclesHost.appendChild(details);
     }
   }
 
   function earliestUsageDay(report) {
     const days = report.usage.map((point) => point.date);
     for (const reset of report.allowance_resets || []) days.push(OpenCDXTelemetryRanges.dayKey(reset.at, report.time_zone));
+    for (const series of report.allowance_history || []) for (const point of series.points) days.push(OpenCDXTelemetryRanges.dayKey(point.at, report.time_zone));
     if (!days.length) return generatedDay(report);
     return utcDate(days.reduce((earliest, day) => day < earliest ? day : earliest));
   }
@@ -1015,6 +1246,9 @@
       telemetryState.currentRange = null;
       telemetryRoot.querySelectorAll("[data-metric]").forEach((element) => { element.textContent = "—"; });
       telemetryRoot.querySelector('[data-usage-chart="tokens"]').textContent = "Complete rolling-window history is unavailable.";
+      telemetryRoot.querySelector("[data-cycle-details]").replaceChildren();
+      renderAllowanceControls(report, range);
+      telemetryRoot.querySelector("[data-allowance-legend]").hidden = true;
       telemetryRoot.querySelector("[data-model-breakdown]").textContent = "";
       telemetryRoot.querySelector("[data-breakdown-total]").textContent = "";
       updateChartMeta(range, "tokens", "model");

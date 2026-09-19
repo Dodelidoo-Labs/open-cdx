@@ -236,8 +236,8 @@ func (manager *Manager) refreshQuota(ctx context.Context, accountID string) erro
 		return err
 	}
 	for _, window := range windows {
-		if window.Duration == 7*24*time.Hour && !window.ResetAt.IsZero() {
-			if err := manager.store.RecordAllowanceObservation(ctx, storage.AllowanceObservation{AccountID: accountID, ObservedAt: now, ResetAt: window.ResetAt, Used: window.UsedPercent}); err != nil {
+		if window.Duration > 0 && !window.ResetAt.IsZero() {
+			if err := manager.store.RecordAllowanceObservation(ctx, storage.AllowanceObservation{AccountID: accountID, ObservedAt: now, ResetAt: window.ResetAt, Used: window.UsedPercent, WindowSeconds: int64(window.Duration / time.Second)}); err != nil {
 				return err
 			}
 		}
