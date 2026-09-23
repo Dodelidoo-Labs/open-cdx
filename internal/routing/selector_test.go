@@ -31,7 +31,7 @@ func TestPrimaryThenConfiguredFallbackOrderWithAffinity(t *testing.T) {
 		t.Fatal(err)
 	}
 	selector := NewSelector(store, bytes.Repeat([]byte{4}, 32))
-	selected, err := selector.SelectNative(context.Background(), "device", "gpt-shared", "thread-1", "")
+	selected, err := selector.SelectNative(context.Background(), "device", "gpt-shared", "thread-1", "", nil)
 	if err != nil || selected.Account.ID != first.ID {
 		t.Fatalf("primary eligible account not selected: %#v %v", selected, err)
 	}
@@ -41,7 +41,7 @@ func TestPrimaryThenConfiguredFallbackOrderWithAffinity(t *testing.T) {
 	if err = store.MarkAccountExhausted(context.Background(), first.ID, time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	selected, err = selector.Rebind(context.Background(), "device", "gpt-shared", "thread-1", first.ID)
+	selected, err = selector.Rebind(context.Background(), "device", "gpt-shared", "thread-1", first.ID, nil)
 	if err != nil || selected.Account.ID != third.ID {
 		t.Fatalf("configured first fallback was not selected: %#v %v", selected, err)
 	}
@@ -51,15 +51,15 @@ func TestPrimaryThenConfiguredFallbackOrderWithAffinity(t *testing.T) {
 	if err = store.ReorderAccounts(context.Background(), []string{first.ID, second.ID, third.ID}); err != nil {
 		t.Fatal(err)
 	}
-	selected, err = selector.SelectNative(context.Background(), "device", "gpt-shared", "thread-1", "")
+	selected, err = selector.SelectNative(context.Background(), "device", "gpt-shared", "thread-1", "", nil)
 	if err != nil || selected.Account.ID != third.ID {
 		t.Fatalf("sticky account affinity was not maintained: %#v %v", selected, err)
 	}
-	selected, err = selector.SelectNative(context.Background(), "device", "gpt-shared", "thread-2", "")
+	selected, err = selector.SelectNative(context.Background(), "device", "gpt-shared", "thread-2", "", nil)
 	if err != nil || selected.Account.ID != second.ID {
 		t.Fatalf("new request did not use the first configured fallback: %#v %v", selected, err)
 	}
-	selected, err = selector.SelectNative(context.Background(), "device", "gpt-first", "other-thread", "")
+	selected, err = selector.SelectNative(context.Background(), "device", "gpt-first", "other-thread", "", nil)
 	if !errors.Is(err, ErrNoEligibleAccount) || selected.Account.ID != "" {
 		t.Fatal("router selected an account not available for the requested entitled model")
 	}

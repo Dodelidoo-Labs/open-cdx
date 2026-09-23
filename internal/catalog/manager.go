@@ -228,7 +228,7 @@ func mergeNativeAccounts(accounts []storage.Account) ([]json.RawMessage, map[str
 	}
 	conflicts := make(map[string]string, len(details))
 	for _, detail := range details {
-		conflicts[detail.Model] = fmt.Sprintf("%d differing fields across %d account definitions; one complete upstream definition was retained", len(detail.Fields), len(detail.Sources))
+		conflicts[detail.Model] = fmt.Sprintf("%d differing fields across %d account definitions; account access programs are excluded", len(detail.Fields), len(detail.Sources))
 	}
 	return entries, conflicts, nil
 }
@@ -299,7 +299,11 @@ func mergeNativeAccountsDetailed(accounts []storage.Account) ([]json.RawMessage,
 	})
 	entries := make([]json.RawMessage, 0, len(identifiers))
 	for _, modelID := range identifiers {
-		entries = append(entries, definitions[modelID][chosen[modelID]].raw)
+		entry, err := nativePickerDefinition(definitions[modelID], chosen[modelID])
+		if err != nil {
+			return nil, nil, err
+		}
+		entries = append(entries, entry)
 	}
 	return entries, conflicts, nil
 }

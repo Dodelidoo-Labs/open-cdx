@@ -11,7 +11,7 @@ import (
 	"github.com/Dodelidoo-Labs/open-cdx/internal/storage"
 )
 
-var ErrNoEligibleAccount = errors.New("no active OpenAI account is entitled to the requested model")
+var ErrNoEligibleAccount = errors.New("no active OpenAI account is entitled to the requested model and access programs")
 
 type Selection struct {
 	Account storage.Account
@@ -29,14 +29,14 @@ func NewSelector(store *storage.Store, affinitySecret []byte) *Selector {
 	return &Selector{store: store, secret: secret, now: func() time.Time { return time.Now().UTC() }}
 }
 
-func (selector *Selector) SelectNative(ctx context.Context, deviceID, modelID, affinityValue, excludedAccount string) (Selection, error) {
+func (selector *Selector) SelectNative(ctx context.Context, deviceID, modelID, affinityValue, excludedAccount string, programs accessPrograms) (Selection, error) {
 	accounts, err := selector.store.Accounts(ctx, false)
 	if err != nil {
 		return Selection{}, err
 	}
 	eligible := make([]storage.Account, 0, len(accounts))
 	for _, account := range accounts {
-		if account.ID == excludedAccount || !account.QuotaAvailable(selector.now()) || !contains(account.EntitledModels, modelID) {
+		if account.ID == excludedAccount || !account.QuotaAvailable(selector.now()) || !contains(account.EntitledModels, modelID) || !accountSupportsAccessPrograms(account, modelID, programs) {
 			continue
 		}
 		eligible = append(eligible, account)
@@ -75,11 +75,11 @@ func (selector *Selector) SelectNative(ctx context.Context, deviceID, modelID, a
 	return Selection{Account: selected, ModelID: modelID}, nil
 }
 
-func (selector *Selector) Rebind(ctx context.Context, deviceID, modelID, affinityValue, exhaustedAccount string) (Selection, error) {
+func (selector *Selector) Rebind(ctx context.Context, deviceID, modelID, affinityValue, exhaustedAccount string, programs accessPrograms) (Selection, error) {
 	if hash := selector.affinityHash(deviceID, affinityValue); len(hash) > 0 {
 		_ = selector.store.DeleteAffinity(ctx, hash, modelID)
 	}
-	return selector.SelectNative(ctx, deviceID, modelID, affinityValue, exhaustedAccount)
+	return selector.SelectNative(ctx, deviceID, modelID, affinityValue, exhaustedAccount, programs)
 }
 
 func (selector *Selector) affinityHash(deviceID, value string) []byte {

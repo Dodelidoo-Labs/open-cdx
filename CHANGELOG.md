@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-09-23
+
+### Fixed
+
+- Keep explicit OpenAI access-program selections scoped to each account's own
+  model catalog during initial routing, thread affinity, and quota fallback.
+  Accounts without the requested access are never used as substitutes.
+- Advertise model access programs available through any eligible account,
+  including secondary accounts, regardless of which account is primary.
+  Exclude these expected account-access differences from definition conflicts
+  and preserve every account’s original catalog and entitlements.
+
+Update the router server to apply these fixes. Sync the updated catalog with
+the macOS companion, then restart Codex to load the available access programs.
+No companion update is required for these fixes.
+
 ## [1.6.1] - 2026-09-22
 
 ### Fixed
@@ -189,7 +205,8 @@ rebuilt for this release, but updating the companion alone does not fix HTTP 413
   timezone and daylight-saving changes. Show overlapping daily-only history as
   unavailable for rolling totals instead of presenting incomplete counts.
 
-[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.6.2...HEAD
+[1.6.2]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.4.2...v1.5.0

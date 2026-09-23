@@ -73,7 +73,7 @@ func definitionConflict(model string, definitions []nativeDefinition, retained i
 	for i, definition := range definitions {
 		conflict.Sources[i] = definition.source
 		conflict.Sources[i].Retained = i == retained
-		values[i] = fieldValue{value: definition.value, present: true}
+		values[i] = fieldValue{value: modelDefinitionWithoutAccess(definition.value), present: true}
 	}
 	collectDifferences("", values, retained, &conflict.Fields)
 	return conflict

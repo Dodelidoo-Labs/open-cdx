@@ -209,14 +209,16 @@ For each router-managed OpenAI account:
 
 1. Fetch its entitled catalog using that account’s router-owned credentials.
 2. Store the raw account-specific snapshot.
-3. Copy native model entries into the merged catalog without deleting, renaming, rewriting, or defaulting fields.
+3. Copy native model definitions into the device catalog, preserving upstream fields except for the account-specific `available_access_programs` availability described below.
 4. Maintain account eligibility separately from the catalog entry.
 5. Never remove unknown models merely because the router does not recognize them.
 6. Never hardcode a fixed OpenAI model list.
 
 Use the union of account-entitled models only if routing can guarantee that a request is assigned to an eligible account. Otherwise expose the safe intersection.
 
-When two accounts return conflicting definitions for the same model ID, retain one complete upstream definition—preferably the designated primary account’s—and report the conflict. Do not field-merge incompatible definitions.
+For each model, advertise the union of `available_access_programs` across eligible accounts. A secondary account’s models and access programs must remain available regardless of which account is primary. These account entitlements are expected to differ and must never be reported as model-definition conflicts. Keep raw account snapshots unchanged and route using the selected account’s own entitlements.
+
+For other model fields, when two accounts return conflicting definitions for the same model ID, retain one upstream definition—preferably the designated primary account’s—and report those definition differences. Do not field-merge incompatible model behavior or instructions.
 
 #### OpenRouter
 
@@ -258,7 +260,7 @@ For native OpenAI models:
 - Preserve Codex metadata and feature headers unless they are hop-by-hop or security-sensitive.
 - Do not inject instructions.
 - Do not translate native reasoning settings.
-- Select only accounts entitled to the requested model.
+- Select only accounts entitled to the requested model and advertising every explicitly requested access program in that model’s own account catalog. Apply the same check before honoring affinity and on quota fallback; missing access metadata never grants explicit program access.
 
 For OpenRouter models:
 

@@ -83,6 +83,14 @@ func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Re
 	}
 	providerName, upstreamModel := catalog.RouteIdentity(modelID)
 	entry.Provider, entry.UpstreamModel = providerName, logText(upstreamModel, 256)
+	var programs accessPrograms
+	if providerName == "openai" {
+		programs, err = parseAccessPrograms(rawDocument["access_programs"])
+		if err != nil {
+			writeProxyError(writer, http.StatusBadRequest, "invalid_access_programs", err.Error())
+			return
+		}
+	}
 	forwardBody := body
 	if providerName != "openai" {
 		rawDocument["model"], _ = json.Marshal(upstreamModel)
@@ -101,7 +109,7 @@ func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Re
 	if affinity == "" {
 		affinity = request.Header.Get("session-id")
 	}
-	target, err := proxy.resolveTarget(request.Context(), providerName, modelID, upstreamModel, request.URL.Path, device.ID, affinity, "")
+	target, err := proxy.resolveTarget(request.Context(), providerName, modelID, upstreamModel, request.URL.Path, device.ID, affinity, "", programs)
 	if err != nil {
 		if request.Context().Err() != nil {
 			return
@@ -160,7 +168,7 @@ func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Re
 	if target.provider == "openai" && response.StatusCode == http.StatusTooManyRequests {
 		response.Body.Close()
 		_ = proxy.store.MarkAccountExhausted(request.Context(), target.account.ID, quotaReset(response.Header))
-		nextTarget, selectErr := proxy.resolveTarget(request.Context(), "openai", modelID, upstreamModel, request.URL.Path, device.ID, affinity, target.account.ID)
+		nextTarget, selectErr := proxy.resolveTarget(request.Context(), "openai", modelID, upstreamModel, request.URL.Path, device.ID, affinity, target.account.ID, programs)
 		if selectErr == nil {
 			target = nextTarget
 			response, err = proxy.loggedAttempt(request.Context(), request, target, forwardBody, entry)
@@ -230,16 +238,16 @@ func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Re
 	})
 }
 
-func (proxy *Proxy) resolveTarget(ctx context.Context, providerName, modelID, upstreamModel, path, deviceID, affinity, excludedAccount string) (routeTarget, error) {
+func (proxy *Proxy) resolveTarget(ctx context.Context, providerName, modelID, upstreamModel, path, deviceID, affinity, excludedAccount string, programs accessPrograms) (routeTarget, error) {
 	target := routeTarget{provider: providerName, model: modelID, upstreamModel: upstreamModel}
 	switch providerName {
 	case "openai":
 		var selection Selection
 		var err error
 		if excludedAccount == "" {
-			selection, err = proxy.selector.SelectNative(ctx, deviceID, modelID, affinity, "")
+			selection, err = proxy.selector.SelectNative(ctx, deviceID, modelID, affinity, "", programs)
 		} else {
-			selection, err = proxy.selector.Rebind(ctx, deviceID, modelID, affinity, excludedAccount)
+			selection, err = proxy.selector.Rebind(ctx, deviceID, modelID, affinity, excludedAccount, programs)
 		}
 		if err != nil {
 			return routeTarget{}, err

@@ -332,7 +332,7 @@
 
       <div id="catalog" role="tabpanel" aria-labelledby="catalog-tab" data-tab-panel="catalog" hidden>
         <section class="page-head">
-          <div><h1 class="page-title">Catalog</h1><p class="page-dek">Discovered provider models and the reason each model can—or cannot—route.</p></div>
+          <div><h1 class="page-title">Catalog</h1><p class="page-dek">Models and access programs are available when an active account provides them. Requests use only accounts with the selected access.</p></div>
           <div class="page-actions"><form class="inline" method="post" action="/admin/catalog/refresh" data-refresh><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="return_tab" value="catalog"><button class="btn btn-secondary" type="submit"><span class="material-symbols-outlined action-symbol" aria-hidden="true">refresh</span>Refresh catalog</button></form></div>
         </section>
         <section>
@@ -343,7 +343,7 @@
         </section>
         <section class="section">
           {{if .ConflictError}}<aside class="conflicts" role="status"><h3>Catalog comparison unavailable</h3><p>{{.ConflictError}}</p></aside>{{end}}
-          {{if .Conflicts}}<aside class="conflicts"><h3>Native definition conflicts · {{len .Conflicts}} {{if eq (len .Conflicts) 1}}model{{else}}models{{end}}</h3><p class="muted">OpenAI accounts returned different definitions for these models. Each comparison shows all differing fields and marks the complete definition retained for routing.</p>{{range .Conflicts}}<div class="catalog-conflict-row"><p><strong>{{.Model}}</strong><span class="muted"> · {{.Detail}}</span></p><button type="button" class="btn btn-secondary" data-catalog-conflict="{{.Model}}" aria-haspopup="dialog" aria-controls="catalog-conflict-dialog" aria-label="View discrepancies for {{.Model}}">Details</button></div>{{end}}</aside>{{end}}
+          {{if .Conflicts}}<aside class="conflicts"><h3>Model definition differences · {{len .Conflicts}} {{if eq (len .Conflicts) 1}}model{{else}}models{{end}}</h3><p class="muted">These comparisons show differences in model definitions. Account access programs are combined for the picker and are not conflicts; each account keeps its own access.</p>{{range .Conflicts}}<div class="catalog-conflict-row"><p><strong>{{.Model}}</strong><span class="muted"> · {{.Detail}}</span></p><button type="button" class="btn btn-secondary" data-catalog-conflict="{{.Model}}" aria-haspopup="dialog" aria-controls="catalog-conflict-dialog" aria-label="View discrepancies for {{.Model}}">Details</button></div>{{end}}</aside>{{end}}
           <dialog id="catalog-conflict-dialog" class="catalog-conflict-dialog" data-catalog-conflict-dialog aria-labelledby="catalog-conflict-title">
             <div class="catalog-conflict-head"><div><h2 id="catalog-conflict-title" data-catalog-conflict-title>Catalog discrepancies</h2><p class="muted" data-catalog-conflict-summary></p></div><button type="button" class="btn btn-secondary" data-catalog-conflict-close>Close</button></div>
             <p role="status" aria-live="polite" data-catalog-conflict-status></p>

@@ -32,7 +32,7 @@ Status: passed.
 
 Codex loads `model_catalog_json` as a complete model catalog at startup; see [config loading](https://github.com/openai/codex/blob/main/codex-rs/core/src/config/mod.rs) and the [ModelInfo schema](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/openai_models.rs).
 
-OpenAI snapshots are stored raw. Merge tests retain unknown fields, upstream reasoning presets including `ultra`, and opaque safety/internal models without field merge. Conflicts retain a complete primary definition and are reported.
+OpenAI snapshots are stored raw. Catalog tests retain unknown fields, upstream reasoning presets including `ultra`, and opaque safety/internal models. The picker exposes the union of account access programs, while routing checks each account’s own snapshot. Access differences are not conflicts. Other definition differences retain the primary model definition and are reported.
 
 ## 5. OpenRouter metadata is sufficient for conservative decisions
 

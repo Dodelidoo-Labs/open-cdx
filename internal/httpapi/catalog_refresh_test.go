@@ -71,7 +71,7 @@ func TestDeviceCatalogUpgradeSurvivesDashboardRefreshAndOlderDevice(t *testing.T
 		t.Fatalf("older device refresh: status=%d body=%s calls=%d", response.Code, response.Body.String(), calls.Load())
 	}
 	selector := routing.NewSelector(store, []byte("affinity-secret"))
-	selection, err := selector.SelectNative(ctx, enrollment.DeviceID, "new-model", "", "")
+	selection, err := selector.SelectNative(ctx, enrollment.DeviceID, "new-model", "", "", nil)
 	if err != nil || selection.Account.ID != account.ID {
 		t.Fatalf("visible model lost its route: %+v, %v", selection, err)
 	}

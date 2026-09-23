@@ -146,7 +146,7 @@ func TestOllamaRoutingEnforcesPersistedAllowHTTPPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	proxy := NewProxy(store, nil, nil, nil, NewStatusRegistry(), &http.Client{}, false)
-	target, err := proxy.resolveTarget(context.Background(), "ollama", "ollama/model", "model", "/v1/responses", "device", "", "")
+	target, err := proxy.resolveTarget(context.Background(), "ollama", "ollama/model", "model", "/v1/responses", "device", "", "", nil)
 	if err != nil || target.url != "http://192.168.1.20:11434/v1/responses" {
 		t.Fatalf("explicitly allowed Ollama target = %#v, %v", target, err)
 	}
@@ -155,7 +155,7 @@ func TestOllamaRoutingEnforcesPersistedAllowHTTPPolicy(t *testing.T) {
 	if err = store.PutProvider(context.Background(), provider); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = proxy.resolveTarget(context.Background(), "ollama", "ollama/model", "model", "/v1/responses", "device", "", ""); err == nil || !strings.Contains(err.Error(), "requires Allow HTTP") {
+	if _, err = proxy.resolveTarget(context.Background(), "ollama", "ollama/model", "model", "/v1/responses", "device", "", "", nil); err == nil || !strings.Contains(err.Error(), "requires Allow HTTP") {
 		t.Fatalf("remote HTTP route without opt-in error = %v", err)
 	}
 }

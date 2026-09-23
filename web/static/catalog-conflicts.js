@@ -14,7 +14,7 @@
   };
   function render(conflict) {
     summary.textContent = `${conflict.fields.length} differing fields · ${conflict.sources.length} account definitions`;
-    content.append(node('p', 'Only discrepancies are shown. Retained marks the complete model definition selected from the primary account when available, otherwise the first eligible account. Values are JSON; “Missing” means the field is absent. Array positions start at 0.', 'muted'));
+    content.append(node('p', 'These are differences in model definitions returned by OpenAI. Account access programs are excluded from this comparison: the picker offers programs available through any active account, and requests route only through accounts with the selected access. Definition source marks the source of the other model fields. Values are JSON; “Missing” means the field is absent. Array positions start at 0.', 'muted'));
     const wrap = node('div', null, 'catalog-conflict-scroll');
     wrap.tabIndex = 0;
     wrap.setAttribute('role', 'region');
@@ -31,7 +31,7 @@
       cell.append(node('span', source.account || 'Account', 'catalog-source-label'));
       cell.append(node('span', source.account_id, 'catalog-source-id'));
       cell.append(node('small', `Catalog entry ${source.catalog_entry}${source.primary ? ' · Primary account' : ''}`));
-      if (source.retained) cell.append(node('span', 'Retained', 'catalog-retained-badge'));
+      if (source.retained) cell.append(node('span', 'Definition source', 'catalog-retained-badge'));
       headings.append(cell);
     }
     head.append(headings);
@@ -47,7 +47,7 @@
         const cell = node('td', null, retained ? 'catalog-value-retained' : value.matches_retained ? '' : 'catalog-value-different');
         if (!value.present) cell.append(node('span', 'Missing', 'catalog-value-missing'));
         else cell.append(node('pre', field.container ? JSON.parse(value.json) : value.json));
-        if (!retained) cell.append(node('small', value.matches_retained ? 'Matches retained' : 'Differs from retained'));
+        if (!retained) cell.append(node('small', value.matches_retained ? 'Matches definition source' : 'Account-specific value'));
         row.append(cell);
       });
       body.append(row);
