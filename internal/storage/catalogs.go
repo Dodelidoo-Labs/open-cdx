@@ -42,6 +42,17 @@ func (store *Store) CatalogSnapshots(ctx context.Context, provider string) ([]Ca
 	return snapshots, rows.Err()
 }
 
+// AccountCatalogClientVersion is committed with the native snapshot, even when
+// its instructions did not change. Reuse that persisted version after restart.
+func (store *Store) AccountCatalogClientVersion(ctx context.Context, accountID string) (string, error) {
+	var version string
+	err := store.db.QueryRowContext(ctx, `SELECT client_version FROM instruction_catalog_state WHERE account_id=?`, accountID).Scan(&version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return version, err
+}
+
 func (store *Store) PutMergedCatalog(ctx context.Context, deviceID, codexVersion string, raw []byte) (string, error) {
 	digest := sha256.Sum256(raw)
 	hash := hex.EncodeToString(digest[:])

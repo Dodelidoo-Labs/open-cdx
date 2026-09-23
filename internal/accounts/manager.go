@@ -246,15 +246,33 @@ func (manager *Manager) refreshQuota(ctx context.Context, accountID string) erro
 }
 
 func (manager *Manager) RefreshCatalog(ctx context.Context, accountID, clientVersion string) error {
+	return manager.refreshCatalog(ctx, accountID, clientVersion, false)
+}
+
+func (manager *Manager) refreshCatalog(ctx context.Context, accountID, clientVersion string, onlyIfNewer bool) error {
+	lock := manager.refreshLock("catalog:" + accountID)
+	lock.Lock()
+	defer lock.Unlock()
+	storedVersion, err := manager.store.AccountCatalogClientVersion(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	version := catalogClientVersion(storedVersion, clientVersion)
+	if version == "" {
+		return errCatalogVersionUnknown
+	}
+	if onlyIfNewer && version == storedVersion {
+		return nil
+	}
 	credential, err := manager.FreshCredential(ctx, accountID)
 	if err != nil {
 		return err
 	}
-	discovery, err := manager.client.DiscoverModels(ctx, credential, clientVersion)
+	discovery, err := manager.client.DiscoverModels(ctx, credential, version)
 	if err != nil {
 		return err
 	}
-	return manager.store.UpdateAccountCatalog(ctx, accountID, discovery.Raw, modelIDs(discovery.Models), clientVersion)
+	return manager.store.UpdateAccountCatalog(ctx, accountID, discovery.Raw, modelIDs(discovery.Models), version)
 }
 
 func (manager *Manager) RefreshQuotas(ctx context.Context) error {
@@ -282,6 +300,16 @@ func (manager *Manager) RefreshQuotas(ctx context.Context) error {
 }
 
 func (manager *Manager) RefreshCatalogs(ctx context.Context, clientVersion string) error {
+	return manager.refreshCatalogs(ctx, clientVersion, false)
+}
+
+// EnsureCatalogVersion lets routine device syncs discover models after a Codex
+// upgrade without refetching upstream catalogs on every poll.
+func (manager *Manager) EnsureCatalogVersion(ctx context.Context, clientVersion string) error {
+	return manager.refreshCatalogs(ctx, clientVersion, true)
+}
+
+func (manager *Manager) refreshCatalogs(ctx context.Context, clientVersion string, onlyIfNewer bool) error {
 	accounts, err := manager.store.Accounts(ctx, false)
 	if err != nil {
 		return err
@@ -291,8 +319,19 @@ func (manager *Manager) RefreshCatalogs(ctx context.Context, clientVersion strin
 		if account.Paused {
 			continue
 		}
-		if refreshErr := manager.RefreshCatalog(ctx, account.ID, clientVersion); refreshErr != nil {
+		if refreshErr := manager.refreshCatalog(ctx, account.ID, clientVersion, onlyIfNewer); refreshErr != nil {
+			// Missing version information must not evict an otherwise usable
+			// cached catalog. A device with a known version can refresh it later.
+			if errors.Is(refreshErr, errCatalogVersionUnknown) {
+				continue
+			}
 			failures++
+			// An upgrade check during a normal catalog read must not hide
+			// the last working catalog on a transient discovery failure.
+			// FreshCredential already persists permanent auth failures.
+			if onlyIfNewer {
+				continue
+			}
 			latest, latestErr := manager.store.Account(ctx, account.ID, false)
 			if latestErr != nil || latest.Status != "reauthentication_required" {
 				_ = manager.store.SetAccountStatus(ctx, account.ID, "degraded", "catalog refresh failed")

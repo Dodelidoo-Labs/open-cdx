@@ -39,7 +39,7 @@ const sessionLifetime = 12 * time.Hour
 type Server struct {
 	telemetryMu       sync.Mutex
 	telemetryCache    *telemetry.Report
-	telemetryCacheKey  string
+	telemetryCacheKey string
 	location          *time.Location
 	store             *storage.Store
 	accounts          *accounts.Manager
@@ -376,6 +376,8 @@ func (server *Server) catalogResponse(writer http.ResponseWriter, request *http.
 	if refresh {
 		_ = server.RefreshProviders(request.Context())
 		_ = server.accounts.RefreshCatalogs(request.Context(), version)
+	} else {
+		_ = server.accounts.EnsureCatalogVersion(request.Context(), version)
 	}
 	result, err := server.catalog.BuildForDevice(request.Context(), device.ID, version)
 	if err != nil {
@@ -941,7 +943,7 @@ func (server *Server) adminRefreshProviders(writer http.ResponseWriter, request 
 
 func (server *Server) adminRefreshCatalog(writer http.ResponseWriter, request *http.Request) {
 	providerErr := server.RefreshProviders(request.Context())
-	accountErr := server.accounts.RefreshCatalogs(request.Context(), normalizedVersion(""))
+	accountErr := server.accounts.RefreshCatalogs(request.Context(), "")
 	if providerErr != nil || accountErr != nil {
 		redirectMessage(writer, request, "Catalog refresh completed with errors", true)
 		return

@@ -122,7 +122,6 @@ func ensureProviders(store *storage.Store) error {
 }
 
 func refreshLoop(ctx context.Context, api *httpapi.Server, accountManager *accounts.Manager, catalogInterval, quotaInterval time.Duration) {
-	const backgroundClientVersion = "0.0.0"
 	catalogTicker := time.NewTicker(catalogInterval)
 	quotaTicker := time.NewTicker(quotaInterval)
 	defer catalogTicker.Stop()
@@ -134,7 +133,7 @@ func refreshLoop(ctx context.Context, api *httpapi.Server, accountManager *accou
 		case <-catalogTicker.C:
 			refreshContext, cancel := context.WithTimeout(ctx, 4*time.Minute)
 			_ = api.RefreshProviders(refreshContext)
-			_ = accountManager.RefreshCatalogs(refreshContext, backgroundClientVersion)
+			_ = accountManager.RefreshCatalogs(refreshContext, "")
 			cancel()
 		case <-quotaTicker.C:
 			refreshContext, cancel := context.WithTimeout(ctx, 2*time.Minute)

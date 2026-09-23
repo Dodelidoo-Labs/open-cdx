@@ -69,6 +69,8 @@ Copy it manually into `~/.codex/config.toml`. Do not add `requires_openai_auth =
 
 Codex must restart after a catalog file changes. The menu app and catalog endpoint report this explicitly. The reminder clears automatically when the helper observes a Codex process that started after the catalog was written; older running instances do not count. It can also be acknowledged manually from the menu.
 
+The helper checks the router catalog every minute. After a Codex upgrade, that sync refreshes each active account's native catalog using the newer detected version. The router preserves the newest successfully used discovery version per account across restarts; background and dashboard refreshes reuse it, and older devices cannot lower it. Refreshes for the same account run sequentially so an older response cannot overwrite an upgrade. If no real version is known yet, refreshes preserve the cached catalog until a helper reports one. Successful upstream refreshes can still remove models that OpenAI no longer lists.
+
 ## Reconcile usage history
 
 The menu app previews and imports only the default Codex home at `~/.codex`.

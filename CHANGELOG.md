@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-09-22
+
+### Fixed
+
+- Preserve each OpenAI account's newest successfully used Codex catalog
+  version across router restarts. Background and dashboard refreshes reuse
+  that version instead of requesting catalogs as `0.0.0`, and older devices
+  cannot downgrade it and remove newer models from routing and pickers.
+- Serialize catalog refreshes per account so an older in-flight response
+  cannot overwrite a catalog fetched for a newer Codex version.
+- Discover models after a Codex upgrade during normal helper synchronization,
+  without requiring a manual catalog refresh. Repeated syncs reuse the stored
+  catalog until a newer client version is detected.
+- Preserve the working catalog when an automatic upgrade check fails, and
+  retry on the next sync. Refreshes without a known client version retain
+  the cached catalog until a helper supplies one.
+
+Update the router server to apply these fixes. The existing macOS companion
+can supply the detected Codex version on its next catalog sync; no companion
+update is required. Restart Codex after the helper reports a changed catalog.
+Successful upstream refreshes can still remove models OpenAI no longer lists.
+
 ## [1.6.0] - 2026-09-19
 
 ### Added
@@ -167,7 +189,8 @@ rebuilt for this release, but updating the companion alone does not fix HTTP 413
   timezone and daylight-saving changes. Show overlapping daily-only history as
   unavailable for rolling totals instead of presenting incomplete counts.
 
-[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.6.1...HEAD
+[1.6.1]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.4.2...v1.5.0
 [1.4.2]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.4.1...v1.4.2
