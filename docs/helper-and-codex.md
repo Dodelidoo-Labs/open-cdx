@@ -71,9 +71,11 @@ Codex must restart after a catalog file changes. The menu app and catalog endpoi
 
 The helper checks the router catalog every minute. After a Codex upgrade, that sync refreshes each active account's native catalog using the newer detected version. The router preserves the newest successfully used discovery version per account across restarts; background and dashboard refreshes reuse it, and older devices cannot lower it. Refreshes for the same account run sequentially so an older response cannot overwrite an upgrade. If no real version is known yet, refreshes preserve the cached catalog until a helper reports one. Successful upstream refreshes can still remove models that OpenAI no longer lists.
 
-## Reconcile usage history
+## Import Codex history
 
-The menu app previews and imports only the default Codex home at `~/.codex`.
+**Import Codex History…** in the menu or Settings previews and imports only the
+default Codex home at `~/.codex`. Claude Code usage has its own
+**Import Claude Code History…** in Settings; see [Claude Code](claude-code.md).
 Before replacement it shows the resolved directory plus scanned-file and
 routed/native request counts. It never discovers or combines other Codex homes.
 
@@ -125,7 +127,9 @@ router-helper reset-telemetry
 ```
 
 This removes only aggregate telemetry and reconciliation metadata from the
-router. It leaves providers, devices, accounts, and all `~/.codex` files intact.
+router. It leaves providers, devices, accounts, and all `~/.codex` and
+`~/.claude` files intact. Claude Code usage keeps its own request-level
+deduplication; Codex reconciliation never replaces it.
 
 ## Useful commands
 
@@ -137,14 +141,16 @@ router. It leaves providers, devices, accounts, and all `~/.codex` files intact.
 | `router-helper refresh-quotas` | Refresh account quotas |
 | `router-helper reconnect` | Recheck remote connectivity |
 | `router-helper reconcile-usage [--codex-home PATH] [--dry-run]` | Preview or replace this machine’s telemetry from one Codex history root |
-| `router-helper reset-telemetry` | Reset router telemetry without changing local Codex history or router configuration |
+| `router-helper reset-telemetry` | Reset router telemetry without changing local Codex or Claude Code history or router configuration |
+| `router-helper claude-setup [--remove] [--apply]` | Preview or change the Claude Code settings entries; see [Claude Code](claude-code.md) |
+| `router-helper claude-import [--dry-run]` | Import Claude Code usage from local transcripts; see [Claude Code](claude-code.md) |
 | `router-helper open-dashboard` | Open the configured dashboard |
 | `router-helper quit` | Stop the user helper daemon |
 | `router-helper config` | Print, but never install, the Codex TOML snippet |
 
 ## Uninstall
 
-`scripts/uninstall-macos-app.sh` stops the helper, removes its three Keychain entries, and moves the app and its application-support folder to Trash. It deliberately does not read or change `~/.codex`, the Codex executable, or native Codex authentication. Remove the manually pasted provider snippet yourself if desired.
+`scripts/uninstall-macos-app.sh` stops the helper, removes its three Keychain entries, and moves the app and its application-support folder to Trash. It deliberately does not read or change `~/.codex`, the Codex executable, or native Codex authentication. If Claude Code is connected, it first removes the OpenCDX entries from `~/.claude/settings.json` and restores the original status line. Remove the manually pasted provider snippet yourself if desired.
 
 ### Request timestamps and time ranges
 

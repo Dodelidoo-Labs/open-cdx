@@ -16,6 +16,7 @@ type AllowancePoint struct {
 
 type AllowanceSeries struct {
 	AccountID     string           `json:"account_id"`
+	Provider      string           `json:"provider"`
 	Label         string           `json:"label"`
 	WindowSeconds int64            `json:"window_seconds"`
 	WindowLabel   string           `json:"window_label"`
@@ -36,7 +37,7 @@ func BuildAllowanceHistory(observations []storage.AllowanceObservation, now time
 		}
 		k := key{o.AccountID, int64(o.WindowDuration() / time.Second)}
 		if streams[k] == nil {
-			streams[k] = &AllowanceSeries{AccountID: o.AccountID, Label: o.Label, WindowSeconds: k.seconds, WindowLabel: (openai.QuotaWindow{Duration: o.WindowDuration()}).Label(), Points: make([]AllowancePoint, 0)}
+			streams[k] = &AllowanceSeries{AccountID: o.AccountID, Provider: o.Provider, Label: o.Label, WindowSeconds: k.seconds, WindowLabel: (openai.QuotaWindow{Duration: o.WindowDuration()}).Label(), Points: make([]AllowancePoint, 0)}
 		}
 		streams[k].Points = append(streams[k].Points, AllowancePoint{At: o.ObservedAt, ResetAt: o.ResetAt, Remaining: 100 - o.Used})
 	}

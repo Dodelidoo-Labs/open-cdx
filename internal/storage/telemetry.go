@@ -28,8 +28,8 @@ func (store *Store) TelemetryRevision() (string, uint64) {
 	return store.telemetrySeed, store.telemetryRevision.Load()
 }
 
-// ResetTelemetry transactionally removes only aggregate usage and its
-// reconciliation metadata. Provider, device, account, catalog, and routing
+// ResetTelemetry transactionally removes only aggregate usage, allowance
+// history, and their reconciliation metadata. Provider, device, account, catalog, and routing
 // state are deliberately outside this transaction.
 func (store *Store) ResetTelemetry(ctx context.Context) error {
 	transaction, err := store.db.BeginTx(ctx, nil)
@@ -46,6 +46,11 @@ func (store *Store) ResetTelemetry(ctx context.Context) error {
 	if _, err = transaction.ExecContext(ctx, `DELETE FROM usage_reconciliation`); err != nil {
 		return err
 	}
+	// Forget imported Claude request identities too, so the same transcripts
+	// can rebuild the cleared history.
+	if _, err = transaction.ExecContext(ctx, `DELETE FROM claude_request_keys`); err != nil {
+		return err
+	}
 	if err = transaction.Commit(); err != nil {
 		return err
 	}
@@ -54,7 +59,8 @@ func (store *Store) ResetTelemetry(ctx context.Context) error {
 }
 
 // ReplaceUsage transactionally replaces only the authenticated device's
-// telemetry with a local history snapshot. The synthetic account value carries no local or remote identity.
+// Codex telemetry with a local history snapshot. Claude Code usage has its
+// own per-request deduplication and is never replaced by a Codex import. The synthetic account value carries no local or remote identity.
 // Requests recorded by the proxy after this transaction commits continue to
 // accumulate normally.
 func (store *Store) ReplaceUsage(ctx context.Context, deviceID string, usage []UsageAggregate, reconciliation UsageReconciliation, observations ...[]AllowanceObservation) error {
@@ -63,7 +69,7 @@ func (store *Store) ReplaceUsage(ctx context.Context, deviceID string, usage []U
 		return err
 	}
 	defer transaction.Rollback()
-	if _, err = transaction.ExecContext(ctx, `DELETE FROM usage_aggregate WHERE device_id=?`, deviceID); err != nil {
+	if _, err = transaction.ExecContext(ctx, `DELETE FROM usage_aggregate WHERE device_id=? AND provider<>?`, deviceID, ProviderClaudeCode); err != nil {
 		return err
 	}
 	if len(observations) > 0 && observations[0] != nil {

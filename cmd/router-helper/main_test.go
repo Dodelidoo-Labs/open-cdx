@@ -129,7 +129,7 @@ func TestResetTelemetryUsesPairedDeviceWithoutReadingCodexHome(t *testing.T) {
 	if err := resetTelemetryToWithSecrets(configPath, nil, &output, memorySecretStore{"device-token": "device-secret"}); err != nil {
 		t.Fatal(err)
 	}
-	if requests != 1 || !strings.Contains(output.String(), "local Codex history were not changed") {
+	if requests != 1 || !strings.Contains(output.String(), "local Codex and Claude Code history were not changed") {
 		t.Fatalf("reset requests = %d, output = %q", requests, output.String())
 	}
 }

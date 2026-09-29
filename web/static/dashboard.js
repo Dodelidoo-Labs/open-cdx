@@ -508,7 +508,7 @@
   function seriesLabel(key, grouping) {
     if (grouping === "routing") return key === "routed" ? "Routed" : "Native";
     if (grouping === "provider") {
-      return { openai: "OpenAI", openrouter: "OpenRouter", ollama: "Ollama" }[key] || key;
+      return { openai: "OpenAI", openrouter: "OpenRouter", ollama: "Ollama", "claude-code": "Claude Code" }[key] || key;
     }
     return key;
   }

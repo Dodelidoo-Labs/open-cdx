@@ -73,3 +73,39 @@ func TestAllowanceNoInventedResetsOrLegacyTotals(t *testing.T) {
 		t.Fatalf("legacy/dedup/baseline: %#v", got)
 	}
 }
+
+func TestClaudeUsageBelongsOnlyToItsSubscriptionCycles(t *testing.T) {
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	firstReset := now.Add(-3 * 24 * time.Hour)
+	observations := []storage.AllowanceObservation{
+		{Source: "live", Provider: storage.ProviderClaudeCode, AccountID: "claude", Label: "Claude · a", ObservedAt: firstReset.Add(-time.Hour), ResetAt: firstReset, Used: 90, WindowSeconds: 604800},
+		{Source: "live", Provider: storage.ProviderClaudeCode, AccountID: "claude", Label: "Claude · a", ObservedAt: firstReset.Add(time.Hour), ResetAt: firstReset.Add(7 * 24 * time.Hour), Used: 1, WindowSeconds: 604800},
+		{Source: "history", DeviceID: "mac", ObservedAt: firstReset.Add(-time.Hour), ResetAt: firstReset, Used: 50},
+		{Source: "history", DeviceID: "mac", ObservedAt: firstReset.Add(time.Hour), ResetAt: firstReset.Add(7 * 24 * time.Hour), Used: 1},
+	}
+	at := firstReset.Add(2 * time.Hour).Format(time.RFC3339Nano)
+	usage := []storage.UsageAggregate{
+		{RecordedAt: at, DeviceID: "mac", Provider: storage.ProviderClaudeCode, AccountID: "claude", Source: storage.UsageSourceRouted, Requests: 2, InputTokens: 100, OutputTokens: 10},
+		{RecordedAt: at, DeviceID: "mac", Provider: storage.ProviderClaudeCode, Source: storage.UsageSourceReconciled, Requests: 1, InputTokens: 1000},
+	}
+	resets := BuildAllowanceResets(observations, usage, now)
+	if len(resets) != 2 {
+		t.Fatalf("resets = %#v", resets)
+	}
+	for _, reset := range resets {
+		switch reset.Source {
+		case "live":
+			if reset.Provider != storage.ProviderClaudeCode || len(reset.Usage) != 1 || reset.Usage[0].Tokens != 110 || reset.Usage[0].Requests != 2 {
+				t.Fatalf("Claude cycle = %#v", reset)
+			}
+		case "history":
+			if len(reset.Usage) != 0 {
+				t.Fatalf("Claude usage was attributed to Codex history: %#v", reset)
+			}
+		}
+	}
+	history := BuildAllowanceHistory(observations, now)
+	if len(history) != 1 || history[0].Provider != storage.ProviderClaudeCode || history[0].Label != "Claude · a" {
+		t.Fatalf("allowance history = %#v", history)
+	}
+}

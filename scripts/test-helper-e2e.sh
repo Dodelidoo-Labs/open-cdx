@@ -64,6 +64,38 @@ AUTHENTICATED=$(curl --silent --output /dev/null --write-out '%{http_code}' \
   --data '{}' http://127.0.0.1:17464/v1/responses)
 test "$AUTHENTICATED" = "400"
 
+# Claude Code observation: OpenTelemetry request counters and status line allowance.
+NOW=$(date +%s)
+CLAUDE_OTLP=$(printf '{"resourceLogs":[{"scopeLogs":[{"logRecords":[{"attributes":[
+{"key":"event.name","value":{"stringValue":"api_request"}},{"key":"session.id","value":{"stringValue":"e2e-session"}},
+{"key":"user.account_uuid","value":{"stringValue":"e2e-account"}},{"key":"user.email","value":{"stringValue":"probe@example.com"}},
+{"key":"model","value":{"stringValue":"claude-e2e-model"}},{"key":"request_id","value":{"stringValue":"req_e2e_%s"}},
+{"key":"event.timestamp","value":{"stringValue":"%s"}},
+{"key":"input_tokens","value":{"intValue":"3"}},{"key":"output_tokens","value":{"intValue":"2"}},
+{"key":"cache_read_tokens","value":{"intValue":"100"}},{"key":"cache_creation_tokens","value":{"intValue":"10"}}]}]}]}]}' "$NOW" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+OTLP_WITH_LOCAL=$(curl --silent --output /dev/null --write-out '%{http_code}' -H @"$TASK_TEMP/auth-header" \
+  -H 'Content-Type: application/json' --data "$CLAUDE_OTLP" http://127.0.0.1:17464/claude/otlp/v1/logs)
+test "$OTLP_WITH_LOCAL" = "401"
+"$HELPER_BINARY" --config "$TASK_TEMP/helper.json" claude-otel-headers |
+  python3 -c 'import json,sys; print("Authorization: " + json.load(sys.stdin)["Authorization"])' > "$TASK_TEMP/otlp-header"
+chmod 600 "$TASK_TEMP/otlp-header"
+OTLP_ACCEPTED=$(curl --silent --output /dev/null --write-out '%{http_code}' -H @"$TASK_TEMP/otlp-header" \
+  -H 'Content-Type: application/json' --data "$CLAUDE_OTLP" http://127.0.0.1:17464/claude/otlp/v1/logs)
+test "$OTLP_ACCEPTED" = "200"
+printf '{"session_id":"e2e-session","cwd":"/private","rate_limits":{"five_hour":{"used_percentage":12,"resets_at":%s},"seven_day":{"used_percentage":40,"resets_at":%s}}}' \
+  "$((NOW + 3600))" "$((NOW + 432000))" | "$HELPER_BINARY" --config "$TASK_TEMP/helper.json" claude-statusline
+attempt=0
+until curl --fail --silent -b "$TASK_TEMP/cookies" "$ROUTER_URL/admin/telemetry" |
+  python3 -c 'import json,sys; r=json.load(sys.stdin); assert any(p["provider"]=="claude-code" and p["input_tokens"]==113 for p in r["usage"]); assert {s["window_seconds"] for s in r["allowance_history"] if s["provider"]=="claude-code" and s["label"]=="Claude · p***e@e***.com"}=={18000,604800}' 2>/dev/null; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 40 ]; then
+    echo "Claude Code telemetry did not reach the router" >&2
+    "$HELPER_BINARY" --config "$TASK_TEMP/helper.json" status | python3 -c 'import json,sys; s=json.load(sys.stdin); print(json.dumps({"claude_code": s.get("claude_code"), "claude_accounts": s.get("claude_accounts")}))' >&2 || true
+    exit 1
+  fi
+  sleep 0.5
+done
+
 curl --fail --silent --show-error -b "$TASK_TEMP/cookies" -o /dev/null \
   --data-urlencode "csrf=$CSRF" "$ROUTER_URL/admin/devices/$DEVICE_ID/revoke"
 REVOKED=$(curl --silent --output /dev/null --write-out '%{http_code}' \
@@ -74,4 +106,4 @@ test "$REVOKED" = "401"
 "$HELPER_BINARY" --config "$TASK_TEMP/helper.json" quit >/dev/null
 wait "$HELPER_PID"
 HELPER_PID=""
-echo "Helper end-to-end passed: local-auth=401 paired-route=400 removed-route=401."
+echo "Helper end-to-end passed: local-auth=401 paired-route=400 claude-telemetry=stored removed-route=401."

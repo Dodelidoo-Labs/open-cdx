@@ -162,6 +162,7 @@ func (server *Server) routes() http.Handler {
 	mux.Handle("POST /api/v1/quotas/refresh", server.device(http.HandlerFunc(server.refreshQuotas)))
 	mux.Handle("POST /api/v1/telemetry/reconcile", server.device(http.HandlerFunc(server.reconcileUsage)))
 	mux.Handle("POST /api/v1/telemetry/reset", server.device(http.HandlerFunc(server.resetTelemetry)))
+	mux.Handle("POST /api/v1/claude/telemetry", server.device(http.HandlerFunc(server.claudeTelemetry)))
 	mux.Handle("POST /v1/responses", server.device(http.HandlerFunc(server.responses)))
 	mux.Handle("POST /v1/responses/compact", server.device(http.HandlerFunc(server.responses)))
 	mux.HandleFunc("GET /admin/login", server.loginPage)
@@ -311,7 +312,9 @@ func (server *Server) deviceStatus(writer http.ResponseWriter, request *http.Req
 	status := server.status.Get(device.ID)
 	accounts, _ := server.safeAccounts(request.Context())
 	providers, _ := server.store.Providers(request.Context())
-	writeJSON(writer, http.StatusOK, map[string]any{"device": device, "route": status, "accounts": accounts, "providers": providers})
+	claudeAccounts, _ := server.store.ClaudeAccounts(request.Context())
+	writeJSON(writer, http.StatusOK, map[string]any{"device": device, "route": status, "accounts": accounts, "providers": providers,
+		"claude_accounts": claudeAccountViews(claudeAccounts, time.Now().UTC())})
 }
 
 func (server *Server) oauthStart(writer http.ResponseWriter, request *http.Request) {
@@ -484,7 +487,7 @@ func validatedHistorySnapshot(snapshot usagehistory.Snapshot, now time.Time) ([]
 		if err != nil || day.Format("2006-01-02") != row.Day || day.After(now.Add(24*time.Hour)) {
 			return nil, errors.New("usage history contains an invalid date")
 		}
-		if provider == "" || len(provider) > 100 || model == "" || len(model) > 512 || strings.ContainsAny(provider+model, "\x00\r\n") {
+		if provider == "" || len(provider) > 100 || model == "" || len(model) > 512 || strings.ContainsAny(provider+model, "\x00\r\n") || provider == storage.ProviderClaudeCode {
 			return nil, errors.New("usage history contains an invalid provider or model")
 		}
 		if routing != usagehistory.RoutingRouted && routing != usagehistory.RoutingNative {
@@ -926,7 +929,7 @@ func (server *Server) adminAccountsLive(writer http.ResponseWriter, request *htt
 
 func (server *Server) adminResetTelemetry(writer http.ResponseWriter, request *http.Request) {
 	err := server.store.ResetTelemetry(request.Context())
-	message := "Telemetry reset; providers, devices, accounts, and local Codex history were not changed"
+	message := "Telemetry reset; providers, devices, accounts, and local Codex and Claude Code history were not changed"
 	if err != nil {
 		message = "Telemetry could not be reset"
 	}

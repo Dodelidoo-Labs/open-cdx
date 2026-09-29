@@ -16,6 +16,7 @@ type AllowanceCycleUsage struct {
 
 type AllowanceReset struct {
 	Source            string                `json:"source"`
+	Provider          string                `json:"provider,omitempty"`
 	AccountID         string                `json:"account_id,omitempty"`
 	DeviceID          string                `json:"device_id,omitempty"`
 	Label             string                `json:"label"`
@@ -75,7 +76,7 @@ func BuildAllowanceResets(observations []storage.AllowanceObservation, usage []s
 				if scheduled {
 					at = previous.ResetAt
 				}
-				markers[key] = append(markers[key], AllowanceReset{Source: key.source, AccountID: key.account, DeviceID: key.device, Label: row.Label, At: at, After: previous.ObservedAt, ObservedAt: row.ObservedAt, Scheduled: scheduled, ObservedRemaining: 100 - row.Used, Usage: make([]AllowanceCycleUsage, 0)})
+				markers[key] = append(markers[key], AllowanceReset{Source: key.source, Provider: row.Provider, AccountID: key.account, DeviceID: key.device, Label: row.Label, At: at, After: previous.ObservedAt, ObservedAt: row.ObservedAt, Scheduled: scheduled, ObservedRemaining: 100 - row.Used, Usage: make([]AllowanceCycleUsage, 0)})
 			}
 			previous = row
 		}
@@ -94,12 +95,21 @@ func BuildAllowanceResets(observations []storage.AllowanceObservation, usage []s
 		}
 	}
 	for _, u := range usage {
-		if u.Provider != "openai" {
+		var keys []allowanceStream
+		switch u.Provider {
+		case "openai":
+			keys = []allowanceStream{{"history", "", u.DeviceID}}
+			if u.Source == storage.UsageSourceRouted {
+				keys = append(keys, allowanceStream{"live", u.AccountID, ""})
+			}
+		case storage.ProviderClaudeCode:
+			// Claude Code usage belongs only to its own subscription's cycles,
+			// never to Codex history observed on the same machine.
+			if u.AccountID != "" {
+				keys = []allowanceStream{{"live", u.AccountID, ""}}
+			}
+		default:
 			continue
-		}
-		keys := []allowanceStream{{"history", "", u.DeviceID}}
-		if u.Source == storage.UsageSourceRouted {
-			keys = append(keys, allowanceStream{"live", u.AccountID, ""})
 		}
 		at, err := time.Parse(time.RFC3339Nano, u.RecordedAt)
 		for _, key := range keys {

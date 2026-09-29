@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Dodelidoo-Labs/open-cdx/internal/claudecode"
 	secure "github.com/Dodelidoo-Labs/open-cdx/internal/crypto"
 	"github.com/Dodelidoo-Labs/open-cdx/internal/helper"
 	"github.com/Dodelidoo-Labs/open-cdx/internal/usagehistory"
@@ -67,6 +68,14 @@ func run(args []string) error {
 		return resetTelemetry(configPath, commandArgs)
 	case "quit":
 		return control(configPath, http.MethodPost, "/control/quit", commandArgs, io.Discard)
+	case claudecode.StatusLineSubcommand:
+		return claudeStatusLine(configPath, commandArgs)
+	case claudecode.HeadersSubcommand:
+		return claudeOTelHeaders(configPath, commandArgs)
+	case "claude-setup":
+		return claudeSetup(configPath, commandArgs)
+	case "claude-import":
+		return claudeImport(configPath, commandArgs)
 	case "login-openai":
 		return loginOpenAI(configPath, commandArgs)
 	case "sync-catalog":
@@ -377,7 +386,7 @@ func reconcileUsageToWithSecrets(configPath string, args []string, output io.Wri
 		fmt.Fprintln(output, string(encoded))
 		return nil
 	}
-	fmt.Fprintf(output, "Usage history reconciled: %s. Prompts and responses were not imported.", snapshot.Summary())
+	fmt.Fprintf(output, "Codex history imported: %s. Prompts and responses were not imported.", snapshot.Summary())
 	if snapshot.DuplicateEvents > 0 || snapshot.MalformedLines > 0 {
 		fmt.Fprintf(output, " Skipped %d copied events and %d malformed records.", snapshot.DuplicateEvents, snapshot.MalformedLines)
 	}
@@ -402,7 +411,7 @@ func resetTelemetryToWithSecrets(configPath string, args []string, output io.Wri
 	if _, err = client.JSON(context.Background(), http.MethodPost, "/api/v1/telemetry/reset", nil, nil, true); err != nil {
 		return err
 	}
-	fmt.Fprintln(output, "Telemetry reset. Providers, devices, accounts, and local Codex history were not changed.")
+	fmt.Fprintln(output, "Telemetry reset. Providers, devices, accounts, and local Codex and Claude Code history were not changed.")
 	return nil
 }
 
@@ -502,5 +511,5 @@ func defaultDeviceName() string {
 }
 
 func usageError() error {
-	return errors.New("usage: router-helper [--config PATH] <enroll|pair|daemon|token|status|login-openai|sync-catalog|refresh-catalog|acknowledge-restart|refresh-quotas|consume-reset|reconcile-usage|reset-telemetry|reconnect|config|open-dashboard|quit|version>")
+	return errors.New("usage: router-helper [--config PATH] <enroll|pair|daemon|token|status|login-openai|sync-catalog|refresh-catalog|acknowledge-restart|refresh-quotas|consume-reset|reconcile-usage|reset-telemetry|claude-setup|claude-import|claude-statusline|claude-otel-headers|reconnect|config|open-dashboard|quit|version>")
 }

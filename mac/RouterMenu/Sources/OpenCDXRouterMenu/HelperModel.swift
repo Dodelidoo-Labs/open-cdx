@@ -85,6 +85,9 @@ struct AccountAllowanceStatus: Codable {
     var quotaResetAt: Date?
     var quotaWindows: [AccountQuotaWindowStatus] = []
     var resetCredits = 0
+    /// Set for observed Claude subscriptions, whose readings arrive only while
+    /// Claude Code is in use.
+    var observedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id, plan, status, paused, primary
@@ -94,6 +97,7 @@ struct AccountAllowanceStatus: Codable {
         case quotaResetAt = "quota_reset_at"
         case quotaWindows = "quota_windows"
         case resetCredits = "reset_credits"
+        case observedAt = "observed_at"
     }
 
     init() {}
@@ -111,6 +115,38 @@ struct AccountAllowanceStatus: Codable {
         quotaResetAt = try container.decodeIfPresent(Date.self, forKey: .quotaResetAt)
         quotaWindows = try container.decodeIfPresent([AccountQuotaWindowStatus].self, forKey: .quotaWindows) ?? []
         resetCredits = try container.decodeIfPresent(Int.self, forKey: .resetCredits) ?? 0
+        observedAt = try container.decodeIfPresent(Date.self, forKey: .observedAt)
+    }
+}
+
+struct ClaudeCodeReportingStatus: Codable {
+    var lastTelemetryAt: Date?
+    var lastStatusLineAt: Date?
+    var lastUploadAt: Date?
+    var pendingRequests = 0
+    var lastError = ""
+
+    enum CodingKeys: String, CodingKey {
+        case lastTelemetryAt = "last_telemetry_at"
+        case lastStatusLineAt = "last_status_line_at"
+        case lastUploadAt = "last_upload_at"
+        case pendingRequests = "pending_requests"
+        case lastError = "last_error"
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        lastTelemetryAt = try container.decodeIfPresent(Date.self, forKey: .lastTelemetryAt)
+        lastStatusLineAt = try container.decodeIfPresent(Date.self, forKey: .lastStatusLineAt)
+        lastUploadAt = try container.decodeIfPresent(Date.self, forKey: .lastUploadAt)
+        pendingRequests = try container.decodeIfPresent(Int.self, forKey: .pendingRequests) ?? 0
+        lastError = try container.decodeIfPresent(String.self, forKey: .lastError) ?? ""
+    }
+
+    var lastActivityAt: Date? {
+        [lastTelemetryAt, lastStatusLineAt].compactMap { $0 }.max()
     }
 }
 
@@ -133,9 +169,13 @@ struct HelperStatus: Codable {
     var catalogChanged: Bool?
     var lastRequestAt: Date?
     var lastError = ""
+    var claudeAccounts: [AccountAllowanceStatus] = []
+    var claudeCode = ClaudeCodeReportingStatus()
 
     enum CodingKeys: String, CodingKey {
         case state, connected, accounts, provider, model, account
+        case claudeAccounts = "claude_accounts"
+        case claudeCode = "claude_code"
         case activeRequests = "active_requests"
         case enrollmentRequired = "enrollment_required"
         case routerURL = "router_url"
@@ -172,6 +212,8 @@ struct HelperStatus: Codable {
         catalogChanged = try container.decodeIfPresent(Bool.self, forKey: .catalogChanged)
         lastRequestAt = try container.decodeIfPresent(Date.self, forKey: .lastRequestAt)
         lastError = try container.decodeIfPresent(String.self, forKey: .lastError) ?? ""
+        claudeAccounts = try container.decodeIfPresent([AccountAllowanceStatus].self, forKey: .claudeAccounts) ?? []
+        claudeCode = try container.decodeIfPresent(ClaudeCodeReportingStatus.self, forKey: .claudeCode) ?? ClaudeCodeReportingStatus()
     }
 }
 
@@ -265,6 +307,99 @@ func usageHistoryPreviewMessage(_ preview: UsageHistoryPreview, codexHome: Strin
     return message
 }
 
+struct ClaudeSetupPreview: Decodable, Equatable {
+    var settingsPath = ""
+    var action = "install"
+    var installed = false
+    var alreadyApplied = false
+    var changes: [String] = []
+    var conflicts: [String] = []
+    var wrapsStatusLine = ""
+    var restartReminder = ""
+
+    enum CodingKeys: String, CodingKey {
+        case action, installed, changes, conflicts
+        case settingsPath = "settings_path"
+        case alreadyApplied = "already_applied"
+        case wrapsStatusLine = "wraps_status_line"
+        case restartReminder = "restart_reminder"
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        settingsPath = try container.decodeIfPresent(String.self, forKey: .settingsPath) ?? ""
+        action = try container.decodeIfPresent(String.self, forKey: .action) ?? "install"
+        installed = try container.decodeIfPresent(Bool.self, forKey: .installed) ?? false
+        alreadyApplied = try container.decodeIfPresent(Bool.self, forKey: .alreadyApplied) ?? false
+        changes = try container.decodeIfPresent([String].self, forKey: .changes) ?? []
+        conflicts = try container.decodeIfPresent([String].self, forKey: .conflicts) ?? []
+        wrapsStatusLine = try container.decodeIfPresent(String.self, forKey: .wrapsStatusLine) ?? ""
+        restartReminder = try container.decodeIfPresent(String.self, forKey: .restartReminder) ?? ""
+    }
+}
+
+struct ClaudeHistoryPreview: Decodable, Equatable {
+    let home: String
+    let filesScanned: Int
+    let requests: Int
+    let models: Int
+    let inputTokens: Int64
+    let outputTokens: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case home, requests, models
+        case filesScanned = "files_scanned"
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+    }
+}
+
+enum ClaudeCodeReporting: Equatable {
+    case notConnected, waiting, reporting, uploadPending
+
+    var label: String {
+        switch self {
+        case .notConnected: return "Not Connected"
+        case .waiting: return "Waiting for Usage"
+        case .reporting: return "Reporting"
+        case .uploadPending: return "Upload Pending"
+        }
+    }
+}
+
+/// Claude Code reports only while a session is active, so a quiet period is
+/// normal and is not treated as an error.
+func claudeCodeReporting(installed: Bool, status: HelperStatus, now: Date = Date()) -> ClaudeCodeReporting {
+    guard installed else { return .notConnected }
+    if !status.claudeCode.lastError.isEmpty && status.claudeCode.pendingRequests > 0 { return .uploadPending }
+    if let last = status.claudeCode.lastActivityAt, now.timeIntervalSince(last) < 15 * 60 { return .reporting }
+    return .waiting
+}
+
+func claudeSetupConfirmationMessage(_ preview: ClaudeSetupPreview) -> String {
+    var message = "Settings file: \(preview.settingsPath)\n\n" + preview.changes.map { "• \($0)" }.joined(separator: "\n")
+    if preview.action == "install" {
+        if !preview.wrapsStatusLine.isEmpty {
+            message += "\n\nYour current status line keeps showing exactly as before."
+        }
+        message += "\n\nOpenCDX receives only model IDs, request IDs, token counts, and plan allowance percentages. Prompts, responses, file paths, and Claude credentials are never read or sent. The previous file is kept next to it as settings.json.opencdx-backup."
+        if !preview.restartReminder.isEmpty { message += "\n\n" + preview.restartReminder }
+    }
+    return message
+}
+
+func claudeHistoryPreviewMessage(_ preview: ClaudeHistoryPreview) -> String {
+    """
+    Source: \(preview.home)
+
+    Found \(preview.requests.formatted()) Claude Code requests across \(preview.models.formatted()) models in \(preview.filesScanned.formatted()) transcript files.
+
+    Only request IDs, timestamps, model IDs, and token counts will be sent. Requests the server already recorded are skipped, so importing again never double-counts. Prompts, responses, paths, and credentials are never imported.
+    """
+}
+
 @MainActor
 final class HelperModel: ObservableObject {
     @Published var status = HelperStatus()
@@ -282,6 +417,8 @@ final class HelperModel: ObservableObject {
     @Published private(set) var enrollmentInProgress = false
     @Published private(set) var configuredRouterURL = ""
     @Published private(set) var configuredDeviceID = ""
+    @Published private(set) var claudeSetup: ClaudeSetupPreview?
+    @Published private(set) var claudeOperationInProgress = false
 
     private var timer: AnyCancellable?
     private var activityTimer: AnyCancellable?
@@ -295,11 +432,16 @@ final class HelperModel: ObservableObject {
     private var operationGeneration: UInt = 0
     private var resetStatusGeneration: UInt = 0
     private let historyImportDecisionKey = "usageHistoryImportDecisionMade"
+    private var claudeSetupCheckedAt = Date.distantPast
 
     private static let confirmationDuration: TimeInterval = 7
     private static let errorDuration: TimeInterval = 12
 
     var inferenceActive: Bool { status.activeRequests > 0 }
+
+    var claudeReporting: ClaudeCodeReporting {
+        claudeCodeReporting(installed: claudeSetup?.installed ?? false, status: status)
+    }
 
     var routerStatusLabel: String {
         if !configured { return "Setup Required" }
@@ -318,6 +460,7 @@ final class HelperModel: ObservableObject {
             status.lastError = ""
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
                 self?.refreshStatus()
+                self?.refreshClaudeSetup()
             }
         } else {
             markSetupRequired()
@@ -531,7 +674,7 @@ final class HelperModel: ObservableObject {
         }
         let alert = NSAlert()
         alert.messageText = "Delete history for every machine on this server?"
-        alert.informativeText = "Server: \(status.routerURL)\n\nThis permanently deletes request, token, and allowance history for ALL machines on this server, including imported history. It cannot be undone.\n\nLocal Codex files, enrollments, accounts, and providers are preserved. To rebuild history, reconcile each machine separately. Do not delete server history between imports."
+        alert.informativeText = "Server: \(status.routerURL)\n\nThis permanently deletes request, token, and allowance history for ALL machines on this server, including imported history. It cannot be undone.\n\nLocal Codex and Claude Code files, enrollments, accounts, and providers are preserved. To rebuild history, reconcile each machine separately. Do not delete server history between imports."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Delete All Server History")
@@ -547,7 +690,7 @@ final class HelperModel: ObservableObject {
             guard let self else { return }
             self.telemetryResetInProgress = false
             if result.success {
-                self.setConfirmationOperation("History deleted for all machines on the server. Local Codex history was not changed.")
+                self.setConfirmationOperation("History deleted for all machines on the server. Local Codex and Claude Code history was not changed.")
             } else {
                 self.setErrorOperation(result.error)
             }
@@ -560,6 +703,131 @@ final class HelperModel: ObservableObject {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(result.output, forType: .string)
             self?.setConfirmationOperation("Codex configuration copied. Paste it into config.toml manually.")
+        }
+    }
+
+    func refreshClaudeSetup() {
+        guard configured else { return }
+        claudeSetupCheckedAt = Date()
+        runHelper(["claude-setup", "--preview-json"], timeout: 15) { [weak self] result in
+            guard let self, result.success, let data = result.output.data(using: .utf8),
+                  let preview = try? JSONDecoder().decode(ClaudeSetupPreview.self, from: data) else { return }
+            self.claudeSetup = preview
+        }
+    }
+
+    func connectClaudeCode() {
+        changeClaudeSetup(remove: false)
+    }
+
+    func disconnectClaudeCode() {
+        changeClaudeSetup(remove: true)
+    }
+
+    private func changeClaudeSetup(remove: Bool) {
+        guard configured, !claudeOperationInProgress else { return }
+        claudeOperationInProgress = true
+        setOperation("Checking Claude Code settings…")
+        let action = remove ? ["claude-setup", "--remove"] : ["claude-setup"]
+        runHelper(action + ["--preview-json"], timeout: 15) { [weak self] result in
+            guard let self else { return }
+            guard result.success, let data = result.output.data(using: .utf8),
+                  let preview = try? JSONDecoder().decode(ClaudeSetupPreview.self, from: data) else {
+                self.claudeOperationInProgress = false
+                self.setErrorOperation(result.success ? "Helper returned an unreadable Claude Code settings preview." : result.error)
+                return
+            }
+            if !preview.conflicts.isEmpty {
+                self.claudeOperationInProgress = false
+                let alert = NSAlert()
+                alert.messageText = "Claude Code already exports telemetry"
+                alert.informativeText = "Settings file: \(preview.settingsPath)\n\n" + preview.conflicts.map { "• \($0)" }.joined(separator: "\n") + "\n\nOpenCDX will not replace telemetry settings you configured yourself. Remove those entries first, then connect again."
+                alert.alertStyle = .warning
+                alert.runModal()
+                self.setOperation("")
+                return
+            }
+            if preview.alreadyApplied {
+                self.claudeOperationInProgress = false
+                self.claudeSetup = remove ? nil : preview
+                self.setConfirmationOperation(remove ? "Claude Code is not connected." : "Claude Code is already connected.")
+                self.refreshClaudeSetup()
+                return
+            }
+            let alert = NSAlert()
+            alert.messageText = remove ? "Disconnect Claude Code from OpenCDX?" : "Connect Claude Code to OpenCDX?"
+            alert.informativeText = claudeSetupConfirmationMessage(preview)
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: remove ? "Disconnect" : "Connect")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                self.claudeOperationInProgress = false
+                self.setConfirmationOperation("Claude Code settings were not changed.")
+                return
+            }
+            self.runHelper(action + ["--apply", "--preview-json"], timeout: 15) { [weak self] result in
+                guard let self else { return }
+                self.claudeOperationInProgress = false
+                guard result.success else {
+                    self.setErrorOperation(result.error)
+                    return
+                }
+                self.refreshClaudeSetup()
+                if remove {
+                    self.setConfirmationOperation("Claude Code disconnected. Its original status line was restored.")
+                } else {
+                    self.setConfirmationOperation("Claude Code connected. Start a new Claude Code session to begin reporting.")
+                    self.offerClaudeHistoryImport()
+                }
+            }
+        }
+    }
+
+    private func offerClaudeHistoryImport() {
+        let alert = NSAlert()
+        alert.messageText = "Import existing Claude Code usage?"
+        alert.informativeText = "OpenCDX can add token usage from local Claude Code transcripts. You will see the request count before anything is sent."
+        alert.addButton(withTitle: "Review Import")
+        alert.addButton(withTitle: "Not Now")
+        if alert.runModal() == .alertFirstButtonReturn { importClaudeHistory() }
+    }
+
+    func importClaudeHistory() {
+        guard status.connected, !claudeOperationInProgress else {
+            setErrorOperation("Connect and approve this Mac before importing Claude Code usage.")
+            return
+        }
+        claudeOperationInProgress = true
+        setOperation("Scanning Claude Code transcripts…")
+        runHelper(["claude-import", "--preview-json"], timeout: 10 * 60) { [weak self] result in
+            guard let self else { return }
+            guard result.success, let data = result.output.data(using: .utf8),
+                  let preview = try? JSONDecoder().decode(ClaudeHistoryPreview.self, from: data) else {
+                self.claudeOperationInProgress = false
+                self.setErrorOperation(result.success ? "Helper returned an unreadable Claude Code history preview." : result.error)
+                return
+            }
+            let alert = NSAlert()
+            alert.messageText = "Import Claude Code usage?"
+            alert.informativeText = claudeHistoryPreviewMessage(preview)
+            alert.addButton(withTitle: "Import")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                self.claudeOperationInProgress = false
+                self.setConfirmationOperation("Claude Code usage was not imported.")
+                return
+            }
+            self.setOperation("Importing Claude Code usage…")
+            self.runHelper(["claude-import", "--claude-home", preview.home], timeout: 10 * 60) { [weak self] result in
+                guard let self else { return }
+                self.claudeOperationInProgress = false
+                if result.success {
+                    let summary = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                    self.setConfirmationOperation(summary.isEmpty ? "Claude Code usage imported." : summary)
+                } else {
+                    self.setErrorOperation(result.error)
+                }
+            }
         }
     }
 
@@ -679,6 +947,10 @@ final class HelperModel: ObservableObject {
             startDaemon()
         }
         refreshStatus()
+        // Claude Code settings can change outside the app; recheck occasionally.
+        if !claudeOperationInProgress && Date().timeIntervalSince(claudeSetupCheckedAt) > 60 {
+            refreshClaudeSetup()
+        }
     }
 
     private func restartDaemon() {
@@ -765,7 +1037,7 @@ final class HelperModel: ObservableObject {
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else {
                 self.usageReconciliationInProgress = false
-                self.setConfirmationOperation("Usage history was not changed.")
+                self.setConfirmationOperation("Codex history was not imported.")
                 return
             }
             self.reconcileUsageHistory(codexHome: codexHome)
@@ -773,13 +1045,13 @@ final class HelperModel: ObservableObject {
     }
 
     private func reconcileUsageHistory(codexHome: String) {
-        setOperation("Reconciling usage history from \(codexHome)…")
+        setOperation("Importing Codex history from \(codexHome)…")
         runHelper(usageHistoryHelperArguments(codexHome: codexHome, preview: false), timeout: 10 * 60) { [weak self] result in
             guard let self else { return }
             self.usageReconciliationInProgress = false
             if result.success {
                 let summary = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-                self.setConfirmationOperation(summary.isEmpty ? "Usage history reconciled." : summary)
+                self.setConfirmationOperation(summary.isEmpty ? "Codex history imported." : summary)
             } else {
                 self.setErrorOperation(result.error)
             }
@@ -951,3 +1223,14 @@ private struct HelperHealthStatus: Decodable {
 }
 
 struct CommandResult { let success: Bool; let output: String; let error: String }
+
+/// Claude allowance arrives only while Claude Code runs; show its age.
+func observationAge(since date: Date, now: Date = Date()) -> String {
+    let seconds = max(0, now.timeIntervalSince(date))
+    switch seconds {
+    case ..<60: return "NOW"
+    case ..<3600: return "\(Int(seconds / 60))M AGO"
+    case ..<86400: return "\(Int(seconds / 3600))H AGO"
+    default: return "\(Int(seconds / 86400))D AGO"
+    }
+}

@@ -8,6 +8,7 @@ Start with the main [OpenCDX Router README](../README.md) if you are installing 
 |---|---|
 | [Deployment](deployment.md) | Production Docker installation, HTTPS, backups, upgrades, and environment settings |
 | [Helper and Codex setup](helper-and-codex.md) | Advanced pairing, account login, Codex configuration, usage reconciliation, helper commands, and uninstalling |
+| [Claude Code](claude-code.md) | Claude plan allowance in the menu, Claude Code usage on the dashboard, setup, privacy, and history import |
 | [Client API](client-api.md) | Local Responses endpoint, live model discovery, and command credentials |
 | [Instruction history](instruction-history.md) | Instruction change notifications, historical diffs, and storage scope |
 | [Request logs](request-logs.md) | Per-request diagnostics, privacy, retention, and portable backup/restore |

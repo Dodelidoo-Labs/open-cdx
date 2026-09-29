@@ -127,11 +127,11 @@
         <section class="page-head">
           <div>
             <h1 class="page-title">Telemetry</h1>
-            <p class="page-dek">Routed work and token volume across connected accounts.</p>
+            <p class="page-dek">Routed work, imported history, and observed Claude Code usage across connected accounts.</p>
           </div>
           <div class="page-actions">
             <button class="btn btn-secondary" type="button" data-export-telemetry disabled>Export CSV</button>
-            <form class="inline" method="post" action="/admin/telemetry/reset" data-confirm="Reset all telemetry stored by OpenCDX? Providers, devices, accounts, and files in ~/.codex will not be changed."><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="return_tab" value="home"><button class="btn btn-danger" type="submit">Reset telemetry…</button></form>
+            <form class="inline" method="post" action="/admin/telemetry/reset" data-confirm="Reset all telemetry stored by OpenCDX? Providers, devices, accounts, and files in ~/.codex and ~/.claude will not be changed."><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="return_tab" value="home"><button class="btn btn-danger" type="submit">Reset telemetry…</button></form>
           </div>
         </section>
 

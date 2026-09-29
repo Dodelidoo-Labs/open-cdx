@@ -183,6 +183,22 @@ CREATE TABLE IF NOT EXISTS usage_reconciliation (
     rows_imported INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS claude_accounts (
+    id TEXT PRIMARY KEY,
+    identity_hash TEXT NOT NULL UNIQUE,
+    masked_email TEXT NOT NULL DEFAULT '',
+    windows_json BLOB,
+    observed_at INTEGER NOT NULL DEFAULT 0,
+    last_device_id TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS claude_request_keys (
+    request_hash BLOB PRIMARY KEY,
+    recorded_at TEXT NOT NULL
+) WITHOUT ROWID;
+
 CREATE INDEX IF NOT EXISTS accounts_ready_idx ON accounts(status, paused, quota_used_percent);
 CREATE INDEX IF NOT EXISTS oauth_expiry_idx ON oauth_transactions(expires_at);
 CREATE INDEX IF NOT EXISTS affinities_updated_idx ON affinities(updated_at);

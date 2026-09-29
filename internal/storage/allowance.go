@@ -12,9 +12,11 @@ import (
 // identify an account, never the device consuming its allowance.
 type AllowanceObservation struct {
 	Source, AccountID, DeviceID, Label string
-	ObservedAt, ResetAt                time.Time
-	Used                               float64
-	WindowSeconds                      int64
+	// Provider is "openai" or ProviderClaudeCode for live readings.
+	Provider            string
+	ObservedAt, ResetAt time.Time
+	Used                float64
+	WindowSeconds       int64
 }
 
 // Older observations and imported machine history describe the weekly window.
@@ -57,7 +59,14 @@ func (store *Store) RecordAllowanceObservation(ctx context.Context, o AllowanceO
 }
 
 func (store *Store) AllowanceObservations(ctx context.Context) ([]AllowanceObservation, error) {
-	rows, err := store.db.QueryContext(ctx, `SELECT o.source,o.account_id,o.device_id,o.observed_at,o.reset_at,o.used_percent,o.window_seconds,CASE WHEN o.source='live' THEN COALESCE(a.masked_email,'Removed account') ELSE COALESCE(d.name,'Removed machine') END FROM allowance_observations o LEFT JOIN accounts a ON a.id=o.account_id LEFT JOIN devices d ON d.id=o.device_id`)
+	rows, err := store.db.QueryContext(ctx, `SELECT o.source,o.account_id,o.device_id,o.observed_at,o.reset_at,o.used_percent,o.window_seconds,
+		CASE WHEN o.source<>'live' THEN COALESCE(d.name,'Removed machine')
+			WHEN a.id IS NOT NULL THEN a.masked_email
+			WHEN c.id IS NOT NULL THEN 'Claude · '||CASE WHEN c.masked_email<>'' THEN c.masked_email ELSE 'subscription' END
+			ELSE 'Removed account' END,
+		CASE WHEN c.id IS NOT NULL THEN ? ELSE 'openai' END
+		FROM allowance_observations o LEFT JOIN accounts a ON a.id=o.account_id LEFT JOIN claude_accounts c ON c.id=o.account_id AND o.source='live'
+		LEFT JOIN devices d ON d.id=o.device_id`, ProviderClaudeCode)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +75,7 @@ func (store *Store) AllowanceObservations(ctx context.Context) ([]AllowanceObser
 	for rows.Next() {
 		var o AllowanceObservation
 		var observed, reset string
-		if err = rows.Scan(&o.Source, &o.AccountID, &o.DeviceID, &observed, &reset, &o.Used, &o.WindowSeconds, &o.Label); err != nil {
+		if err = rows.Scan(&o.Source, &o.AccountID, &o.DeviceID, &observed, &reset, &o.Used, &o.WindowSeconds, &o.Label, &o.Provider); err != nil {
 			return nil, err
 		}
 		if o.ObservedAt, err = time.Parse(time.RFC3339Nano, observed); err != nil {

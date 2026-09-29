@@ -25,12 +25,18 @@ sudo ./scripts/test-docker-restart.sh
 ```
 
 The helper smoke test requests enrollment, approves and pairs the device,
-checks loopback command authentication, revokes that device, and verifies the
-same helper can no longer reach the router:
+checks loopback command authentication, sends a Claude Code telemetry batch
+and status line reading and waits for both on the router, revokes that
+device, and verifies the same helper can no longer reach the router:
 
 ```sh
-OPENCODEX_HELPER_BINARY=./dist/router-helper-linux sudo -E ./scripts/test-helper-e2e.sh
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o dist/router-helper-linux ./cmd/router-helper
+multipass transfer dist/router-helper-linux opencdx-docker-test:/home/ubuntu/router-helper-linux
+multipass exec opencdx-docker-test -- sh -lc 'chmod 755 ~/router-helper-linux && cd ~/opencdx && OPENCODEX_HELPER_BINARY=$HOME/router-helper-linux sudo -E sh ./scripts/test-helper-e2e.sh'
 ```
+
+Root cannot execute binaries from the Multipass mount, so copy the helper into
+the VM first. Use `GOARCH=amd64` on an Intel host.
 
 Build the macOS target and app bundle:
 
@@ -55,6 +61,48 @@ the menu height. An SDK 15.5-linked build exercises the defective legacy
 presentation even when running on Tahoe.
 
 The suite covers OAuth state/PKCE, duplicate detection, encrypted persistence, refresh single-flight, native entry preservation, entitlement selection, sticky affinity, quota failover, partial-stream no-retry, headers/auth replacement, capability-driven OpenRouter catalog mapping, account-collapsed token telemetry, Codex-local patch exposure, unsupported/no-op reasoning handling, Ollama hosted-search suppression, atomic catalogs, device lifecycle, error redaction, HTTP policy, and helper local tokens.
+
+## Claude Code observation
+
+Automated coverage includes the OpenTelemetry parser (only `api_request`
+counters survive; prompt and response text, raw emails, and account UUIDs do
+not), status line window parsing, transcript merging across content blocks
+and subagents, settings install/update/removal with order preservation and
+conflict refusal, scoped credentials, helper buffering and retry, router
+validation, cross-source request deduplication, Codex reconciliation
+isolation, allowance throttling, reset-marker attribution, and menu decoding
+and rendering. Setting `OPENCODEX_CLAUDE_FIXTURE_OUTPUT` to a PNG path while
+running the Swift tests writes the rendered Claude allowance rows.
+
+To test against a real Claude Code login without touching the installed app,
+run an isolated router and helper as described in
+[Development](development.md#isolated-helper-tests), then use a separate
+settings file:
+
+1. `router-helper claude-setup --settings /absolute/test/settings.json --apply`,
+   with a copy of the real status line in that file.
+2. Start `claude --settings /absolute/test/settings.json` from a trusted
+   project directory with `OPENCODEX_HELPER_SECRET_FILE` exported, and send
+   one short prompt.
+3. Confirm the original status line still renders, `router-helper status`
+   shows `claude_code.last_telemetry_at`, `last_status_line_at`, and a Claude
+   account with weekly and 5-hour windows, and the router has `claude-code`
+   usage rows.
+4. Run `router-helper claude-import` twice: the first run skips the requests
+   already reported live; the second adds nothing.
+5. `router-helper claude-setup --settings … --remove --apply` restores the file.
+
+Human acceptance on an installed build:
+
+1. Update the router and companion. Choose **Connect Claude Code…**; confirm
+   the preview lists the settings path and changes, then connect.
+2. Start a new Claude Code session with a Pro or Max login. Within about 30
+   seconds of the first response, the menu shows **Claude Code — Reporting**
+   and a subscription row with weekly and 5-hour bars.
+3. On Telemetry, group by provider: **Claude Code** appears. **Show
+   allowances** lists `Claude · <masked email>`.
+4. Import history from Settings; repeat the import and confirm it adds nothing.
+5. Disconnect; confirm `~/.claude/settings.json` matches its original content.
 
 ## Spark allowance in the macOS menu
 
@@ -101,7 +149,7 @@ This checklist requires credentials and deliberate browser choices, so it must b
 9. Copy the generated TOML manually into the isolated Codex config and restart Codex.
 10. Confirm `/model` contains the complete entitled native union, native auto-review/safety entries, and only compatible namespaced OpenRouter entries.
 11. Run one native model and one OpenRouter model.
-12. Choose **Reconcile This Mac’s History…**, confirm the preview names the default `~/.codex` source and shows routed/native counts, then cancel and verify telemetry is unchanged.
+12. Choose **Import Codex History…**, confirm the preview names the default `~/.codex` source and shows routed/native counts, then cancel and verify telemetry is unchanged.
 13. Run a dry run against the isolated Codex home with `router-helper reconcile-usage --codex-home /absolute/test/home --dry-run`; confirm it reports the routed requests, then run the same command without `--dry-run` and verify the dashboard preserves their routed classification.
 14. Configure a LAN Ollama `http://` endpoint with **Allow HTTP** off and confirm it is rejected; enable the option and confirm the connection can be tested. Verify HTTPS and loopback HTTP still work with the option off.
 15. Open **Settings → Delete All Server History…**, confirm the warning identifies every machine and Cancel is the default, then confirm the dashboard returns to zero, then verify accounts, providers, devices, and the isolated `~/.codex` rollout files are unchanged. Confirm a new routed request starts telemetry fresh, or reconcile again.
@@ -118,7 +166,7 @@ Record account labels only as masked values. Never paste tokens, OAuth codes, ra
 These checks require the installed app, a real browser, and normal router activity. They must be performed manually by the operator and are not part of the hermetic automated suite:
 
 1. Leave Telemetry visible and make normal routed calls; confirm data updates within the polling interval.
-2. Reconcile from the macOS app while Telemetry is visible; confirm routed/native results update without reloading.
+2. Choose **Import Codex History…** in the macOS app while Telemetry is visible; confirm routed/native results update without reloading.
 3. Export CSV immediately afterward; confirm it contains the current reconciled data.
 4. Request enrollment from a client while Devices is visible; confirm it appears within a few seconds.
 5. Approve, reject, remove, and delete devices after dynamic list replacement; confirm every form still works.

@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-09-29
+
+### Added
+
+- Show Claude plan allowance and Claude Code usage. **Connect Claude Code…**
+  in the menu or Settings previews, then adds a status line wrapper and a local
+  OpenTelemetry log export to `~/.claude/settings.json`. Your existing status
+  line keeps rendering unchanged, and telemetry settings you configured
+  yourself are never replaced. Disconnecting restores the original entries.
+- Show weekly and 5-hour allowance bars with pace markers for each Claude
+  subscription in the macOS menu, alongside the OpenAI account rows.
+- Include Claude Code requests and tokens in Telemetry under the **Claude
+  Code** provider, add Claude subscriptions to the allowance overlay, and show
+  observed weekly Claude resets with cycle totals.
+- Add **Import Claude Code History…** in Settings and
+  `router-helper claude-import` to import usage from local Claude Code
+  transcripts. Live telemetry and imports share Anthropic request IDs, so
+  repeated imports never double-count.
+
+### Changed
+
+- Rename **Reconcile This Mac’s History…** to **Import Codex History…** so it
+  is clearly separate from **Import Claude Code History…**.
+- Codex history import now replaces only a machine's Codex rows and rejects
+  the reserved `claude-code` provider. Resetting telemetry also clears Claude
+  Code request deduplication, so transcripts can rebuild history.
+- The uninstall script removes the OpenCDX entries from
+  `~/.claude/settings.json` and restores the original status line.
+
+OpenCDX only observes Claude Code: it does not route Claude Code, offer a
+Claude sign-in, or handle Claude credentials, and it never reads or sends
+prompts or responses. Update both the router server and the macOS companion,
+then start a new Claude Code session after connecting. See
+[Claude Code](docs/claude-code.md).
+
 ## [1.6.2] - 2026-09-23
 
 ### Fixed
@@ -205,7 +240,8 @@ rebuilt for this release, but updating the companion alone does not fix HTTP 413
   timezone and daylight-saving changes. Show overlapping daily-only history as
   unavailable for rolling totals instead of presenting incomplete counts.
 
-[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.6.2...HEAD
+[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.6.2...v1.7.0
 [1.6.2]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.5.0...v1.6.0

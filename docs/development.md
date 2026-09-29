@@ -101,6 +101,27 @@ Local helper state lives under `~/Library/Application Support/com.dodelidoo.open
 
 See [Verification](verification.md) for the complete automated and manual test matrix. Release builds, notarization, Sparkle signing, and publication are documented separately in [Releases](releases.md).
 
+## Isolated helper tests
+
+On macOS every helper uses the same Keychain service, so a test helper would
+replace the installed helper's device credential. Point test helpers at a
+file store instead, and give them their own configuration, port, and catalog:
+
+```sh
+export OPENCODEX_HELPER_SECRET_FILE="$PWD/tmp/helper/secrets.json"
+export OPENCODEX_HELPER_CONFIG="$PWD/tmp/helper/helper.json"
+router-helper enroll --router http://127.0.0.1:18480 --name "Test Mac" --port 17564 --no-wait
+```
+
+`enroll` writes the default catalog path, which is the installed app's
+catalog. Change `catalog_path` in the test `helper.json` before starting the
+daemon. A router for these tests can run directly from `go build ./cmd/routerd`
+with `OPENCODEX_LISTEN`, `OPENCODEX_DATABASE`, `OPENCODEX_MASTER_KEY_FILE`,
+`OPENCODEX_ADMIN_TOKEN_FILE`, and `OPENCODEX_PUBLIC_URL` pointing at a
+temporary directory on loopback. Loopback-only processes do not trigger Local
+Network privacy prompts. Do not install, launch, or ad-hoc sign a second copy
+of the app.
+
 ## Synthetic allowance preview
 
 The fixture in `scripts/testing/allowance-preview/` runs the actual dashboard

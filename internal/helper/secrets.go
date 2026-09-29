@@ -19,7 +19,16 @@ type SecretStore interface {
 	Delete(account string) error
 }
 
+// SecretFileEnvironment selects a file store instead of the macOS Keychain.
+// It exists for isolated development tests: every helper on a Mac otherwise
+// shares one Keychain service, so a test helper would replace the installed
+// helper's device credential.
+const SecretFileEnvironment = "OPENCODEX_HELPER_SECRET_FILE"
+
 func NewSecretStore(configPath string) SecretStore {
+	if path := strings.TrimSpace(os.Getenv(SecretFileEnvironment)); path != "" && filepath.IsAbs(path) {
+		return &fileSecrets{path: filepath.Clean(path)}
+	}
 	if runtime.GOOS == "darwin" {
 		return macKeychain{}
 	}

@@ -386,7 +386,9 @@ Human end-to-end verification must include:
 
 Do not implement:
 
-- Claude Code
+- Claude Code routing or Claude sign-in (release 1.7.0 later added
+  observation-only Claude Code allowance and usage telemetry; see
+  `docs/claude-code.md`)
 - Claude, Gemini, Grok, Kimi, or numerous speculative providers
 - Prompt/persona rewriting
 - Codex executable shims

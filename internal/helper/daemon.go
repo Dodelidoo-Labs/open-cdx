@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Dodelidoo-Labs/open-cdx/internal/claudecode"
 	"github.com/Dodelidoo-Labs/open-cdx/internal/providers/openai"
 )
 
@@ -35,6 +36,8 @@ type LocalStatus struct {
 	RestartRequired    bool               `json:"codex_restart_required,omitempty"`
 	LastRequestAt      *time.Time         `json:"last_request_at,omitempty"`
 	LastError          string             `json:"last_error,omitempty"`
+	ClaudeAccounts     []AccountAllowance `json:"claude_accounts,omitempty"`
+	ClaudeCode         ClaudeCodeStatus   `json:"claude_code"`
 }
 
 type AccountAllowance struct {
@@ -49,6 +52,7 @@ type AccountAllowance struct {
 	QuotaResetAt   *time.Time           `json:"quota_reset_at,omitempty"`
 	QuotaWindows   []AllowanceWindow    `json:"quota_windows,omitempty"`
 	ResetCredits   int                  `json:"reset_credits,omitempty"`
+	ObservedAt     *time.Time           `json:"observed_at,omitempty"`
 }
 
 type AllowanceWindow struct {
@@ -74,6 +78,7 @@ type Daemon struct {
 	remoteStatusMu sync.Mutex
 	catalogMu      sync.Mutex
 	processInfo    func(context.Context, int) (codexProcessInfo, error)
+	claude         *claudeCollector
 	shutdownOnce   sync.Once
 	shutdown       chan struct{}
 	server         *http.Server
@@ -94,7 +99,7 @@ func NewDaemon(configPath string, config Config, secrets SecretStore) (*Daemon, 
 	}
 	return &Daemon{
 		configPath: configPath, catalogPath: config.CatalogPath, config: config, secrets: secrets, localSecret: localSecret,
-		deviceToken: deviceToken, remote: remote, shutdown: make(chan struct{}),
+		deviceToken: deviceToken, remote: remote, shutdown: make(chan struct{}), claude: newClaudeCollector(),
 		processInfo: inspectCodexProcess,
 		status:      LocalStatus{State: "connecting", RouterURL: config.RouterURL, DeviceName: config.DeviceName, CatalogSynced: CatalogExists(config), CatalogUpdated: config.CatalogUpdatedAt},
 	}, nil
@@ -110,6 +115,8 @@ func (daemon *Daemon) Run(ctx context.Context) error {
 	proxy := daemon.trackInferenceActivity(daemon.responsesProxy())
 	mux.Handle("POST /v1/responses", daemon.localAuth(proxy))
 	mux.Handle("POST /v1/responses/compact", daemon.localAuth(proxy))
+	mux.Handle("POST "+claudecode.OTLPLogsPath, daemon.scopedAuth(ClaudeOTLPScope, http.HandlerFunc(daemon.claudeOTLPLogs)))
+	mux.Handle("POST /claude/statusline", daemon.localAuth(http.HandlerFunc(daemon.claudeStatusLine)))
 	mux.HandleFunc("GET /healthz", func(writer http.ResponseWriter, _ *http.Request) {
 		writeHelperJSON(writer, http.StatusOK, map[string]any{
 			"status":          "ok",
@@ -128,6 +135,7 @@ func (daemon *Daemon) Run(ctx context.Context) error {
 	serverErrors := make(chan error, 1)
 	go func() { serverErrors <- daemon.server.Serve(listener) }()
 	go daemon.syncLoop(ctx)
+	go daemon.claudeLoop(ctx)
 	select {
 	case <-ctx.Done():
 	case <-daemon.shutdown:
@@ -420,6 +428,20 @@ func (daemon *Daemon) refreshStatus(ctx context.Context) error {
 			} `json:"quota_windows"`
 			ResetCredits int `json:"reset_credits"`
 		} `json:"accounts"`
+		ClaudeAccounts []struct {
+			ID           string `json:"id"`
+			MaskedEmail  string `json:"masked_email"`
+			ObservedAt   string `json:"observed_at"`
+			QuotaWindows []struct {
+				Label             string    `json:"label"`
+				Remaining         float64   `json:"remaining"`
+				DurationMinutes   int64     `json:"duration_minutes"`
+				ResetAt           time.Time `json:"reset_at"`
+				PaceStatus        string    `json:"pace_status"`
+				PaceMarkerPercent float64   `json:"pace_marker_percent"`
+				PaceBufferPercent float64   `json:"pace_buffer_percent"`
+			} `json:"quota_windows"`
+		} `json:"claude_accounts"`
 		Route struct {
 			Connected       bool      `json:"connected"`
 			State           string    `json:"state"`
@@ -473,6 +495,19 @@ func (daemon *Daemon) refreshStatus(ctx context.Context) error {
 				})
 			}
 			status.Accounts = append(status.Accounts, allowance)
+		}
+		status.ClaudeAccounts = make([]AccountAllowance, 0, len(remoteStatus.ClaudeAccounts))
+		for _, account := range remoteStatus.ClaudeAccounts {
+			observed, _ := time.Parse(time.RFC3339, account.ObservedAt)
+			allowance := AccountAllowance{ID: account.ID, MaskedEmail: account.MaskedEmail, Plan: "Claude", Status: "ready", ObservedAt: nonZeroTimePointer(observed)}
+			for _, window := range account.QuotaWindows {
+				allowance.QuotaWindows = append(allowance.QuotaWindows, AllowanceWindow{
+					Label: window.Label, Remaining: window.Remaining, DurationMinutes: window.DurationMinutes,
+					ResetAt: nonZeroTimePointer(window.ResetAt), PaceStatus: window.PaceStatus,
+					PaceMarkerPercent: window.PaceMarkerPercent, PaceBufferPercent: window.PaceBufferPercent,
+				})
+			}
+			status.ClaudeAccounts = append(status.ClaudeAccounts, allowance)
 		}
 		status.RestartRequired = status.RestartRequired || remoteStatus.Route.RestartRequired
 		if remoteStatus.Route.RestartRequired && !remoteStatus.Route.CatalogUpdated.IsZero() &&

@@ -308,4 +308,109 @@ final class HelperModelTests: XCTestCase {
             try png.write(to: URL(fileURLWithPath: output), options: .atomic)
         }
     }
+
+    private func claudeStatusDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }
+
+    func testClaudeAccountsAndReportingStatusDecode() throws {
+        let data = Data(#"""
+        {"connected":true,"claude_accounts":[{"id":"c1","masked_email":"b***s@g***.com","plan":"Claude","status":"ready",
+        "observed_at":"2030-01-02T03:04:05Z","quota_windows":[{"label":"Weekly","remaining":36,"duration_minutes":10080,
+        "reset_at":"2030-01-05T00:00:00Z","pace_status":"too_fast","pace_marker_percent":54,"pace_buffer_percent":-18}]}],
+        "claude_code":{"last_telemetry_at":"2030-01-02T03:04:00Z","pending_requests":2,"last_error":"router request failed"}}
+        """#.utf8)
+        let status = try claudeStatusDecoder().decode(HelperStatus.self, from: data)
+        XCTAssertEqual(status.claudeAccounts.count, 1)
+        XCTAssertEqual(status.claudeAccounts[0].quotaWindows.first?.remaining, 36)
+        XCTAssertNotNil(status.claudeAccounts[0].observedAt)
+        XCTAssertEqual(status.claudeCode.pendingRequests, 2)
+
+        let old = try claudeStatusDecoder().decode(HelperStatus.self, from: Data(#"{"connected":true}"#.utf8))
+        XCTAssertTrue(old.claudeAccounts.isEmpty)
+        XCTAssertNil(old.claudeCode.lastActivityAt)
+    }
+
+    func testClaudeReportingStates() {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        var status = HelperStatus()
+        XCTAssertEqual(claudeCodeReporting(installed: false, status: status, now: now), .notConnected)
+        XCTAssertEqual(claudeCodeReporting(installed: true, status: status, now: now), .waiting)
+        status.claudeCode.lastStatusLineAt = now.addingTimeInterval(-60)
+        XCTAssertEqual(claudeCodeReporting(installed: true, status: status, now: now), .reporting)
+        status.claudeCode.lastStatusLineAt = now.addingTimeInterval(-20 * 60)
+        XCTAssertEqual(claudeCodeReporting(installed: true, status: status, now: now), .waiting)
+        status.claudeCode.lastError = "remote router is unreachable"
+        status.claudeCode.pendingRequests = 3
+        XCTAssertEqual(claudeCodeReporting(installed: true, status: status, now: now), .uploadPending)
+        XCTAssertEqual(ClaudeCodeReporting.uploadPending.label, "Upload Pending")
+    }
+
+    func testObservationAgeLabels() {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        XCTAssertEqual(observationAge(since: now.addingTimeInterval(-10), now: now), "NOW")
+        XCTAssertEqual(observationAge(since: now.addingTimeInterval(-12 * 60), now: now), "12M AGO")
+        XCTAssertEqual(observationAge(since: now.addingTimeInterval(-3 * 3600), now: now), "3H AGO")
+        XCTAssertEqual(observationAge(since: now.addingTimeInterval(-2 * 86400), now: now), "2D AGO")
+    }
+
+    func testClaudeSetupPreviewMessagesExplainScope() throws {
+        let data = Data(#"""
+        {"settings_path":"/Users/me/.claude/settings.json","action":"install","installed":false,"already_applied":false,
+        "changes":["Wrap the existing status line; its output is unchanged"],"wraps_status_line":"bash statusline.sh",
+        "restart_reminder":"Start a new Claude Code session to begin exporting usage.","helper_executable":"/x"}
+        """#.utf8)
+        let preview = try JSONDecoder().decode(ClaudeSetupPreview.self, from: data)
+        XCTAssertTrue(preview.conflicts.isEmpty)
+        let message = claudeSetupConfirmationMessage(preview)
+        XCTAssertTrue(message.contains("/Users/me/.claude/settings.json"))
+        XCTAssertTrue(message.contains("• Wrap the existing status line"))
+        XCTAssertTrue(message.contains("keeps showing exactly as before"))
+        XCTAssertTrue(message.contains("Prompts, responses, file paths, and Claude credentials are never read or sent"))
+
+        let history = try JSONDecoder().decode(ClaudeHistoryPreview.self, from: Data(#"""
+        {"home":"/Users/me/.claude","files_scanned":118,"models":4,"input_tokens":10,"output_tokens":2,"requests":12728,"malformed_records_skipped":0}
+        """#.utf8))
+        let historyMessage = claudeHistoryPreviewMessage(history)
+        XCTAssertTrue(historyMessage.contains("\(12_728.formatted()) Claude Code requests"))
+        XCTAssertTrue(historyMessage.contains("never double-counts"))
+    }
+
+    @MainActor
+    func testClaudeAllowanceRowsRender() throws {
+        var openAI = AccountAllowanceStatus()
+        openAI.maskedEmail = "h***o@t***.com"
+        openAI.plan = "pro"
+        openAI.status = "ready"
+        openAI.primary = true
+        openAI.quotaWindows = [AccountQuotaWindowStatus(label: "Weekly", remaining: 97, durationMinutes: 10_080,
+                                                        resetAt: Date().addingTimeInterval(6 * 86400), paceStatus: "on_pace", paceMarkerPercent: 88, paceBufferPercent: 9)]
+        var claude = AccountAllowanceStatus()
+        claude.maskedEmail = "b***s@g***.com"
+        claude.plan = "Claude"
+        claude.status = "ready"
+        claude.observedAt = Date().addingTimeInterval(-4 * 60)
+        claude.quotaWindows = [
+            AccountQuotaWindowStatus(label: "Weekly", remaining: 36, durationMinutes: 10_080, resetAt: Date().addingTimeInterval(4 * 86400),
+                                     paceStatus: "too_fast", paceMarkerPercent: 54, paceBufferPercent: -18),
+            AccountQuotaWindowStatus(label: "5 hours", remaining: 91, durationMinutes: 300, resetAt: Date().addingTimeInterval(4 * 3600),
+                                     paceStatus: "on_pace", paceMarkerPercent: 83.7, paceBufferPercent: 7.3),
+        ]
+        let fixture = AccountAllowanceSection(accounts: [openAI], claudeAccounts: [claude], connected: true)
+            .frame(width: 360)
+            .background(Color(red: 0.075, green: 0.09, blue: 0.11))
+            .environment(\.colorScheme, .dark)
+            .accentColor(.green)
+        let renderer = ImageRenderer(content: fixture)
+        renderer.scale = 2
+        let image = try XCTUnwrap(renderer.nsImage)
+        let bitmap = try XCTUnwrap(image.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:)))
+        let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        XCTAssertGreaterThan(png.count, 1_000)
+        if let output = ProcessInfo.processInfo.environment["OPENCODEX_CLAUDE_FIXTURE_OUTPUT"], !output.isEmpty {
+            try png.write(to: URL(fileURLWithPath: output), options: .atomic)
+        }
+    }
 }

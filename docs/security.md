@@ -7,6 +7,7 @@
 - The helper receives OAuth authorization codes but never final OpenAI tokens.
 - The Mac stores only its device credential and local helper secret in Keychain.
 - Codex receives only a short-lived loopback credential.
+- Claude Code credentials never reach OpenCDX. Claude Code signs in and talks to Anthropic itself; OpenCDX does not route, proxy, or authenticate its requests and offers no Claude sign-in.
 
 AES-256-GCM envelopes use per-record random nonces and authenticated associated data. Stable ChatGPT account IDs are represented outside the envelope only by SHA-256 duplicate-detection hashes. Device and enrollment credentials are also stored as hashes; the one-time device issue is separately encrypted until acknowledgement.
 
@@ -27,10 +28,40 @@ Native OpenAI request bodies remain byte-for-byte unchanged. Third-party catalog
 Daily telemetry contains provider, routed model, opaque internal account key, request count, and token totals. The dashboard combines account rows for usage series. Account-attributed allowance history and reset markers include opaque router account IDs and masked labels; they never include upstream account IDs or credentials. Telemetry contains no prompts or responses.
 
 The dashboard and paired-device reset operations delete only those aggregate
-rows, allowance observations, and their reconciliation metadata. They do not access Codex rollout files
+rows, allowance observations, Claude Code request digests, and their reconciliation metadata. They do not access Codex rollout files or Claude Code transcripts
 and do not delete accounts, devices, providers, catalogs, routing state, or request logs.
 
 Dashboard cost figures are estimates. The router refreshes the unauthenticated public OpenRouter model catalog, applies exact published input/output token prices to matching routed model IDs, and leaves unmatched models visibly unpriced. It does not present subscription usage as a bill or invent a cost for local Ollama execution.
+
+### Claude Code observation
+
+The optional [Claude Code integration](claude-code.md) adds two local inputs to
+the helper, both limited to loopback:
+
+- `POST /claude/statusline` accepts the normal five-minute local credential.
+  The `claude-statusline` command reads the status line JSON Claude Code
+  provides and sends only the session ID and the five-hour and weekly
+  rate-limit windows. It runs the user's original status line command with
+  the same input, as that user, exactly as Claude Code would have.
+- `POST /claude/otlp/v1/logs` accepts only a separate, telemetry-scoped local
+  credential issued by `claude-otel-headers`. That credential lasts one hour
+  and is rejected by inference routes; inference credentials are rejected
+  here. Only `api_request` events are kept; every other event, including
+  prompt and response events, is discarded without being stored or logged.
+
+On the Mac, the helper replaces the Claude account UUID with a SHA-256 digest
+and masks the email before anything leaves the machine. Unsent observations
+stay in helper memory only, up to 20,000 requests. The router stores that
+digest, the masked email, the last reporting machine, the latest windows,
+allowance readings, token counters, and a digest of each Anthropic request ID
+for deduplication. The router rejects reports with unknown fields or account
+references, future timestamps, or out-of-range counters.
+
+Transcript import reads Claude Code's local JSONL files on the Mac and uploads
+only request IDs, timestamps, model IDs, and token counts. Setup edits
+`~/.claude/settings.json` only after an explicit preview and confirmation,
+keeps a backup, refuses to replace telemetry settings the user configured, and
+restores the original status line on removal.
 
 ## Header policy
 

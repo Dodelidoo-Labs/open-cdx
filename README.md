@@ -46,6 +46,7 @@ OpenCDX has two separately distributed parts:
 - Track changes to Codex catalog instructions with [instruction history](docs/instruction-history.md), unread updates, and per-field diffs.
 - Inspect per-request errors, model settings, token usage, timing, and routing attempts in [Logs](docs/request-logs.md), with portable backup and restore.
 - Reconcile aggregate usage from an existing local Codex history without sending conversation content to the router.
+- See your Claude plan allowance in the menu bar and Claude Code usage on the dashboard, observed through Claude Code's own status line and telemetry hooks. See [Claude Code](docs/claude-code.md).
 
 ## Screenshots
 
@@ -166,6 +167,10 @@ The configuration points Codex at the local helper. Codex receives a short-lived
 
 See [Helper and Codex setup](docs/helper-and-codex.md) for advanced pairing, custom Codex homes, usage reconciliation, reset behavior, helper commands, and uninstall steps.
 
+### 5. Optional: show Claude Code allowance and usage
+
+Choose **Connect Claude Code…** in the menu app and review the proposed changes to `~/.claude/settings.json`. OpenCDX wraps your existing status line and exports Claude Code's per-request token counts to the local helper. Claude Code keeps its own login and talks to Anthropic directly; OpenCDX never routes it or handles Claude credentials. See [Claude Code](docs/claude-code.md).
+
 ## Updating
 
 - **macOS companion:** choose **Check for Updates…** in the menu. Signed updates are delivered from GitHub Releases through Sparkle.
@@ -178,6 +183,7 @@ Back up the router database volume and `docker/secrets/master_key` together befo
 - OpenAI access and refresh tokens and provider API keys exist only in encrypted router storage and transient router memory.
 - The helper binds only to the Mac's loopback interface and keeps its device credential in Keychain.
 - Prompts and responses are streamed and are not logged or stored by OpenCDX.
+- Claude Code integration observes only allowance percentages and token counts; Claude credentials never reach OpenCDX.
 - Telemetry contains aggregate request and token counts. Request logs retain selected metadata and bounded provider diagnostics, excluding conversation bodies.
 - Production Mac-to-router traffic must use HTTPS. Plain HTTP on a LAN is available only through an explicit development override.
 

@@ -26,6 +26,13 @@ struct RouterMenuView: View {
                     model.addOpenAIAccount()
                 }
                 .disabled(!remoteActionsAvailable || model.accountLoginInProgress)
+
+                if let setup = model.claudeSetup, !setup.installed {
+                    MenuActionButton("Connect Claude Code…", systemImage: "terminal") {
+                        model.connectClaudeCode()
+                    }
+                    .disabled(!remoteActionsAvailable || model.claudeOperationInProgress)
+                }
             }
             .padding(8)
 
@@ -54,7 +61,7 @@ struct RouterMenuView: View {
                 }
                 .disabled(!remoteActionsAvailable)
 
-                MenuActionButton("Reconcile This Mac’s History…", systemImage: "clock.arrow.circlepath") {
+                MenuActionButton("Import Codex History…", systemImage: "clock.arrow.circlepath") {
                     model.requestUsageReconciliation()
                 }
                 .disabled(!model.status.connected || model.usageReconciliationInProgress || model.telemetryResetInProgress)
@@ -126,6 +133,15 @@ struct RouterMenuView: View {
                 )
             }
 
+            if showsClaudeStatus {
+                StatusSummaryRow(
+                    title: "Claude Code",
+                    value: model.claudeReporting.label,
+                    systemImage: claudeStatusIcon,
+                    color: claudeStatusColor
+                )
+            }
+
             if !model.status.lastError.isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -151,7 +167,28 @@ struct RouterMenuView: View {
     }
 
     private var accountsSection: some View {
-        AccountAllowanceSection(accounts: model.status.accounts, connected: model.status.connected, resetInProgress: model.resetAccountID != nil, onReset: model.consumeReset)
+        AccountAllowanceSection(accounts: model.status.accounts, claudeAccounts: model.status.claudeAccounts, connected: model.status.connected, resetInProgress: model.resetAccountID != nil, onReset: model.consumeReset)
+    }
+
+    private var showsClaudeStatus: Bool {
+        model.configured && (model.claudeSetup?.installed == true || !model.status.claudeAccounts.isEmpty)
+    }
+
+    private var claudeStatusIcon: String {
+        switch model.claudeReporting {
+        case .reporting: return "checkmark.circle.fill"
+        case .waiting: return "clock"
+        case .uploadPending: return "exclamationmark.triangle.fill"
+        case .notConnected: return "minus.circle"
+        }
+    }
+
+    private var claudeStatusColor: Color {
+        switch model.claudeReporting {
+        case .reporting: return .accentColor
+        case .uploadPending: return .orange
+        case .waiting, .notConnected: return .secondary
+        }
     }
 
     private var routerStatusIcon: String {
@@ -186,19 +223,24 @@ struct RouterMenuView: View {
 
 struct AccountAllowanceSection: View {
     let accounts: [AccountAllowanceStatus]
+    var claudeAccounts: [AccountAllowanceStatus] = []
     let connected: Bool
     var resetInProgress = false
     var onReset: ((AccountAllowanceStatus, AccountResetTicket) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if accounts.isEmpty {
+            if accounts.isEmpty && claudeAccounts.isEmpty {
                 Text(connected ? "No OpenAI accounts connected." : "Account allowances are unavailable while disconnected.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-            } else {
+            }
+            if !accounts.isEmpty {
                 AccountAllowanceList(accounts: accounts, canReset: connected && !resetInProgress, onReset: onReset)
+            }
+            if !claudeAccounts.isEmpty {
+                AccountAllowanceList(accounts: claudeAccounts)
             }
         }
         .padding(.horizontal, 16)
@@ -276,7 +318,7 @@ struct AccountAllowanceRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 8) {
-                Text(account.maskedEmail.isEmpty ? "OpenAI account" : account.maskedEmail)
+                Text(account.maskedEmail.isEmpty ? (account.observedAt == nil ? "OpenAI account" : "Claude subscription") : account.maskedEmail)
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -387,6 +429,9 @@ struct AccountAllowanceRow: View {
             parts.append("PAUSED")
         } else if !account.status.isEmpty && account.status != "ready" {
             parts.append(account.status.uppercased())
+        }
+        if let observedAt = account.observedAt {
+            parts.append(observationAge(since: observedAt))
         }
         return parts.joined(separator: " · ")
     }
@@ -651,6 +696,24 @@ private struct RouterMenuViewPreviews: PreviewProvider {
                 ]
             )
         ]
+        var claude = previewAccount(
+            email: "b***s@g***.com",
+            plan: "Claude",
+            windows: [
+                AccountQuotaWindowStatus(
+                    label: "Weekly", remaining: 36, durationMinutes: 10_080,
+                    resetAt: now.addingTimeInterval(4 * 24 * 60 * 60),
+                    paceStatus: "too_fast", paceMarkerPercent: 54, paceBufferPercent: -18
+                ),
+                AccountQuotaWindowStatus(
+                    label: "5 hours", remaining: 91, durationMinutes: 300,
+                    resetAt: now.addingTimeInterval(4 * 60 * 60),
+                    paceStatus: "on_pace", paceMarkerPercent: 83.7, paceBufferPercent: 7.3
+                )
+            ]
+        )
+        claude.observedAt = now.addingTimeInterval(-4 * 60)
+        status.claudeAccounts = [claude]
         model.applyPreviewStatus(status)
         return model
     }

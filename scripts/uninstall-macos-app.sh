@@ -8,6 +8,9 @@ KEYCHAIN_SERVICE="com.dodelidoo.opencdx.helper"
 PREFERENCES_DOMAIN="com.dodelidoo.opencdx"
 
 if [ -x "$APP/Contents/Resources/router-helper" ]; then
+  # Restore Claude Code's original status line while the saved copy exists.
+  # This changes only OpenCDX entries and does nothing when none are present.
+  "$APP/Contents/Resources/router-helper" claude-setup --remove --apply >/dev/null 2>&1 || true
   "$APP/Contents/Resources/router-helper" quit >/dev/null 2>&1 || true
 fi
 /usr/bin/security delete-generic-password -a device-token -s "$KEYCHAIN_SERVICE" >/dev/null 2>&1 || true
@@ -16,4 +19,4 @@ fi
 /usr/bin/defaults delete "$PREFERENCES_DOMAIN" >/dev/null 2>&1 || true
 if [ -d "$APP" ]; then mv "$APP" "$TRASH/OpenCDX Router.app.$(date +%s)"; fi
 if [ -d "$SUPPORT" ]; then mv "$SUPPORT" "$TRASH/OpenCDX Router Support.$(date +%s)"; fi
-echo "OpenCDX Router was removed. Codex and ~/.codex were not modified."
+echo "OpenCDX Router was removed. Codex and ~/.codex were not modified; OpenCDX entries in ~/.claude/settings.json were removed."
