@@ -207,9 +207,10 @@
 
         <div class="telemetry-layout">
           <section class="section">
-            <div class="section-head"><div><h2 class="section-title" data-chart-title>Model usage by tokens</h2><p class="section-meta" data-chart-meta>Loading selected range…</p></div></div>
+            <div class="section-head"><div><h2 class="section-title" data-chart-title>Model usage by tokens</h2><p class="section-meta" data-chart-meta>Loading selected range…</p></div><button class="btn btn-secondary timeline-now" type="button" data-timeline-now hidden>Now →</button></div>
             <div class="chart-stack">
-              <div class="chart-scroll"><div class="chart-shell" data-usage-chart="tokens"><div class="telemetry-loading">Loading token usage…</div></div></div>
+              <div class="chart-scroll"><div class="chart-shell" data-usage-chart="tokens" tabindex="0" aria-describedby="timeline-hint"><div class="telemetry-loading">Loading token usage…</div></div></div>
+              <p class="timeline-hint" id="timeline-hint">Drag or swipe to move through time · pinch or ⌘/Ctrl-scroll to zoom · arrow and +/− keys work too</p>
               <div class="allowance-legend" data-allowance-legend aria-label="Account allowance lines" hidden></div>
               <div class="chart-footer">
                 <div data-cycle-details></div>
@@ -358,6 +359,7 @@
 <script src="/assets/telemetry-ranges.js?v={{.AssetVersion}}" defer></script>
 <script src="/assets/telemetry-allowance.js?v={{.AssetVersion}}" defer></script>
 <script src="/assets/telemetry-devices.js?v={{.AssetVersion}}" defer></script>
+<script src="/assets/telemetry-timeline.js?v={{.AssetVersion}}" defer></script>
 <script src="/assets/instruction-diff.js?v={{.AssetVersion}}" defer></script>
 <script src="/assets/instruction-history.js?v={{.AssetVersion}}" defer></script>
 <script src="/assets/catalog-conflicts.js?v={{.AssetVersion}}" defer></script>

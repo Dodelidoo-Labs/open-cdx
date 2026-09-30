@@ -69,13 +69,13 @@ func TestReportPreservesInstantsAndUsesConfiguredCalendarDays(t *testing.T) {
 		{Day: "2026-09-01", ModelID: "astra", InputTokens: 10, Requests: 1},
 	}
 	report := Build(rows, nil, now, location)
-	if report.TimeZone != location.String() || len(report.RollingUsage["24"]) != 1 || len(report.UntimedUsage) != 1 {
+	if report.TimeZone != location.String() || len(report.HourlyUsage) != 2 || len(report.UntimedUsage) != 1 {
 		t.Fatalf("precision lost: %#v", report)
 	}
 	if len(report.Usage) != 2 || report.Usage[1].Date != "2026-09-08" || report.Usage[1].InputTokens != 400000000 {
 		t.Fatalf("wrong day totals: %#v", report.Usage)
 	}
-	if report.TotalInputTokens != 400000010 || report.RollingUsage["24"][0].InputTokens != 400000000 {
+	if report.TotalInputTokens != 400000010 || report.HourlyUsage[0].At != "2026-09-08T16:00:00Z" || report.HourlyUsage[1].InputTokens != 35000000 {
 		t.Fatalf("totals or instant lost: %#v", report)
 	}
 	utc := Build(rows, nil, now)
@@ -84,30 +84,24 @@ func TestReportPreservesInstantsAndUsesConfiguredCalendarDays(t *testing.T) {
 	}
 }
 
-func TestRollingUsageCutoffsAndExpiryAreIndependentOfMidnight(t *testing.T) {
+func TestHourlyUsageCoversHistoryAndRevealsFutureRowsOnTime(t *testing.T) {
 	now := time.Date(2026, 9, 9, 1, 0, 0, 0, time.UTC)
-	boundary := now.Add(-24 * time.Hour)
 	rows := []storage.UsageAggregate{}
-	for _, at := range []time.Time{boundary.Add(-time.Nanosecond), boundary, now, now.Add(time.Second)} {
+	for _, at := range []time.Time{now.Add(-400 * 24 * time.Hour), now.Add(-time.Hour), now, now.Add(time.Second)} {
 		rows = append(rows, storage.UsageAggregate{RecordedAt: at.Format(time.RFC3339Nano), Day: at.Format("2006-01-02"), InputTokens: 10, Requests: 1})
 	}
-	sum := func(report Report, hours string) int64 {
+	sum := func(report Report) int64 {
 		var n int64
-		for _, row := range report.RollingUsage[hours] {
+		for _, row := range report.HourlyUsage {
 			n += row.InputTokens
 		}
 		return n
 	}
 	initial := Build(rows, nil, now)
-	if sum(initial, "24") != 20 || sum(initial, "168") != 30 || !initial.NextChangeAt.Equal(now.Add(time.Nanosecond)) {
-		t.Fatalf("wrong cutoff/expiry: %#v", initial)
+	if sum(initial) != 30 || len(initial.HourlyUsage) != 3 || !initial.NextChangeAt.Equal(now.Add(time.Second)) {
+		t.Fatalf("hourly history = %#v next=%v", initial.HourlyUsage, initial.NextChangeAt)
 	}
-	after := Build(rows, nil, initial.NextChangeAt)
-	if sum(after, "24") != 10 {
-		t.Fatalf("expired usage remained: %#v", after.RollingUsage)
-	}
-	future := Build(rows, nil, now.Add(time.Second))
-	if sum(future, "24") != 20 {
-		t.Fatalf("future response missing: %#v", future.RollingUsage)
+	if later := Build(rows, nil, initial.NextChangeAt); sum(later) != 40 {
+		t.Fatalf("future row missing once due: %#v", later.HourlyUsage)
 	}
 }

@@ -136,7 +136,11 @@ func reportStatusLine(ctx context.Context, configPath string, input []byte, now 
 	if err != nil {
 		return err
 	}
-	body, _ := json.Marshal(helper.StatusLineUpload{SessionID: reading.SessionID, ObservedAt: now, Windows: reading.Windows})
+	upload := helper.StatusLineUpload{SessionID: reading.SessionID, ObservedAt: now, Windows: reading.Windows}
+	if account, ok := claudecode.LocalAccount(); ok {
+		upload.Account = &account
+	}
+	body, _ := json.Marshal(upload)
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, config.LocalBaseURL()+"/claude/statusline", bytes.NewReader(body))
 	if err != nil {
 		return err

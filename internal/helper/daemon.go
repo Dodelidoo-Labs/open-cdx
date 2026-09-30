@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,6 +43,7 @@ type LocalStatus struct {
 
 type AccountAllowance struct {
 	ID             string               `json:"id"`
+	Provider       string               `json:"provider,omitempty"`
 	ResetTickets   []openai.ResetTicket `json:"reset_tickets,omitempty"`
 	MaskedEmail    string               `json:"masked_email"`
 	Plan           string               `json:"plan,omitempty"`
@@ -99,7 +101,7 @@ func NewDaemon(configPath string, config Config, secrets SecretStore) (*Daemon, 
 	}
 	return &Daemon{
 		configPath: configPath, catalogPath: config.CatalogPath, config: config, secrets: secrets, localSecret: localSecret,
-		deviceToken: deviceToken, remote: remote, shutdown: make(chan struct{}), claude: newClaudeCollector(),
+		deviceToken: deviceToken, remote: remote, shutdown: make(chan struct{}), claude: newClaudeCollector(filepath.Join(filepath.Dir(configPath), "claude-accounts.json")),
 		processInfo: inspectCodexProcess,
 		status:      LocalStatus{State: "connecting", RouterURL: config.RouterURL, DeviceName: config.DeviceName, CatalogSynced: CatalogExists(config), CatalogUpdated: config.CatalogUpdatedAt},
 	}, nil
@@ -121,6 +123,7 @@ func (daemon *Daemon) Run(ctx context.Context) error {
 		writeHelperJSON(writer, http.StatusOK, map[string]any{
 			"status":          "ok",
 			"active_requests": daemon.currentStatus().ActiveRequests,
+			"build":           BuildIdentity(),
 		})
 	})
 	mux.Handle("GET /control/status", daemon.controlAuth(http.HandlerFunc(daemon.controlStatus)))
@@ -481,7 +484,7 @@ func (daemon *Daemon) refreshStatus(ctx context.Context) error {
 		status.Accounts = make([]AccountAllowance, 0, len(remoteStatus.Accounts))
 		for _, account := range remoteStatus.Accounts {
 			allowance := AccountAllowance{
-				ID: account.ID, ResetTickets: account.ResetTickets,
+				ID: account.ID, Provider: "openai", ResetTickets: account.ResetTickets,
 				MaskedEmail: account.MaskedEmail, Plan: account.Plan, Status: account.Status,
 				Paused: account.Paused, Primary: account.Primary, QuotaRemaining: account.QuotaRemaining,
 				QuotaResetAt: nonZeroTimePointer(account.QuotaResetAt), ResetCredits: account.ResetCredits,
@@ -499,7 +502,7 @@ func (daemon *Daemon) refreshStatus(ctx context.Context) error {
 		status.ClaudeAccounts = make([]AccountAllowance, 0, len(remoteStatus.ClaudeAccounts))
 		for _, account := range remoteStatus.ClaudeAccounts {
 			observed, _ := time.Parse(time.RFC3339, account.ObservedAt)
-			allowance := AccountAllowance{ID: account.ID, MaskedEmail: account.MaskedEmail, Plan: "Claude", Status: "ready", ObservedAt: nonZeroTimePointer(observed)}
+			allowance := AccountAllowance{ID: account.ID, Provider: "claude", MaskedEmail: account.MaskedEmail, Status: "ready", ObservedAt: nonZeroTimePointer(observed)}
 			for _, window := range account.QuotaWindows {
 				allowance.QuotaWindows = append(allowance.QuotaWindows, AllowanceWindow{
 					Label: window.Label, Remaining: window.Remaining, DurationMinutes: window.DurationMinutes,

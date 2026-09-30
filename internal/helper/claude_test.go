@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -45,12 +46,12 @@ func TestScopedTokenAuthenticatesOnlyItsScope(t *testing.T) {
 }
 
 func TestClaudeCollectorAttributesStatusLineThroughSessions(t *testing.T) {
-	collector := newClaudeCollector()
+	collector := newClaudeCollector("")
 	now := time.Unix(2_000_000_000, 0).UTC()
 	identity := claudecode.AccountIdentity("account")
 	window := []claudecode.Window{{Seconds: 18000, UsedPercent: 5, ResetAt: now.Add(time.Hour).Format(time.RFC3339)}}
-	collector.addReading(claudeReading{session: "s1", observedAt: now, receivedAt: now, windows: window})
-	collector.addReading(claudeReading{session: "unknown", observedAt: now, receivedAt: now, windows: window})
+	collector.addReading(claudeReading{session: "s1", observedAt: now, receivedAt: now, windows: window}, nil)
+	collector.addReading(claudeReading{session: "unknown", observedAt: now, receivedAt: now, windows: window}, nil)
 
 	report, taken := collector.take(now.Add(5 * time.Second))
 	if len(report.Allowances) != 0 || len(taken) != 0 {
@@ -65,14 +66,15 @@ func TestClaudeCollectorAttributesStatusLineThroughSessions(t *testing.T) {
 		len(report.Accounts) != 1 || report.Accounts[0].MaskedEmail != "a***@e***.com" {
 		t.Fatalf("attributed report = %#v", report)
 	}
+	// Without its session's account, the reading belongs to the only known one.
 	report, _ = collector.take(now.Add(40 * time.Second))
-	if len(report.Allowances) != 1 || report.Allowances[0].Account != "" || len(report.Accounts) != 0 {
-		t.Fatalf("unattributed reading after waiting = %#v", report)
+	if len(report.Allowances) != 1 || report.Allowances[0].Account != identity || len(report.Accounts) != 1 {
+		t.Fatalf("reading after waiting = %#v", report)
 	}
 
 	collector.addLogs(claudecode.LogBatch{Requests: []claudecode.Request{{ID: "retry"}}}, now)
 	failed, readings := collector.take(now)
-	collector.addReading(claudeReading{session: "s1", observedAt: now.Add(time.Minute), receivedAt: now, windows: window})
+	collector.addReading(claudeReading{session: "s1", observedAt: now.Add(time.Minute), receivedAt: now, windows: window}, nil)
 	collector.restore(failed, append(readings, claudeReading{session: "s1", observedAt: now}))
 	report, _ = collector.take(now.Add(time.Minute))
 	if len(report.Requests) != 1 || report.Requests[0].ID != "retry" || len(report.Allowances) != 1 || !strings.HasPrefix(report.Allowances[0].ObservedAt, now.Add(time.Minute).Format("2006-01-02T15:04")) {
@@ -96,7 +98,7 @@ func TestDaemonReceivesClaudeTelemetryAndUploadsIt(t *testing.T) {
 		_, _ = writer.Write([]byte(`{"requests_added":1}`))
 	}))
 	defer router.Close()
-	daemon := &Daemon{localSecret: testLocalSecret, remote: &RemoteClient{BaseURL: router.URL, DeviceToken: "device-token", HTTP: router.Client()}, claude: newClaudeCollector(), shutdown: make(chan struct{})}
+	daemon := &Daemon{localSecret: testLocalSecret, remote: &RemoteClient{BaseURL: router.URL, DeviceToken: "device-token", HTTP: router.Client()}, claude: newClaudeCollector(""), shutdown: make(chan struct{})}
 	otlp := daemon.scopedAuth(ClaudeOTLPScope, http.HandlerFunc(daemon.claudeOTLPLogs))
 	statusLine := daemon.localAuth(http.HandlerFunc(daemon.claudeStatusLine))
 
@@ -161,7 +163,7 @@ func TestDaemonKeepsClaudeTelemetryWhileRouterIsUnavailable(t *testing.T) {
 		_, _ = writer.Write([]byte(`{"error":{"message":"unavailable"}}`))
 	}))
 	defer router.Close()
-	daemon := &Daemon{remote: &RemoteClient{BaseURL: router.URL, DeviceToken: "device-token", HTTP: router.Client()}, claude: newClaudeCollector()}
+	daemon := &Daemon{remote: &RemoteClient{BaseURL: router.URL, DeviceToken: "device-token", HTTP: router.Client()}, claude: newClaudeCollector("")}
 	daemon.claude.addLogs(claudecode.LogBatch{Requests: []claudecode.Request{{ID: "req"}}}, time.Now())
 	if err := daemon.uploadClaudeTelemetry(context.Background()); err == nil || daemon.claude.pending() != 1 || daemon.currentStatus().ClaudeCode.LastError == "" {
 		t.Fatalf("router outage dropped telemetry: %v pending=%d", err, daemon.claude.pending())
@@ -184,8 +186,41 @@ func TestDaemonStatusIncludesClaudeAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	accounts := daemon.currentStatus().ClaudeAccounts
-	if len(accounts) != 1 || accounts[0].ObservedAt == nil || accounts[0].Plan != "Claude" || len(accounts[0].QuotaWindows) != 2 ||
+	if len(accounts) != 1 || accounts[0].ObservedAt == nil || accounts[0].Provider != "claude" || len(accounts[0].QuotaWindows) != 2 ||
 		accounts[0].QuotaWindows[1].ResetAt != nil || accounts[0].QuotaWindows[0].Remaining != 36 {
 		t.Fatalf("Claude accounts = %#v", accounts)
+	}
+}
+
+func TestClaudeCollectorRemembersSoleAccountAcrossRestarts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "claude-accounts.json")
+	now := time.Unix(2_000_000_000, 0).UTC()
+	identity := claudecode.AccountIdentity("account")
+	first := newClaudeCollector(path)
+	first.addLogs(claudecode.LogBatch{Accounts: []claudecode.Account{{Identity: identity, MaskedEmail: "a***@e***.com"}}}, now)
+
+	restarted := newClaudeCollector(path)
+	window := []claudecode.Window{{Seconds: 18000, UsedPercent: 5, ResetAt: now.Add(time.Hour).Format(time.RFC3339)}}
+	restarted.addReading(claudeReading{session: "old-session", observedAt: now, receivedAt: now, windows: window}, nil)
+	report, _ := restarted.take(now.Add(time.Minute))
+	if len(report.Allowances) != 1 || report.Allowances[0].Account != identity || len(report.Accounts) != 1 || report.Accounts[0].MaskedEmail != "a***@e***.com" {
+		t.Fatalf("reading was not attributed to the known account: %#v", report)
+	}
+	restarted.addLogs(claudecode.LogBatch{Accounts: []claudecode.Account{{Identity: claudecode.AccountIdentity("second")}}}, now)
+	restarted.addReading(claudeReading{session: "old-session", observedAt: now, receivedAt: now, windows: window}, nil)
+	if report, _ = restarted.take(now.Add(time.Minute)); report.Allowances[0].Account != "" {
+		t.Fatalf("reading was guessed between two accounts: %#v", report)
+	}
+}
+
+func TestStatusLineAccountAttributesReadingImmediately(t *testing.T) {
+	collector := newClaudeCollector("")
+	now := time.Unix(2_000_000_000, 0).UTC()
+	account := claudecode.Account{Identity: claudecode.AccountIdentity("uuid"), MaskedEmail: "a***@e***.com"}
+	window := []claudecode.Window{{Seconds: 18000, UsedPercent: 5, ResetAt: now.Add(time.Hour).Format(time.RFC3339)}}
+	collector.addReading(claudeReading{session: "no-telemetry", observedAt: now, receivedAt: now, windows: window}, &account)
+	report, _ := collector.take(now)
+	if len(report.Allowances) != 1 || report.Allowances[0].Account != account.Identity || len(report.Accounts) != 1 || report.Accounts[0].MaskedEmail != account.MaskedEmail {
+		t.Fatalf("report = %#v", report)
 	}
 }

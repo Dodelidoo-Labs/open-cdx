@@ -556,6 +556,14 @@ func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
 	}
 }
 
+func TestTelemetryTimelineScriptIsServed(t *testing.T) {
+	response := httptest.NewRecorder()
+	(&Server{}).routes().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/assets/telemetry-timeline.js", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "OpenCDXTelemetryTimeline") {
+		t.Fatalf("timeline asset status = %d", response.Code)
+	}
+}
+
 func TestDashboardJavaScriptIsServed(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/assets/dashboard.js", nil)
 	response := httptest.NewRecorder()
@@ -567,7 +575,7 @@ func TestDashboardJavaScriptIsServed(t *testing.T) {
 		t.Fatalf("dashboard asset content type = %q", contentType)
 	}
 	bundle := response.Body.String()
-	for _, marker := range []string{"data-sort-table", "pill.hidden = false", "formatNumber", "renderUsageChart(range, report, mode, grouping)", "data-flash-dismiss", "prepareSeriesColors", "data-group-mode", "const visible = ordered.map", "moveRowAtY", "data-account-order-form", `time[data-local-datetime]`, `time[data-local-date]`, `time[data-local-clock]`, "/admin/telemetry", "/admin/devices/live", "/admin/accounts/live", "If-None-Match", "visibilitychange", "AbortController", "runLiveRefresh"} {
+	for _, marker := range []string{"data-sort-table", "pill.hidden = false", "formatNumber", "renderUsageChart(view, report, mode, grouping)", "OpenCDXTelemetryTimeline.pan", "data-flash-dismiss", "prepareSeriesColors", "data-group-mode", "const visible = ordered.map", "moveRowAtY", "data-account-order-form", `time[data-local-datetime]`, `time[data-local-date]`, `time[data-local-clock]`, "/admin/telemetry", "/admin/devices/live", "/admin/accounts/live", "If-None-Match", "visibilitychange", "AbortController", "runLiveRefresh"} {
 		if !strings.Contains(bundle, marker) {
 			t.Fatalf("dashboard behavior bundle is missing %q", marker)
 		}
@@ -978,7 +986,7 @@ func TestTelemetryCacheExpiresWithoutAStorageMutation(t *testing.T) {
 	server.telemetryCache.NextChangeAt = time.Now().Add(-time.Second)
 	next := telemetryResponse(t, server, oldETag)
 	if next.Code != http.StatusOK || next.Header().Get("ETag") == oldETag {
-		t.Fatal("time-dependent report remained cached past a rolling cutoff")
+		t.Fatal("time-dependent report remained cached past its next change")
 	}
 }
 

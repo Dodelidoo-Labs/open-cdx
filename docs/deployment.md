@@ -118,7 +118,7 @@ The OpenAI authorization, ChatGPT API, and Codex Responses endpoints must always
 
 For the source-built HTTP stack and the isolated Multipass workflow, see [Development](development.md).
 
-## Dashboard timezone and rolling usage
+## Dashboard timezone and time ranges
 
 The dashboard defaults to the viewing browser's timezone. Its **Timezone**
 selector can show statistics in any listed IANA timezone, including UTC. The
@@ -127,7 +127,7 @@ on page load. It applies independently of the Machine filter: a London viewer
 can inspect any machine's usage using London calendar dates, while another viewer
 uses Buenos Aires dates. Changing it refreshes charts, calendar ranges, reset
 markers, timestamps, and CSV date grouping without changing stored UTC timestamps
-or another viewer's settings. Rolling 24h/7d/30d durations remain identical.
+or another viewer's settings. The **24h**, **7d**, and **30d** windows keep their exact durations.
 
 Set the fallback `OPENCODEX_TIMEZONE` in the server environment (or in `docker/.env` for
 production Compose). It accepts an IANA name, for example:
@@ -143,14 +143,19 @@ overrides the environment; invalid zones and `Local` are rejected at startup.
 Timezone data is embedded in the binary, including minimal Docker images.
 Restart the router after changing this setting.
 
-The dashboard's **24h**, **7d**, and **30d** controls select the preceding 24,
-168, and 720 hours using the server clock. Calendar ranges, chart days, and
-rendered timestamps use the selected viewing timezone. **Year** means the current
-calendar year. Changing timezone never changes a rolling window's duration.
+The **24h**, **7d**, **30d**, **Year**, and **All** controls choose how much of
+the timeline is visible, ending at the server's current time. They zoom rather
+than filter: drag the chart or swipe horizontally to move into the past,
+pinch or ⌘/Ctrl-scroll to zoom, or use the arrow and +/− keys. **Now →** returns
+to the present. Totals, the breakdown, and CSV export follow the visible window.
+Bars are hourly, daily, weekly, or monthly depending on the zoom level, aligned
+to calendar boundaries in the selected timezone, so bars of one size are evenly
+spaced. **Custom** shows whole calendar days.
 
 Upgrades retain older daily totals, but cannot invent their request timestamps.
-Rolling totals that overlap that history are shown as unavailable instead of
-showing a misleading partial number. After upgrading the router and helper,
+Hourly bars cannot show that history; zoom out to see it as daily or longer
+bars. Totals that include a daily-only record extending past the visible window
+are marked. After upgrading the router and helper,
 reconcile each machine's original Codex history to restore timestamps. Preview
 first with `router-helper reconcile-usage --dry-run`; the regular reconciliation
 replaces that machine's telemetry. No telemetry reset is required for history that already has machine attribution.

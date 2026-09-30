@@ -317,7 +317,7 @@ final class HelperModelTests: XCTestCase {
 
     func testClaudeAccountsAndReportingStatusDecode() throws {
         let data = Data(#"""
-        {"connected":true,"claude_accounts":[{"id":"c1","masked_email":"b***s@g***.com","plan":"Claude","status":"ready",
+        {"connected":true,"claude_accounts":[{"id":"c1","provider":"claude","masked_email":"b***s@g***.com","status":"ready",
         "observed_at":"2030-01-02T03:04:05Z","quota_windows":[{"label":"Weekly","remaining":36,"duration_minutes":10080,
         "reset_at":"2030-01-05T00:00:00Z","pace_status":"too_fast","pace_marker_percent":54,"pace_buffer_percent":-18}]}],
         "claude_code":{"last_telemetry_at":"2030-01-02T03:04:00Z","pending_requests":2,"last_error":"router request failed"}}
@@ -325,6 +325,9 @@ final class HelperModelTests: XCTestCase {
         let status = try claudeStatusDecoder().decode(HelperStatus.self, from: data)
         XCTAssertEqual(status.claudeAccounts.count, 1)
         XCTAssertEqual(status.claudeAccounts[0].quotaWindows.first?.remaining, 36)
+        XCTAssertEqual(status.claudeAccounts[0].accountProvider, .claude)
+        let legacy = try JSONDecoder().decode(AccountAllowanceStatus.self, from: Data(#"{"masked_email":"a***@e***.com"}"#.utf8))
+        XCTAssertEqual(legacy.accountProvider, .openAI)
         XCTAssertNotNil(status.claudeAccounts[0].observedAt)
         XCTAssertEqual(status.claudeCode.pendingRequests, 2)
 
@@ -389,7 +392,7 @@ final class HelperModelTests: XCTestCase {
                                                         resetAt: Date().addingTimeInterval(6 * 86400), paceStatus: "on_pace", paceMarkerPercent: 88, paceBufferPercent: 9)]
         var claude = AccountAllowanceStatus()
         claude.maskedEmail = "b***s@g***.com"
-        claude.plan = "Claude"
+        claude.provider = AccountProvider.claude.rawValue
         claude.status = "ready"
         claude.observedAt = Date().addingTimeInterval(-4 * 60)
         claude.quotaWindows = [
@@ -412,5 +415,13 @@ final class HelperModelTests: XCTestCase {
         if let output = ProcessInfo.processInfo.environment["OPENCODEX_CLAUDE_FIXTURE_OUTPUT"], !output.isEmpty {
             try png.write(to: URL(fileURLWithPath: output), options: .atomic)
         }
+    }
+
+    func testDaemonFromAnEarlierAppVersionIsStale() {
+        XCTAssertTrue(helperDaemonIsStale(runningBuild: nil, bundledBuild: "1.7.1 (abc)"))
+        XCTAssertTrue(helperDaemonIsStale(runningBuild: "1.7.0 (def)", bundledBuild: "1.7.1 (abc)"))
+        XCTAssertFalse(helperDaemonIsStale(runningBuild: "1.7.1 (abc)", bundledBuild: "1.7.1 (abc)"))
+        XCTAssertFalse(helperDaemonIsStale(runningBuild: nil, bundledBuild: nil))
+        XCTAssertFalse(helperDaemonIsStale(runningBuild: "1.7.0 (def)", bundledBuild: ""))
     }
 }

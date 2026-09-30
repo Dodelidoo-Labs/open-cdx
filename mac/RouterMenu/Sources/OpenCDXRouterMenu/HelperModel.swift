@@ -69,6 +69,8 @@ struct AccountResetTicket: Codable {
 
 struct AccountAllowanceStatus: Codable {
     var id = ""
+    var provider = AccountProvider.openAI.rawValue
+    var accountProvider: AccountProvider { AccountProvider(rawValue: provider) ?? .openAI }
     var resetTickets: [AccountResetTicket]?
     var displayID: String { id.isEmpty ? maskedEmail : id }
 
@@ -90,7 +92,7 @@ struct AccountAllowanceStatus: Codable {
     var observedAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id, plan, status, paused, primary
+        case id, provider, plan, status, paused, primary
         case resetTickets = "reset_tickets"
         case maskedEmail = "masked_email"
         case quotaRemaining = "quota_remaining"
@@ -105,6 +107,7 @@ struct AccountAllowanceStatus: Codable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeIfPresent(String.self, forKey: .id) ?? ""
+        provider = try container.decodeIfPresent(String.self, forKey: .provider) ?? AccountProvider.openAI.rawValue
         resetTickets = try container.decodeIfPresent([AccountResetTicket].self, forKey: .resetTickets)
         maskedEmail = try container.decodeIfPresent(String.self, forKey: .maskedEmail) ?? ""
         plan = try container.decodeIfPresent(String.self, forKey: .plan) ?? ""
@@ -240,7 +243,7 @@ func enrollmentRequestAllowed(routerURL: String, configuredRouterURL: String, de
 }
 
 func operationAfterApplyingStatus(_ operation: String, status: HelperStatus) -> String {
-    if status.connected && operation == "Device approved. Connecting…" {
+    if status.connected && (operation == "Device approved. Connecting…" || operation == "Helper updated. Reconnecting…") {
         return ""
     }
     return operation
@@ -433,6 +436,9 @@ final class HelperModel: ObservableObject {
     private var resetStatusGeneration: UInt = 0
     private let historyImportDecisionKey = "usageHistoryImportDecisionMade"
     private var claudeSetupCheckedAt = Date.distantPast
+    private var bundledHelperBuild: String?
+    private var bundledHelperBuildRequested = false
+    private var staleDaemonReplaced = false
 
     private static let confirmationDuration: TimeInterval = 7
     private static let errorDuration: TimeInterval = 12
@@ -953,7 +959,26 @@ final class HelperModel: ObservableObject {
         }
     }
 
-    private func restartDaemon() {
+    private func replaceStaleDaemonIfNeeded(_ health: HelperHealthStatus) {
+        guard !staleDaemonReplaced, !restartingDaemon, !pairing, health.activeRequests == 0 else { return }
+        if bundledHelperBuild == nil {
+            guard !bundledHelperBuildRequested else { return }
+            bundledHelperBuildRequested = true
+            runHelper(["version"], timeout: 5) { [weak self] result in
+                guard let self, result.success else { return }
+                let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                self.bundledHelperBuild = output.hasPrefix("router-helper ") ? String(output.dropFirst("router-helper ".count)) : output
+            }
+            return
+        }
+        guard helperDaemonIsStale(runningBuild: health.build, bundledBuild: bundledHelperBuild) else { return }
+        // Replace it once per launch; a mismatch that survives a restart
+        // belongs to another helper copy and must not cause a restart loop.
+        staleDaemonReplaced = true
+        restartDaemon(operation: "Helper updated. Reconnecting…")
+    }
+
+    private func restartDaemon(operation: String = "Device approved. Connecting…") {
         guard !restartingDaemon else { return }
         restartingDaemon = true
         let previousProcess = daemonProcess
@@ -978,7 +1003,7 @@ final class HelperModel: ObservableObject {
                     self.status.connected = false
                     self.status.state = "connecting"
                     self.status.lastError = ""
-                    self.setOperation("Device approved. Connecting…")
+                    self.setOperation(operation)
                     self.startDaemon()
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
                         self.refreshStatus()
@@ -1098,10 +1123,12 @@ final class HelperModel: ObservableObject {
         var request = URLRequest(url: helperHealthURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 0.6)
         request.httpMethod = "GET"
         URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
-            let activeRequests = data.flatMap { try? JSONDecoder().decode(HelperHealthStatus.self, from: $0).activeRequests }
+            let health = data.flatMap { try? JSONDecoder().decode(HelperHealthStatus.self, from: $0) }
+            let activeRequests = health?.activeRequests
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.activityRequestInFlight = false
+                if let health { self.replaceStaleDaemonIfNeeded(health) }
                 guard let activeRequests, activeRequests != self.status.activeRequests else { return }
                 var updated = self.status
                 updated.activeRequests = max(0, activeRequests)
@@ -1216,10 +1243,19 @@ private struct HelperRuntimeConfiguration: Decodable {
 
 private struct HelperHealthStatus: Decodable {
     let activeRequests: Int
+    let build: String?
 
     enum CodingKeys: String, CodingKey {
         case activeRequests = "active_requests"
+        case build
     }
+}
+
+/// A daemon started by an earlier app version keeps the loopback port after an
+/// update, so the updated helper cannot start. Older daemons report no build.
+func helperDaemonIsStale(runningBuild: String?, bundledBuild: String?) -> Bool {
+    guard let bundledBuild, !bundledBuild.isEmpty else { return false }
+    return runningBuild != bundledBuild
 }
 
 struct CommandResult { let success: Bool; let output: String; let error: String }

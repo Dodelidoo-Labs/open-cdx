@@ -43,6 +43,7 @@ type ClaudeWindow struct {
 // the identity is a helper-computed digest and the email is masked on the Mac.
 type ClaudeAccount struct {
 	ID             string
+	IdentityHash   string
 	MaskedEmail    string
 	LastDeviceID   string
 	LastDeviceName string
@@ -197,7 +198,7 @@ func (store *Store) RecordClaudeAllowance(ctx context.Context, accountID string,
 }
 
 func (store *Store) ClaudeAccounts(ctx context.Context) ([]ClaudeAccount, error) {
-	rows, err := store.db.QueryContext(ctx, `SELECT c.id, c.masked_email, c.last_device_id, COALESCE(d.name,''), c.windows_json, c.observed_at, c.updated_at
+	rows, err := store.db.QueryContext(ctx, `SELECT c.id, c.identity_hash, c.masked_email, c.last_device_id, COALESCE(d.name,''), c.windows_json, c.observed_at, c.updated_at
 		FROM claude_accounts c LEFT JOIN devices d ON d.id=c.last_device_id ORDER BY c.created_at, c.id`)
 	if err != nil {
 		return nil, err
@@ -208,7 +209,7 @@ func (store *Store) ClaudeAccounts(ctx context.Context) ([]ClaudeAccount, error)
 		var account ClaudeAccount
 		var windows []byte
 		var observed, updated int64
-		if err = rows.Scan(&account.ID, &account.MaskedEmail, &account.LastDeviceID, &account.LastDeviceName, &windows, &observed, &updated); err != nil {
+		if err = rows.Scan(&account.ID, &account.IdentityHash, &account.MaskedEmail, &account.LastDeviceID, &account.LastDeviceName, &windows, &observed, &updated); err != nil {
 			return nil, err
 		}
 		if len(windows) > 0 {
@@ -220,4 +221,32 @@ func (store *Store) ClaudeAccounts(ctx context.Context) ([]ClaudeAccount, error)
 		result = append(result, account)
 	}
 	return result, rows.Err()
+}
+
+// DeleteClaudeAccountIdentity removes an observed subscription and its
+// allowance readings. Its usage rows keep their opaque account key.
+func (store *Store) DeleteClaudeAccountIdentity(ctx context.Context, identityHash string) error {
+	transaction, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer transaction.Rollback()
+	var id string
+	if err = transaction.QueryRowContext(ctx, `SELECT id FROM claude_accounts WHERE identity_hash=?`, identityHash).Scan(&id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	if _, err = transaction.ExecContext(ctx, `DELETE FROM allowance_observations WHERE source='live' AND account_id=?`, id); err != nil {
+		return err
+	}
+	if _, err = transaction.ExecContext(ctx, `DELETE FROM claude_accounts WHERE id=?`, id); err != nil {
+		return err
+	}
+	if err = transaction.Commit(); err != nil {
+		return err
+	}
+	store.telemetryRevision.Add(1)
+	return nil
 }

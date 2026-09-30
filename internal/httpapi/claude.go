@@ -45,7 +45,7 @@ func (server *Server) claudeTelemetry(writer http.ResponseWriter, request *http.
 		if identity == "" {
 			// Without Claude Code's OpenTelemetry account attributes, an
 			// allowance can only be attributed to the reporting machine.
-			identity = claudecode.AccountIdentity("device:" + device.ID)
+			identity = machineClaudeIdentity(device.ID)
 		}
 		if id, ok := accountIDs[identity]; ok {
 			return id, nil
@@ -88,6 +88,11 @@ func (server *Server) claudeTelemetry(writer http.ResponseWriter, request *http.
 		accountID, err := resolve(allowance.account)
 		if err == nil {
 			err = server.store.RecordClaudeAllowance(ctx, accountID, allowance.observedAt, allowance.windows)
+		}
+		if err == nil && allowance.account != "" {
+			// Readings this Mac sent before its account was known belong to a
+			// placeholder that would duplicate the identified subscription.
+			err = server.store.DeleteClaudeAccountIdentity(ctx, machineClaudeIdentity(device.ID))
 		}
 		if err != nil {
 			writeAPIError(writer, http.StatusInternalServerError, "claude_telemetry_failed", "Claude Code allowance could not be stored")
@@ -218,6 +223,10 @@ func claudeAccountViews(accounts []storage.ClaudeAccount, now time.Time) []map[s
 		})
 	}
 	return result
+}
+
+func machineClaudeIdentity(deviceID string) string {
+	return claudecode.AccountIdentity("device:" + deviceID)
 }
 
 // Weekly first, then shorter windows, matching the OpenAI account rows.

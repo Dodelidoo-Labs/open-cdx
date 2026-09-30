@@ -530,10 +530,6 @@
     return seriesColors.get(key) || chartPalette[0];
   }
 
-  function pointsForRange(report, range) {
-    return OpenCDXTelemetryRanges.select(report, range).points;
-  }
-
   function setMetrics(points) {
     const models = new Set(points.map((point) => point.model));
     const totals = points.reduce((sum, point) => {
@@ -589,16 +585,22 @@
     });
   }
 
-  function updateChartMeta(range, mode, grouping) {
-    const date = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
-    const start = date.format(range.start);
-    const end = date.format(range.end);
-    telemetryRoot.querySelector("[data-chart-title]").textContent = `${groupingLabel(grouping)} usage by ${mode}`;
-    telemetryRoot.querySelector("[data-chart-meta]").textContent = `${range.hours ? `Last ${range.hours === 24 ? "24 hours" : `${range.hours / 24} days`} · ` : ""}${start === end ? start : `${start}–${end}`} · ${selectedTimeZone} · ${mode === "tokens" ? "input and output combined" : "inference calls"}`;
+  const timelineFormats = new Map();
+  function timelineFormat(options) {
+    const key = `${selectedTimeZone}:${JSON.stringify(options)}`;
+    if (!timelineFormats.has(key)) timelineFormats.set(key, new Intl.DateTimeFormat(undefined, { timeZone: selectedTimeZone, ...options }));
+    return timelineFormats.get(key);
   }
 
-  function exportTelemetry(points, range) {
-    const columns = ["date", "device_id", "device_name", "provider", "model", "source", "routing", "requests", "input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens", "reasoning_output_tokens"];
+  const unitLabels = { hour: "hourly", day: "daily", week: "weekly", month: "monthly" };
+  function updateChartMeta(view, unit, mode, grouping) {
+    const format = timelineFormat({ month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    telemetryRoot.querySelector("[data-chart-title]").textContent = `${groupingLabel(grouping)} usage by ${mode}`;
+    telemetryRoot.querySelector("[data-chart-meta]").textContent = `${format.format(view.from)} – ${format.format(view.to)} · ${unitLabels[unit]} bars · ${selectedTimeZone} · ${mode === "tokens" ? "input and output combined" : "inference calls"}`;
+  }
+
+  function exportTelemetry(points, view) {
+    const columns = ["date", "at", "device_id", "device_name", "provider", "model", "source", "routing", "requests", "input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens", "reasoning_output_tokens"];
     const escapeCell = (value) => {
       const text = String(value ?? "");
       return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
@@ -608,7 +610,8 @@
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     link.href = url;
-    link.download = `opencdx-telemetry-${dateKey(range.start)}-${dateKey(range.end)}.csv`;
+    const day = (at) => OpenCDXTelemetryRanges.dayKey(at, selectedTimeZone);
+    link.download = `opencdx-telemetry-${day(view.from)}-${day(view.to - 1)}.csv`;
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
   }
@@ -681,32 +684,30 @@
     host.appendChild(scroll);
   }
 
-  function bucketDetails(date, spanDays) {
-    if (spanDays <= 45) {
+  function bucketText(bucket, unit) {
+    if (unit === "hour") {
+      const midnight = OpenCDXTelemetryRanges.dayKey(bucket.from, selectedTimeZone) !== OpenCDXTelemetryRanges.dayKey(bucket.from - 1, selectedTimeZone);
       return {
-        key: dateKey(date),
-        label: date.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }),
-        tooltip: fullDate.format(date),
+        label: midnight ? timelineFormat({ month: "short", day: "numeric" }).format(bucket.from) : timelineFormat({ hour: "2-digit", minute: "2-digit" }).format(bucket.from),
+        tooltip: timelineFormat({ weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(bucket.from),
       };
     }
-    if (spanDays <= 180) {
-      const week = startOfWeek(date);
+    if (unit === "day") {
       return {
-        key: dateKey(week),
-        label: week.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }),
-        tooltip: `Week of ${fullDate.format(week)}`,
+        label: timelineFormat({ month: "short", day: "numeric" }).format(bucket.from),
+        tooltip: timelineFormat({ weekday: "short", year: "numeric", month: "long", day: "numeric" }).format(bucket.from),
       };
     }
-    if (spanDays <= 3650) {
-      const key = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+    if (unit === "week") {
       return {
-        key,
-        label: date.toLocaleDateString(undefined, { month: "short", year: "2-digit", timeZone: "UTC" }),
-        tooltip: date.toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" }),
+        label: timelineFormat({ month: "short", day: "numeric" }).format(bucket.from),
+        tooltip: `Week of ${timelineFormat({ year: "numeric", month: "long", day: "numeric" }).format(bucket.from)}`,
       };
     }
-    const year = String(date.getUTCFullYear());
-    return { key: year, label: year, tooltip: year };
+    return {
+      label: timelineFormat({ month: "short", year: "2-digit" }).format(bucket.from),
+      tooltip: timelineFormat({ month: "long", year: "numeric" }).format(bucket.from),
+    };
   }
 
   function niceMaximum(value) {
@@ -722,6 +723,7 @@
     return element;
   }
 
+  const chartHost = telemetryRoot.querySelector('[data-usage-chart="tokens"]');
   const allowanceToggle = telemetryRoot.querySelector("[data-allowance-toggle]");
   const allowanceWindow = telemetryRoot.querySelector("[data-allowance-window]");
   let allowancePreferences = {};
@@ -751,6 +753,17 @@
     hideTooltip();
     renderTelemetry();
   });
+  // Provider marks from Simple Icons (CC0); trademarks of OpenAI and Anthropic.
+  const providerMarks = {
+    openai: "M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z",
+    "claude-code": "m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z",
+  };
+  function providerMark(provider) {
+    const svg = svgElement("svg", { viewBox: "0 0 24 24", class: "provider-mark", "aria-hidden": "true" });
+    svg.appendChild(svgElement("path", { d: providerMarks[provider] || providerMarks.openai }));
+    return svg;
+  }
+
   function renderAllowanceControls(report, range) {
     const windows = OpenCDXTelemetryAllowance.windows(report);
     if (windows.length && !windows.some((w) => w.seconds === allowanceSeconds)) allowanceSeconds = windows[0].seconds;
@@ -766,7 +779,7 @@
     const series = OpenCDXTelemetryAllowance.select(report, range, allowanceSeconds);
     const legend = telemetryRoot.querySelector("[data-allowance-legend]");
     legend.hidden = !allowanceEnabled || !series.length;
-    const legendSignature = JSON.stringify(series.map((s) => [s.account_id, s.label, s.color, hiddenAllowanceAccounts.has(s.account_id)]));
+    const legendSignature = JSON.stringify(series.map((s) => [s.account_id, s.provider, s.label, s.color, hiddenAllowanceAccounts.has(s.account_id)]));
     if (legend.dataset.accounts !== legendSignature) {
       const focused = legend.contains(document.activeElement) ? document.activeElement.dataset.account : null;
       legend.replaceChildren(
@@ -780,9 +793,11 @@
           swatch.setAttribute("aria-hidden", "true");
           // Masked emails can coincide. The short internal ID distinguishes them without exposing credentials.
           const duplicates = series.filter((s) => s.label === account.label).length > 1;
+          const label = (account.label || "Account").replace(/^Claude · /, "");
           button.append(
             swatch,
-            document.createTextNode(`${account.label || "Account"}${duplicates ? ` · ${account.account_id.slice(-6)}` : ""}`),
+            providerMark(account.provider),
+            document.createTextNode(`${label}${duplicates ? ` · ${account.account_id.slice(-6)}` : ""}`),
           );
           button.addEventListener("click", () => {
             if (hiddenAllowanceAccounts.has(account.account_id)) hiddenAllowanceAccounts.delete(account.account_id);
@@ -801,74 +816,32 @@
     return allowanceEnabled ? visible : [];
   }
 
-  function renderUsageChart(range, report, mode, grouping) {
-    const host = telemetryRoot.querySelector('[data-usage-chart="tokens"]');
+  function renderUsageChart(view, report, mode, grouping) {
+    const host = chartHost;
     host.textContent = "";
     const cyclesHost = telemetryRoot.querySelector("[data-cycle-details]");
     cyclesHost.replaceChildren();
-    const hourly = range.hours === 24 && Array.isArray(report.hourly_usage);
-    const points = hourly ? report.hourly_usage : pointsForRange(report, range);
+    const timeZone = report.time_zone || "UTC";
+    const unit = OpenCDXTelemetryTimeline.unitFor(view.to - view.from);
+    const range = { from: new Date(view.from), to: new Date(view.to) };
     const resets = OpenCDXTelemetryRanges.resets(report, range);
     const allowanceSeries = renderAllowanceControls(report, range);
-    const timeline = OpenCDXTelemetryAllowance.bounds(range, report.time_zone || "UTC");
-    const spanDays = Math.max(1, Math.round((range.end - range.start) / 86400000) + 1);
-    const buckets = new Map();
-    if (hourly) {
-      const hourFormat = new Intl.DateTimeFormat(undefined, { timeZone: report.time_zone, hour: "2-digit", minute: "2-digit" });
-      const detailFormat = new Intl.DateTimeFormat(undefined, {
-        timeZone: report.time_zone,
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZoneName: "short",
-      });
-      for (let at = Math.floor(timeline.from / 3600000) * 3600000; at <= timeline.to; at += 3600000) {
-        const key = new Date(at).toISOString();
-        buckets.set(key, {
-          key,
-          label: hourFormat.format(at),
-          tooltip: detailFormat.format(at),
-          from: Math.max(at, timeline.from),
-          to: Math.min(at + 3600000, timeline.to),
-          series: new Map(),
-          cached: new Map(),
-        });
-      }
-    } else {
-      for (let date = range.start; date <= range.end; date = addDays(date, 1)) {
-        const bucket = bucketDetails(date, spanDays);
-        if (!buckets.has(bucket.key)) buckets.set(bucket.key, { ...bucket, firstDay: dateKey(date), series: new Map(), cached: new Map() });
-        buckets.get(bucket.key).afterDay = dateKey(addDays(date, 1));
-      }
-    }
+    const timeline = view;
+    const aggregated = OpenCDXTelemetryTimeline.aggregate(report, view, unit, timeZone,
+      (point) => seriesKey(point, grouping),
+      (point) => (mode === "requests" ? point.requests : point.input_tokens + point.output_tokens));
+    const bucketList = aggregated.buckets.map((bucket) => ({ ...bucket, ...bucketText(bucket, unit) }));
     const seriesTotals = new Map();
-    points.forEach((point) => {
-      const key = seriesKey(point, grouping);
-      const bucket = hourly ? { key: new Date(point.at).toISOString() } : bucketDetails(utcDate(point.date), spanDays);
-      const value = mode === "requests" ? point.requests : point.input_tokens + point.output_tokens;
-      const target = buckets.get(bucket.key);
-      if (!target) return;
-      target.series.set(key, (target.series.get(key) || 0) + value);
-      if (mode === "tokens") target.cached.set(key, (target.cached.get(key) || 0) + point.cached_input_tokens);
-      seriesTotals.set(key, (seriesTotals.get(key) || 0) + value);
-    });
+    bucketList.forEach((bucket) => bucket.series.forEach((value, key) => seriesTotals.set(key, (seriesTotals.get(key) || 0) + value)));
     const orderedSeries = Array.from(seriesTotals.keys()).sort((left, right) => {
       const valueDifference = (seriesTotals.get(right) || 0) - (seriesTotals.get(left) || 0);
       if (valueDifference !== 0) return valueDifference;
       return seriesLabel(left, grouping).localeCompare(seriesLabel(right, grouping));
     });
-    const bucketList = Array.from(buckets.values());
     let maximum = niceMaximum(
       Math.max(0, ...bucketList.map((bucket) => Array.from(bucket.series.values()).reduce((sum, value) => sum + value, 0))),
     );
-    if ((orderedSeries.length === 0 || maximum === 0) && resets.length === 0 && !allowanceSeries.some((s) => s.points.length)) {
-      const empty = document.createElement("div");
-      empty.className = "telemetry-empty";
-      empty.textContent = orderedSeries.length === 0 ? "No usage in this period." : `No ${mode} were reported in this period.`;
-      host.appendChild(empty);
-      return;
-    }
+    const empty = (orderedSeries.length === 0 || maximum === 0) && resets.length === 0 && !allowanceSeries.some((s) => s.points.length);
 
     maximum = Math.max(1, maximum);
     const width = Math.max(560, host.clientWidth || 960);
@@ -879,11 +852,19 @@
     const bottom = 58;
     const plotWidth = width - left - right;
     const plotHeight = height - top - bottom;
+    telemetryState.chart = { width, left, plotWidth };
     const svg = svgElement("svg", {
       viewBox: `0 0 ${width} ${height}`,
       role: "img",
-      "aria-label": `Stacked ${grouping} ${mode} usage chart`,
+      "aria-label": `Stacked ${grouping} ${mode} usage chart. Drag, swipe, or use arrow keys to move through time; pinch, Control-scroll, or plus and minus keys to zoom.`,
     });
+    const clipID = "telemetry-plot-clip";
+    const defs = svgElement("defs");
+    const clip = svgElement("clipPath", { id: clipID });
+    clip.appendChild(svgElement("rect", { x: left, y: 0, width: plotWidth, height: top + plotHeight }));
+    defs.appendChild(clip);
+    svg.appendChild(defs);
+    const plot = svgElement("g", { "clip-path": `url(#${clipID})` });
     for (let tick = 0; tick <= 4; tick += 1) {
       const value = (maximum / 4) * tick;
       const y = top + plotHeight - (plotHeight * tick) / 4;
@@ -893,12 +874,14 @@
       svg.appendChild(label);
     }
     svg.appendChild(svgElement("line", { x1: left, x2: width - right, y1: top + plotHeight, y2: top + plotHeight, class: "axis-line" }));
+    svg.appendChild(plot);
+    if (empty) {
+      const note = svgElement("text", { x: left + plotWidth / 2, y: top + plotHeight / 2, "text-anchor": "middle", class: "chart-empty" });
+      note.textContent = "No usage in this period.";
+      svg.appendChild(note);
+    }
     const timeX = (at) => left + ((at - timeline.from) / (timeline.to - timeline.from)) * plotWidth;
     bucketList.forEach((bucket) => {
-      if (!hourly) {
-        bucket.from = Math.max(timeline.from, OpenCDXTelemetryAllowance.dayStart(bucket.firstDay, report.time_zone));
-        bucket.to = Math.min(timeline.to, OpenCDXTelemetryAllowance.dayStart(bucket.afterDay, report.time_zone));
-      }
       bucket.x = timeX(bucket.from);
       bucket.width = timeX(bucket.to) - bucket.x;
     });
@@ -917,10 +900,12 @@
         })
         .filter(Boolean);
     const cursor = svgElement("line", { class: "allowance-cursor", y1: top, y2: top + plotHeight, visibility: "hidden" });
+    // Label a stable subset of buckets so labels do not jump while panning.
     const labelEvery = Math.max(1, Math.ceil(bucketList.length / 12));
-    bucketList.forEach((bucket, index) => {
+    const unitLength = { hour: 3600000, day: 86400000, week: 7 * 86400000, month: 30.44 * 86400000 }[unit];
+    bucketList.forEach((bucket) => {
       const slot = bucket.width;
-      const barWidth = Math.max(1, Math.min(30, slot * 0.7));
+      const barWidth = Math.max(1, Math.min(48, slot * 0.72));
       const x = bucket.x + (slot - barWidth) / 2;
       let stacked = 0;
       orderedSeries.forEach((key) => {
@@ -928,7 +913,7 @@
         if (value <= 0) return;
         const segmentHeight = (value / maximum) * plotHeight;
         const y = top + plotHeight - stacked - segmentHeight;
-        svg.appendChild(svgElement("rect", { x, y, width: barWidth, height: Math.max(segmentHeight, 0.6), fill: colorFor(key) }));
+        plot.appendChild(svgElement("rect", { x, y, width: barWidth, height: Math.max(segmentHeight, 0.6), fill: colorFor(key) }));
         stacked += segmentHeight;
       });
       const values = orderedSeries
@@ -946,10 +931,11 @@
         .sort((a, b) => b.numeric - a.numeric);
       const total = values.reduce((sum, row) => sum + row.numeric, 0);
       const cachedTotal = values.reduce((sum, row) => sum + row.cached, 0);
+      const hitLeft = Math.max(bucket.x, left);
       const hit = svgElement("rect", {
-        x: bucket.x,
+        x: hitLeft,
         y: top,
-        width: Math.max(slot, 1),
+        width: Math.max(Math.min(bucket.x + slot, left + plotWidth) - hitLeft, 1),
         height: plotHeight,
         class: "bar-hit",
         tabindex: values.length || allowanceSeries.length ? 0 : -1,
@@ -985,6 +971,7 @@
           cursor.setAttribute("x1", px);
           cursor.setAttribute("x2", px);
           cursor.setAttribute("visibility", allowanceEnabled ? "visible" : "hidden");
+          if (telemetryState.panning) return;
           showTooltip(`${bucket.tooltip} · usage totals`, rowsAt(at), totalLabel, event.clientX, event.clientY);
         };
         hit.addEventListener("pointerenter", showAtPointer);
@@ -999,8 +986,9 @@
         hit.addEventListener("blur", hideTooltip);
       }
       svg.appendChild(hit);
-      if (index % labelEvery === 0 || index === bucketList.length - 1) {
-        const label = svgElement("text", { x: x + barWidth / 2, y: height - 25, "text-anchor": "middle" });
+      const center = x + barWidth / 2;
+      if (Math.round(bucket.from / unitLength) % labelEvery === 0 && center >= left && center <= left + plotWidth) {
+        const label = svgElement("text", { x: center, y: height - 25, "text-anchor": "middle" });
         label.textContent = bucket.label;
         svg.appendChild(label);
       }
@@ -1025,11 +1013,11 @@
               path += ` L ${x} ${y(segment[index - 1].remaining)}`;
             path += `${index ? " L" : "M"} ${x} ${y(point.remaining)}`;
           });
-          svg.appendChild(
+          plot.appendChild(
             svgElement("path", { d: path, stroke: series.color, class: "allowance-line", "data-account": series.account_id }),
           );
           if (segment.length === 1)
-            svg.appendChild(
+            plot.appendChild(
               svgElement("circle", {
                 cx: timeX(Date.parse(segment[0].at)),
                 cy: y(segment[0].remaining),
@@ -1060,17 +1048,17 @@
     };
     const resetBuckets = new Map();
     resets.forEach((reset) => {
-      const day = OpenCDXTelemetryRanges.dayKey(reset.at, report.time_zone);
-      const key = hourly
-        ? new Date(Math.floor(Date.parse(reset.at) / 3600000) * 3600000).toISOString()
-        : bucketDetails(utcDate(day), spanDays).key;
-      if (!resetBuckets.has(key)) resetBuckets.set(key, []);
-      resetBuckets.get(key).push(reset);
+      const at = Date.parse(reset.at);
+      const bucket = bucketList.find((candidate) => at >= candidate.from && at < candidate.to);
+      if (!bucket) return;
+      if (!resetBuckets.has(bucket)) resetBuckets.set(bucket, []);
+      resetBuckets.get(bucket).push(reset);
     });
-    bucketList.forEach((bucket, index) => {
-      const entries = resetBuckets.get(bucket.key);
+    bucketList.forEach((bucket) => {
+      const entries = resetBuckets.get(bucket);
       if (!entries) return;
       const x = bucket.x + bucket.width / 2;
+      if (x < left || x > left + plotWidth) return;
       const marker = svgElement("g", {
         class: "allowance-reset",
         tabindex: 0,
@@ -1130,32 +1118,21 @@
   }
 
   function earliestUsageDay(report) {
-    const days = report.usage.map((point) => point.date);
-    for (const reset of report.allowance_resets || []) days.push(OpenCDXTelemetryRanges.dayKey(reset.at, report.time_zone));
-    for (const series of report.allowance_history || []) for (const point of series.points) days.push(OpenCDXTelemetryRanges.dayKey(point.at, report.time_zone));
-    if (!days.length) return generatedDay(report);
-    return utcDate(days.reduce((earliest, day) => day < earliest ? day : earliest));
+    return utcDate(OpenCDXTelemetryRanges.dayKey(OpenCDXTelemetryTimeline.extent(report).earliest, report.time_zone));
   }
 
-  function selectedRange(report, selection = telemetryRoot.querySelector("[data-telemetry-range]").value) {
-    const today = generatedDay(report);
-    if (selection === "rolling24") return OpenCDXTelemetryRanges.rolling(report, 24);
-    if (selection === "today") return { start: today, end: today };
-    if (selection === "week") return OpenCDXTelemetryRanges.rolling(report, 7 * 24);
-    if (selection === "thirty") return OpenCDXTelemetryRanges.rolling(report, 30 * 24);
-    if (selection === "month") return { start: new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)), end: today };
-    if (selection === "year") return { start: new Date(Date.UTC(today.getUTCFullYear(), 0, 1)), end: today };
-    if (selection === "all") return { start: earliestUsageDay(report), end: today };
+  // The visible window for a preset, or for the custom date inputs.
+  function viewForSelection(report, selection) {
+    if (selection !== "custom") return OpenCDXTelemetryTimeline.presetView(selection, report);
     const startValue = telemetryRoot.querySelector("[data-range-start]").value;
     const endValue = telemetryRoot.querySelector("[data-range-end]").value;
-    if (!startValue || !endValue) return null;
-    const earliest = earliestUsageDay(report);
-    const requestedStart = utcDate(startValue);
-    const requestedEnd = utcDate(endValue);
-    const start = requestedStart < earliest ? earliest : requestedStart;
-    const end = requestedEnd > today ? today : requestedEnd;
-    if (start > end) return null;
-    return { start, end };
+    if (!startValue || !endValue || startValue > endValue) return null;
+    const timeZone = report.time_zone || "UTC";
+    const end = dateKey(addDays(utcDate(endValue), 1));
+    return OpenCDXTelemetryTimeline.clamp(
+      { from: OpenCDXTelemetryAllowance.dayStart(startValue, timeZone), to: OpenCDXTelemetryAllowance.dayStart(end, timeZone) },
+      OpenCDXTelemetryTimeline.extent(report),
+    );
   }
 
   function telemetryFailed() {
@@ -1186,12 +1163,17 @@
   const telemetryState = {
     report: null,
     currentPoints: [],
-    currentRange: null,
+    view: null,
+    following: true,
+    preset: select.value,
+    panning: false,
+    chart: null,
     boundsInitialized: false,
     exporting: false,
   };
 
-  const syncPresetButtons = (active = select.value) => {
+  const nowButton = telemetryRoot.querySelector("[data-timeline-now]");
+  const syncPresetButtons = (active = telemetryState.preset) => {
     presets.forEach((button) => button.classList.toggle("active", button.dataset.rangePreset === active));
   };
   const closeCustomRange = (restoreFocus = false) => {
@@ -1222,55 +1204,82 @@
     }
   }
 
-  function renderTelemetry(selection = select.value, includeHeatmap = false) {
-    if (!telemetryState.report) return false;
-    const report = OpenCDXTelemetryDevices.filter(telemetryState.report, deviceSelect.value);
-    const range = selectedRange(report, selection);
-    if (!range) {
+  // Presets and custom dates choose the visible window; drag, swipe, and
+  // zoom move it through all recorded history.
+  function applySelection(selection) {
+    if (!telemetryState.report) {
+      // Remember a choice made while the first report is still loading.
+      select.value = selection;
+      telemetryState.preset = selection;
+      syncPresetButtons();
+      return selection !== "custom";
+    }
+    const view = viewForSelection(telemetryState.report, selection);
+    if (!view) {
       rangeError.textContent = "Choose a valid start and end date.";
       rangeError.hidden = false;
       return false;
     }
-    const pageScroll = { x: window.scrollX, y: window.scrollY };
-    const heatmapScroll = telemetryRoot.querySelector(".heatmap-scroll")?.scrollLeft || 0;
     rangeError.hidden = true;
     select.value = selection;
+    telemetryState.preset = selection;
+    telemetryState.view = view;
+    telemetryState.following = view.to >= Date.parse(telemetryState.report.generated_at);
+    renderTelemetry();
+    return true;
+  }
+
+  function moveView(view, keepPreset = true) {
+    if (!telemetryState.report) return;
+    telemetryState.view = view;
+    telemetryState.following = view.to >= Date.parse(telemetryState.report.generated_at) - 60000;
+    if (!keepPreset) telemetryState.preset = null;
+    if (renderFrame) return;
+    renderFrame = window.requestAnimationFrame(() => {
+      renderFrame = 0;
+      renderTelemetry();
+    });
+  }
+  let renderFrame = 0;
+
+  // A refreshed report keeps a window that follows the present moving with it.
+  function followReport(report) {
+    if (!telemetryState.view) {
+      telemetryState.view = viewForSelection(report, select.value) || OpenCDXTelemetryTimeline.presetView("all", report);
+      telemetryState.following = true;
+      return;
+    }
+    const span = telemetryState.view.to - telemetryState.view.from;
+    const to = telemetryState.following ? Date.parse(report.generated_at) : telemetryState.view.to;
+    telemetryState.view = OpenCDXTelemetryTimeline.clamp({ from: to - span, to }, OpenCDXTelemetryTimeline.extent(report));
+  }
+
+  function renderTelemetry(includeHeatmap = false) {
+    if (!telemetryState.report || !telemetryState.view) return false;
+    const report = OpenCDXTelemetryDevices.filter(telemetryState.report, deviceSelect.value);
+    const view = telemetryState.view;
+    const pageScroll = { x: window.scrollX, y: window.scrollY };
+    const heatmapScroll = telemetryRoot.querySelector(".heatmap-scroll")?.scrollLeft || 0;
     syncPresetButtons();
-    const selected = OpenCDXTelemetryRanges.select(report, range);
+    nowButton.hidden = telemetryState.following;
+    const unit = OpenCDXTelemetryTimeline.unitFor(view.to - view.from);
+    const selected = OpenCDXTelemetryTimeline.visible(report, view);
+    const hiddenUntimed = unit === "hour" && selected.points.some((point) => !point.at);
     const precision = telemetryRoot.querySelector("[data-telemetry-precision]");
-    precision.hidden = selected.complete;
-    precision.textContent = selected.complete ? "" : "This rolling total is unavailable because older records contain only UTC daily totals. Reconcile usage with the updated helper to restore request timestamps, or select a calendar range.";
-    telemetryState.precisionComplete = selected.complete;
-    if (!selected.complete) {
-      telemetryState.currentPoints = [];
-      telemetryState.currentRange = null;
-      telemetryRoot.querySelectorAll("[data-metric]").forEach((element) => { element.textContent = "—"; });
-      telemetryRoot.querySelector('[data-usage-chart="tokens"]').textContent = "Complete rolling-window history is unavailable.";
-      telemetryRoot.querySelector("[data-cycle-details]").replaceChildren();
-      renderAllowanceControls(report, range);
-      telemetryRoot.querySelector("[data-allowance-legend]").hidden = true;
-      telemetryRoot.querySelector("[data-model-breakdown]").textContent = "";
-      telemetryRoot.querySelector("[data-breakdown-total]").textContent = "";
-      updateChartMeta(range, "tokens", "model");
-      exportButton.disabled = true;
-      if (includeHeatmap) renderHeatmap(report);
-      return true;
-    }
-    if (!range.from && report.time_zone !== "UTC" && report.untimed_usage?.length) {
-      precision.hidden = false;
-      precision.textContent = "Older records without request timestamps remain grouped by UTC day. Reconcile usage with the updated helper to apply the configured timezone to that history.";
-    }
+    precision.hidden = !selected.partial && !hiddenUntimed;
+    precision.textContent = hiddenUntimed
+      ? "Some history has only daily totals and cannot be shown as hourly bars. Zoom out to see it, or import usage with the updated helper to restore request timestamps."
+      : selected.partial ? "Totals include older daily-only records whose day extends past the visible window." : "";
     const points = selected.points;
     telemetryState.currentPoints = points;
-    telemetryState.currentRange = range;
     const mode = telemetryRoot.querySelector("[data-metric-mode]")?.value || "tokens";
     const grouping = telemetryRoot.querySelector("[data-group-mode]")?.value || "model";
     prepareSeriesColors(report.usage, grouping);
     if (includeHeatmap) renderHeatmap(report);
     setMetrics(points);
-    renderUsageChart(range, report, mode, grouping);
+    renderUsageChart(view, report, mode, grouping);
     renderBreakdown(points, mode, grouping);
-    updateChartMeta(range, mode, grouping);
+    updateChartMeta(view, unit, mode, grouping);
     const nextHeatmap = telemetryRoot.querySelector(".heatmap-scroll");
     if (nextHeatmap) nextHeatmap.scrollLeft = heatmapScroll;
     exportButton.disabled = telemetryState.exporting;
@@ -1278,11 +1287,109 @@
     return true;
   }
 
+  const plotScreenBounds = () => {
+    const chart = telemetryState.chart;
+    if (!chart) return null;
+    const bounds = chartHost.getBoundingClientRect();
+    const scale = bounds.width / chart.width;
+    return { left: bounds.left + chart.left * scale, width: chart.plotWidth * scale };
+  };
+  let drag = null;
+  let suppressClickUntil = 0;
+  chartHost.addEventListener("click", (event) => {
+    if (performance.now() < suppressClickUntil) event.stopPropagation();
+  }, { capture: true });
+  chartHost.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || !telemetryState.view) return;
+    drag = { id: event.pointerId, x: event.clientX, view: telemetryState.view, moved: false };
+  });
+  chartHost.addEventListener("pointermove", (event) => {
+    if (!drag || event.pointerId !== drag.id) return;
+    const dx = event.clientX - drag.x;
+    if (!drag.moved && Math.abs(dx) < 4) return;
+    const plot = plotScreenBounds();
+    if (!plot) return;
+    if (!drag.moved) {
+      drag.moved = true;
+      telemetryState.panning = true;
+      try { chartHost.setPointerCapture(event.pointerId); } catch { /* The pointer may already be gone. */ }
+      chartHost.classList.add("is-panning");
+      hideTooltip();
+    }
+    const span = drag.view.to - drag.view.from;
+    moveView(OpenCDXTelemetryTimeline.pan(drag.view, (-dx / plot.width) * span, telemetryState.report));
+  });
+  const endDrag = (event) => {
+    if (!drag || event.pointerId !== drag.id) return;
+    if (drag.moved) {
+      if (chartHost.hasPointerCapture?.(event.pointerId)) chartHost.releasePointerCapture(event.pointerId);
+      chartHost.classList.remove("is-panning");
+      // The click that ends a drag must not open a reset marker.
+      suppressClickUntil = performance.now() + 100;
+      window.setTimeout(() => { telemetryState.panning = false; }, 0);
+    }
+    drag = null;
+  };
+  chartHost.addEventListener("pointerup", endDrag);
+  chartHost.addEventListener("pointercancel", endDrag);
+  const zoomAt = (factor, clientX) => {
+    const view = telemetryState.view;
+    const plot = plotScreenBounds();
+    if (!view || !plot) return;
+    const ratio = clientX === undefined ? 1 : Math.min(1, Math.max(0, (clientX - plot.left) / plot.width));
+    // Zooming at the right edge keeps a window that follows the present.
+    const anchor = telemetryState.following && ratio > 0.9 ? view.to : view.from + ratio * (view.to - view.from);
+    moveView(OpenCDXTelemetryTimeline.zoom(view, factor, anchor, telemetryState.report), false);
+  };
+  chartHost.addEventListener("wheel", (event) => {
+    const view = telemetryState.view;
+    const plot = plotScreenBounds();
+    if (!view || !plot) return;
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      zoomAt(Math.exp(Math.max(-1, Math.min(1, event.deltaY * 0.01))), event.clientX);
+    } else if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+      // Horizontal swipes move through time; vertical scrolling stays with the page.
+      event.preventDefault();
+      moveView(OpenCDXTelemetryTimeline.pan(view, (event.deltaX / plot.width) * (view.to - view.from), telemetryState.report));
+    }
+  }, { passive: false });
+  let gesture = null;
+  chartHost.addEventListener("gesturestart", (event) => {
+    event.preventDefault();
+    gesture = { view: telemetryState.view, x: event.clientX };
+  });
+  chartHost.addEventListener("gesturechange", (event) => {
+    if (!gesture?.view) return;
+    event.preventDefault();
+    telemetryState.view = gesture.view;
+    zoomAt(1 / event.scale, gesture.x);
+  });
+  chartHost.addEventListener("gestureend", () => { gesture = null; });
+  chartHost.addEventListener("keydown", (event) => {
+    const view = telemetryState.view;
+    if (!view || event.altKey || event.ctrlKey || event.metaKey) return;
+    const span = view.to - view.from;
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      moveView(OpenCDXTelemetryTimeline.pan(view, (event.key === "ArrowLeft" ? -0.25 : 0.25) * span, telemetryState.report));
+    } else if (event.key === "+" || event.key === "=" || event.key === "-") {
+      event.preventDefault();
+      zoomAt(event.key === "-" ? 1.5 : 1 / 1.5);
+    }
+  });
+  nowButton.addEventListener("click", () => {
+    const view = telemetryState.view;
+    if (!view || !telemetryState.report) return;
+    const to = Date.parse(telemetryState.report.generated_at);
+    moveView(OpenCDXTelemetryTimeline.clamp({ from: to - (view.to - view.from), to }, OpenCDXTelemetryTimeline.extent(telemetryState.report)));
+  });
+
   select.addEventListener("change", () => {
     if (select.value === "custom") openCustomRange();
     else {
       closeCustomRange();
-      renderTelemetry();
+      applySelection(select.value);
     }
   });
   presets.forEach((button) => button.addEventListener("click", () => {
@@ -1292,19 +1399,19 @@
       return;
     }
     closeCustomRange();
-    renderTelemetry(selection);
+    applySelection(selection);
   }));
-  deviceSelect.addEventListener("change", () => renderTelemetry(select.value, true));
+  deviceSelect.addEventListener("change", () => renderTelemetry(true));
   telemetryRoot.querySelector("[data-metric-mode]")?.addEventListener("change", () => renderTelemetry());
   telemetryRoot.querySelector("[data-group-mode]")?.addEventListener("change", () => renderTelemetry());
   telemetryRoot.querySelector("[data-apply-range]").addEventListener("click", () => {
-    if (renderTelemetry("custom")) closeCustomRange();
+    if (applySelection("custom")) closeCustomRange();
   });
   telemetryRoot.querySelectorAll("[data-close-custom-range]").forEach((button) => {
     button.addEventListener("click", () => closeCustomRange(true));
   });
   [startInput, endInput].forEach((input) => input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && renderTelemetry("custom")) closeCustomRange();
+    if (event.key === "Enter" && applySelection("custom")) closeCustomRange();
   }));
   document.addEventListener("pointerdown", (event) => {
     if (!custom.hidden && !custom.contains(event.target) && !customButton.contains(event.target)) closeCustomRange();
@@ -1337,7 +1444,8 @@
       if (telemetryState.report && serverDate) {
         telemetryState.report.generated_at = new Date(serverDate).toISOString();
         updateTelemetryBounds(telemetryState.report);
-        renderTelemetry(select.value, true);
+        followReport(telemetryState.report);
+        renderTelemetry(true);
       }
       return { etag: response.headers.get("ETag") || etag };
     }
@@ -1349,7 +1457,8 @@
     telemetryState.report = report;
     updateTelemetryDevices(report);
     updateTelemetryBounds(report);
-    renderTelemetry(select.value, true);
+    followReport(report);
+    renderTelemetry(true);
     return { etag: response.headers.get("ETag") || "" };
   }
 
@@ -1598,7 +1707,8 @@
     state.etag = "";
     state.succeeded = false;
     telemetryState.report = null;
-    telemetryState.currentRange = null;
+    telemetryState.view = null;
+    telemetryState.chart = null;
     exportButton.disabled = true;
     telemetryRoot.setAttribute("aria-busy", "true");
     telemetryRoot.querySelectorAll("[data-metric]").forEach((element) => { element.textContent = "—"; });
@@ -1673,10 +1783,10 @@
     exportButton.disabled = true;
     try {
       await runLiveRefresh("home", liveStates.home);
-      if (telemetryState.currentRange) exportTelemetry(telemetryState.currentPoints, telemetryState.currentRange);
+      if (telemetryState.view) exportTelemetry(telemetryState.currentPoints, telemetryState.view);
     } finally {
       telemetryState.exporting = false;
-      exportButton.disabled = !telemetryState.report || telemetryState.precisionComplete === false;
+      exportButton.disabled = !telemetryState.report;
     }
   });
 

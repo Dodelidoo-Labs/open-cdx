@@ -311,3 +311,24 @@ func TestShellQuote(t *testing.T) {
 		}
 	}
 }
+
+func TestAccountFromStateReadsOnlyTheSignedInAccount(t *testing.T) {
+	state := `{"projects":{"/secret":{"history":["PRIVATE"]}},"oauthAccount":{"accountUuid":"uuid-1","emailAddress":"someone@example.com","organizationName":"Org"}}`
+	account, ok := accountFromState([]byte(state))
+	if !ok || account.Identity != AccountIdentity("uuid-1") || account.MaskedEmail != "s***e@e***.com" {
+		t.Fatalf("account = %#v %v", account, ok)
+	}
+	for _, missing := range []string{`{}`, `{"oauthAccount":{"emailAddress":"a@b.c"}}`, `not json`} {
+		if _, ok = accountFromState([]byte(missing)); ok {
+			t.Fatalf("%s produced an account", missing)
+		}
+	}
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, ".claude.json"), []byte(state), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", directory)
+	if account, ok = LocalAccount(); !ok || account.Identity != AccountIdentity("uuid-1") {
+		t.Fatalf("CLAUDE_CONFIG_DIR account = %#v %v", account, ok)
+	}
+}

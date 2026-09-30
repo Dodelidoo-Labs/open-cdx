@@ -27,11 +27,9 @@
     return high;
   }
   function bounds(range, timeZone) {
+    if (range.from) return { from: +range.from, to: +range.to };
     const next = new Date(+range.end + 86400000).toISOString().slice(0, 10);
-    return {
-      from: range.from ? +range.from : dayStart(range.start.toISOString().slice(0, 10), timeZone),
-      to: range.to ? +range.to : dayStart(next, timeZone),
-    };
+    return { from: dayStart(range.start.toISOString().slice(0, 10), timeZone), to: dayStart(next, timeZone) };
   }
   function windows(report) {
     const found = new Map();

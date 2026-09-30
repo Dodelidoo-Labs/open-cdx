@@ -33,3 +33,11 @@ test('duplicate names stay distinguishable and removed devices retain identity',
   assert.equal(options.find(d => d.id === '').name, 'Unknown device');
   assert.equal(options.find(d => d.id === 'removed').name, 'Removed device · removed');
 });
+test('machine filter also scopes hourly and daily-only timeline rows', () => {
+  const timeline = { ...report,
+    hourly_usage: [{ ...point('a', 1), at: '2026-09-01T10:00:00Z' }, { ...point('b', 2), at: '2026-09-01T11:00:00Z' }],
+    untimed_usage: [point('b', 3), point('', 4)] };
+  const selected = filter(timeline, 'b');
+  assert.deepEqual(selected.hourly_usage.map((row) => row.requests), [2]);
+  assert.deepEqual(selected.untimed_usage.map((row) => row.requests), [3]);
+});

@@ -300,7 +300,13 @@ form { margin: 0; }
 .model-breakdown-section .breakdown { min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; border-bottom: 1px solid var(--border); }
 .chart-stack { border-bottom: 1px solid var(--border); }
 .chart-scroll, .heatmap-scroll { min-width: 0; overflow-x: auto; scrollbar-width: thin; }
-.chart-shell { min-height: 214px; }
+.chart-shell { min-height: 214px; cursor: grab; touch-action: pan-y; user-select: none; outline: none; }
+.chart-shell:focus-visible { box-shadow: 0 0 0 2px var(--accent, currentColor); border-radius: 6px; }
+.chart-shell.is-panning, .chart-shell.is-panning .bar-hit { cursor: grabbing; }
+.chart-shell .chart-empty { fill: var(--muted); font-size: 12px; }
+.provider-mark { width: 12px; height: 12px; flex: 0 0 auto; fill: currentColor; opacity: .75; }
+.timeline-hint { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+.timeline-now { align-self: center; }
 .chart-shell svg { width: 100%; min-width: 560px; height: auto; display: block; }
 .chart-shell text { fill: var(--muted); font: 10px var(--font-mono); }
 .chart-shell .grid-line { stroke: var(--border); stroke-width: 1; stroke-dasharray: 4 4; }

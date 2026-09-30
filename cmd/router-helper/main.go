@@ -21,7 +21,6 @@ import (
 	secure "github.com/Dodelidoo-Labs/open-cdx/internal/crypto"
 	"github.com/Dodelidoo-Labs/open-cdx/internal/helper"
 	"github.com/Dodelidoo-Labs/open-cdx/internal/usagehistory"
-	"github.com/Dodelidoo-Labs/open-cdx/internal/version"
 )
 
 func main() {
@@ -85,7 +84,7 @@ func run(args []string) error {
 	case "open-dashboard":
 		return openDashboard(configPath, commandArgs)
 	case "version", "--version", "-version":
-		fmt.Printf("router-helper %s (%s)\n", version.Version, version.Commit)
+		fmt.Printf("router-helper %s\n", helper.BuildIdentity())
 		return nil
 	default:
 		return usageError()

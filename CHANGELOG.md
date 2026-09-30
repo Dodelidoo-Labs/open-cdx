@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-09-29
+
+### Added
+
+- Make the Telemetry chart a scrollable timeline. **24h**, **7d**, **30d**,
+  **Year**, and **All** now zoom instead of filtering: drag or swipe to move
+  through all recorded history, pinch or ⌘/Ctrl-scroll to zoom, use the arrow
+  and +/− keys, and choose **Now →** to return. Totals, the breakdown, and CSV
+  export follow the visible window.
+- Show OpenAI and Claude logos before account emails in the macOS menu and in
+  the allowance legend.
+
+### Changed
+
+- Bars are hourly, daily, weekly, or monthly by zoom level, aligned to calendar
+  boundaries in the selected timezone, so equal bars are evenly spaced. The
+  server now provides hourly usage for all timestamped history.
+- Attribute Claude allowance to the signed-in account, shown as its masked
+  email, even in sessions without telemetry. A machine placeholder is replaced
+  by the first identified reading from that Mac.
+- Remove the Claude Code status row and **Import Codex History…** from the
+  menu; both imports are in Settings.
+
+### Fixed
+
+- Replace a helper daemon left running by an earlier app version, so updates
+  take effect without quitting the app. The helper now reports its build.
+
+Update both the router server and the macOS companion. Updating from 1.7.0
+still requires quitting and reopening the app once, because the 1.7.0 app
+cannot yet replace its running helper.
+
 ## [1.7.0] - 2026-09-29
 
 ### Added
@@ -240,7 +272,8 @@ rebuilt for this release, but updating the companion alone does not fix HTTP 413
   timezone and daylight-saving changes. Show overlapping daily-only history as
   unavailable for rolling totals instead of presenting incomplete counts.
 
-[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.6.2...v1.7.0
 [1.6.2]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.6.0...v1.6.1

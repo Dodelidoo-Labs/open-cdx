@@ -21,9 +21,9 @@ emits one `api_request` event per model request.
 
 ## What you get
 
-- **macOS menu:** a **Claude Code** status row and one allowance row per
-  Claude subscription, with weekly and 5-hour bars, reset times, and the same
-  pace marker as OpenAI accounts. The row shows how old the reading is.
+- **macOS menu:** one row per Claude subscription, next to the OpenAI
+  accounts and marked with the Claude logo, with weekly and 5-hour bars, reset
+  times, and the same pace marker. The row shows how old the reading is.
 - **Dashboard telemetry:** Claude Code requests and tokens by model, machine,
   and provider (**Claude Code**), in the same charts, totals, breakdown, and
   CSV export as Codex usage.
@@ -99,7 +99,8 @@ reset telemetry.
 
 From the status line input, the wrapper reads only `session_id` and the
 `five_hour` and `seven_day` rate-limit windows. Paths, workspace, cost, and
-all other fields are ignored.
+all other fields are ignored. It also reads the signed-in account's UUID and
+email from Claude Code's `.claude.json`; no other field and no credential.
 
 From OpenTelemetry, the helper keeps only `api_request` events: request ID,
 model, timestamp, and input, output, cache-read, and cache-creation token
@@ -144,9 +145,13 @@ is included in the next reading, but not in token counts.
 Unchanged readings are stored at most every five minutes. The overlay does not
 connect readings more than 15 minutes apart, so idle periods appear as gaps.
 
-Readings are attributed to a subscription through the session's telemetry
-account. If telemetry is disabled, the reading is attributed to the machine
-and shown as `Claude on <Mac name>`.
+Readings are attributed to the signed-in subscription. The status line
+wrapper reads only `oauthAccount.accountUuid` and `emailAddress` from Claude
+Code's own `.claude.json` (in `CLAUDE_CONFIG_DIR` when set), the same values its
+telemetry reports, digests the UUID and masks the email on the Mac. Only when
+neither that file nor telemetry names an account is a reading attributed to the
+machine, shown as `Claude on <Mac name>`; the first identified reading from that
+Mac replaces the placeholder.
 
 ## Import history
 
@@ -167,7 +172,7 @@ attribution. Claude Code deletes transcripts after its `cleanupPeriodDays`
 
 | Symptom | Check |
 |---|---|
-| **Claude Code — Waiting for Usage** | Normal between sessions. Start a new session after connecting. |
+| **Settings** shows **Waiting for Usage** | Normal between sessions. Start a new session after connecting. |
 | No allowance rows | Allowance requires a Pro or Max login and appears after the first response. |
 | **Upload Pending** | The router is unreachable; the helper retries and keeps up to 20,000 requests in memory. |
 | Telemetry missing, allowance present | Run `/status` in Claude Code: it reports `otelHeadersHelper` failures. Confirm the helper is running. |

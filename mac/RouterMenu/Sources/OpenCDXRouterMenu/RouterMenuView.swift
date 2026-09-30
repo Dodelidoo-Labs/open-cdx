@@ -60,11 +60,6 @@ struct RouterMenuView: View {
                     model.copyConfiguration()
                 }
                 .disabled(!remoteActionsAvailable)
-
-                MenuActionButton("Import Codex History…", systemImage: "clock.arrow.circlepath") {
-                    model.requestUsageReconciliation()
-                }
-                .disabled(!model.status.connected || model.usageReconciliationInProgress || model.telemetryResetInProgress)
             }
             .padding(8)
 
@@ -133,15 +128,6 @@ struct RouterMenuView: View {
                 )
             }
 
-            if showsClaudeStatus {
-                StatusSummaryRow(
-                    title: "Claude Code",
-                    value: model.claudeReporting.label,
-                    systemImage: claudeStatusIcon,
-                    color: claudeStatusColor
-                )
-            }
-
             if !model.status.lastError.isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -168,27 +154,6 @@ struct RouterMenuView: View {
 
     private var accountsSection: some View {
         AccountAllowanceSection(accounts: model.status.accounts, claudeAccounts: model.status.claudeAccounts, connected: model.status.connected, resetInProgress: model.resetAccountID != nil, onReset: model.consumeReset)
-    }
-
-    private var showsClaudeStatus: Bool {
-        model.configured && (model.claudeSetup?.installed == true || !model.status.claudeAccounts.isEmpty)
-    }
-
-    private var claudeStatusIcon: String {
-        switch model.claudeReporting {
-        case .reporting: return "checkmark.circle.fill"
-        case .waiting: return "clock"
-        case .uploadPending: return "exclamationmark.triangle.fill"
-        case .notConnected: return "minus.circle"
-        }
-    }
-
-    private var claudeStatusColor: Color {
-        switch model.claudeReporting {
-        case .reporting: return .accentColor
-        case .uploadPending: return .orange
-        case .waiting, .notConnected: return .secondary
-        }
     }
 
     private var routerStatusIcon: String {
@@ -318,10 +283,14 @@ struct AccountAllowanceRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 8) {
-                Text(account.maskedEmail.isEmpty ? (account.observedAt == nil ? "OpenAI account" : "Claude subscription") : account.maskedEmail)
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                HStack(spacing: 6) {
+                    ProviderLogo(provider: account.accountProvider)
+                        .foregroundStyle(.secondary)
+                    Text(account.maskedEmail.isEmpty ? (account.accountProvider == .claude ? "Claude subscription" : "OpenAI account") : account.maskedEmail)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
                 TimelineView(.periodic(from: .now, by: 1)) { timeline in
                     let tickets = account.availableResetTickets(at: timeline.date)
                     HStack(spacing: 2) {
@@ -698,7 +667,7 @@ private struct RouterMenuViewPreviews: PreviewProvider {
         ]
         var claude = previewAccount(
             email: "b***s@g***.com",
-            plan: "Claude",
+            plan: "",
             windows: [
                 AccountQuotaWindowStatus(
                     label: "Weekly", remaining: 36, durationMinutes: 10_080,
@@ -713,6 +682,7 @@ private struct RouterMenuViewPreviews: PreviewProvider {
             ]
         )
         claude.observedAt = now.addingTimeInterval(-4 * 60)
+        claude.provider = AccountProvider.claude.rawValue
         status.claudeAccounts = [claude]
         model.applyPreviewStatus(status)
         return model

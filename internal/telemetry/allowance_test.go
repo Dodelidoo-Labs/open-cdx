@@ -46,24 +46,21 @@ func TestAllowanceHistoryUsesOnlyAccountReadingsAndKeepsWindowIdentity(t *testin
 	}
 }
 
-func TestHourlyUsageMatchesExactRollingWindowAndPreservesMachineScope(t *testing.T) {
+func TestHourlyUsagePreservesHourAndMachineScope(t *testing.T) {
 	now := time.Date(2026, 9, 19, 12, 30, 0, 0, time.UTC)
 	rows := []storage.UsageAggregate{}
 	for i, at := range []time.Time{now.Add(-24*time.Hour - time.Second), now.Add(-24 * time.Hour), now.Add(-23 * time.Hour), now, now.Add(time.Second)} {
 		rows = append(rows, storage.UsageAggregate{RecordedAt: at.Format(time.RFC3339Nano), DeviceID: []string{"a", "b"}[i%2], Provider: "openai", ModelID: "model", Requests: 1, InputTokens: 100, OutputTokens: 10, CachedInputTokens: 50})
 	}
 	report := Build(rows, nil, now)
-	var hourly, rolling int64
+	var hourly int64
 	for _, row := range report.HourlyUsage {
 		hourly += row.InputTokens + row.OutputTokens
 		if row.At == "" || row.DeviceID == "" {
 			t.Fatal("lost hour/device")
 		}
 	}
-	for _, row := range report.RollingUsage["24"] {
-		rolling += row.InputTokens + row.OutputTokens
-	}
-	if hourly != 330 || hourly != rolling {
-		t.Fatalf("hourly=%d rolling=%d", hourly, rolling)
+	if hourly != 440 {
+		t.Fatalf("hourly=%d", hourly)
 	}
 }

@@ -41,7 +41,8 @@ the helper, both limited to loopback:
 - `POST /claude/statusline` accepts the normal five-minute local credential.
   The `claude-statusline` command reads the status line JSON Claude Code
   provides and sends only the session ID and the five-hour and weekly
-  rate-limit windows. It runs the user's original status line command with
+  rate-limit windows, plus the signed-in account's UUID digest and masked
+  email from Claude Code's `.claude.json` (no other field, no credential). It runs the user's original status line command with
   the same input, as that user, exactly as Claude Code would have.
 - `POST /claude/otlp/v1/logs` accepts only a separate, telemetry-scoped local
   credential issued by `claude-otel-headers`. That credential lasts one hour

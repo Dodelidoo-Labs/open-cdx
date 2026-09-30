@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -38,10 +39,12 @@ type StatusLineUpload struct {
 	SessionID  string              `json:"session_id"`
 	ObservedAt time.Time           `json:"observed_at"`
 	Windows    []claudecode.Window `json:"windows"`
+	Account    *claudecode.Account `json:"account,omitempty"`
 }
 
 type claudeReading struct {
 	session    string
+	identity   string
 	observedAt time.Time
 	receivedAt time.Time
 	windows    []claudecode.Window
@@ -55,15 +58,41 @@ type claudeSession struct {
 // claudeCollector buffers Claude Code observations between uploads. Nothing is
 // written to disk; after a helper restart, transcript import fills any gap.
 type claudeCollector struct {
-	mu       sync.Mutex
-	sessions map[string]claudeSession
-	accounts map[string]string
-	requests []claudecode.Request
-	readings []claudeReading
+	mu           sync.Mutex
+	sessions     map[string]claudeSession
+	accounts     map[string]string
+	accountsPath string
+	requests     []claudecode.Request
+	readings     []claudeReading
 }
 
-func newClaudeCollector() *claudeCollector {
-	return &claudeCollector{sessions: make(map[string]claudeSession), accounts: make(map[string]string)}
+// newClaudeCollector loads the account digests and masked emails this Mac
+// has seen, so readings from sessions without telemetry can still be
+// attributed after a helper restart. An empty path keeps them in memory only.
+func newClaudeCollector(accountsPath string) *claudeCollector {
+	collector := &claudeCollector{sessions: make(map[string]claudeSession), accounts: make(map[string]string), accountsPath: accountsPath}
+	if raw, err := os.ReadFile(accountsPath); accountsPath != "" && err == nil {
+		var saved map[string]string
+		if json.Unmarshal(raw, &saved) == nil {
+			for identity, masked := range saved {
+				if claudecode.ValidIdentity(identity) {
+					collector.accounts[identity] = masked
+				}
+			}
+		}
+	}
+	return collector
+}
+
+// soleAccount is the only subscription this Mac has reported, if exactly one.
+func (collector *claudeCollector) soleAccount() string {
+	if len(collector.accounts) != 1 {
+		return ""
+	}
+	for identity := range collector.accounts {
+		return identity
+	}
+	return ""
 }
 
 func (collector *claudeCollector) addLogs(batch claudecode.LogBatch, now time.Time) {
@@ -72,20 +101,37 @@ func (collector *claudeCollector) addLogs(batch claudecode.LogBatch, now time.Ti
 	for session, identity := range batch.Sessions {
 		collector.sessions[session] = claudeSession{identity: identity, seen: now}
 	}
-	for _, account := range batch.Accounts {
-		if collector.accounts[account.Identity] == "" {
-			collector.accounts[account.Identity] = account.MaskedEmail
-		}
-	}
+	collector.rememberAccounts(batch.Accounts)
 	collector.requests = append(collector.requests, batch.Requests...)
 	if overflow := len(collector.requests) - maxPendingClaudeRequests; overflow > 0 {
 		collector.requests = append([]claudecode.Request(nil), collector.requests[overflow:]...)
 	}
 }
 
-func (collector *claudeCollector) addReading(reading claudeReading) {
+// rememberAccounts records account digests and masked emails; the caller
+// holds the lock.
+func (collector *claudeCollector) rememberAccounts(accounts []claudecode.Account) {
+	changed := false
+	for _, account := range accounts {
+		if previous, known := collector.accounts[account.Identity]; !known || previous == "" && account.MaskedEmail != "" {
+			collector.accounts[account.Identity] = account.MaskedEmail
+			changed = true
+		}
+	}
+	if changed && collector.accountsPath != "" {
+		if encoded, err := json.Marshal(collector.accounts); err == nil {
+			_ = AtomicWrite(collector.accountsPath, encoded, 0o600)
+		}
+	}
+}
+
+func (collector *claudeCollector) addReading(reading claudeReading, account *claudecode.Account) {
 	collector.mu.Lock()
 	defer collector.mu.Unlock()
+	if account != nil && claudecode.ValidIdentity(account.Identity) {
+		collector.rememberAccounts([]claudecode.Account{*account})
+		reading.identity = account.Identity
+	}
 	for index := range collector.readings {
 		if collector.readings[index].session == reading.session {
 			collector.readings[index] = reading
@@ -102,8 +148,9 @@ func (collector *claudeCollector) pending() int {
 }
 
 // take removes everything ready for upload. A status line reading waits briefly
-// for its session's account to arrive through telemetry; without one it is
-// attributed to this machine.
+// for its session's account to arrive through telemetry. Without one, it
+// belongs to the only subscription this Mac has reported, or else to the
+// machine itself.
 func (collector *claudeCollector) take(now time.Time) (claudecode.Report, []claudeReading) {
 	collector.mu.Lock()
 	defer collector.mu.Unlock()
@@ -122,10 +169,16 @@ func (collector *claudeCollector) take(now time.Time) (claudecode.Report, []clau
 	}
 	var taken, waiting []claudeReading
 	for _, reading := range collector.readings {
-		identity := collector.sessions[reading.session].identity
+		identity := reading.identity
+		if identity == "" {
+			identity = collector.sessions[reading.session].identity
+		}
 		if identity == "" && now.Sub(reading.receivedAt) < claudeSessionAttribution {
 			waiting = append(waiting, reading)
 			continue
+		}
+		if identity == "" {
+			identity = collector.soleAccount()
 		}
 		taken = append(taken, reading)
 		report.Allowances = append(report.Allowances, claudecode.Allowance{Account: identity, ObservedAt: reading.observedAt.UTC().Format(time.RFC3339Nano), Windows: reading.windows})
@@ -222,7 +275,10 @@ func (daemon *Daemon) claudeStatusLine(writer http.ResponseWriter, request *http
 	if upload.ObservedAt.IsZero() || upload.ObservedAt.After(now.Add(time.Minute)) {
 		upload.ObservedAt = now
 	}
-	daemon.claude.addReading(claudeReading{session: upload.SessionID, observedAt: upload.ObservedAt, receivedAt: now, windows: upload.Windows})
+	if upload.Account != nil && (!claudecode.ValidIdentity(upload.Account.Identity) || len(upload.Account.MaskedEmail) > 320) {
+		upload.Account = nil
+	}
+	daemon.claude.addReading(claudeReading{session: upload.SessionID, observedAt: upload.ObservedAt, receivedAt: now, windows: upload.Windows}, upload.Account)
 	daemon.updateStatus(func(status *LocalStatus) { status.ClaudeCode.LastStatusLineAt = timePointer(now) })
 	writer.WriteHeader(http.StatusNoContent)
 }

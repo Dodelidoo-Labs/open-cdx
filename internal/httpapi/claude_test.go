@@ -153,6 +153,25 @@ func TestClaudeTelemetryHistoryAndDeviceAttribution(t *testing.T) {
 	if views := claudeAccountViews(accounts, now.Add(2*time.Hour)); views[0]["quota_windows"].([]accountLiveQuotaWindow)[0].Remaining != 100 {
 		t.Fatalf("expired window view = %#v", views)
 	}
+	// A later reading with an account identity supersedes the placeholder.
+	identity := claudecode.AccountIdentity("account")
+	identified := claudecode.Report{Version: claudecode.ReportVersion, Source: claudecode.SourceLive,
+		Accounts: []claudecode.Account{{Identity: identity, MaskedEmail: "a***@e***.com"}},
+		Allowances: []claudecode.Allowance{{Account: identity, ObservedAt: now.Add(time.Minute).Format(time.RFC3339Nano),
+			Windows: []claudecode.Window{{Seconds: 18000, UsedPercent: 6, ResetAt: now.Add(time.Hour).Format(time.RFC3339)}}}}}
+	if response := postClaudeReport(t, server, token, identified); response.Code != http.StatusOK {
+		t.Fatalf("identified status = %d %s", response.Code, response.Body.String())
+	}
+	accounts, _ = store.ClaudeAccounts(context.Background())
+	if len(accounts) != 1 || accounts[0].MaskedEmail != "a***@e***.com" {
+		t.Fatalf("placeholder was not replaced: %#v", accounts)
+	}
+	observations, _ := store.AllowanceObservations(context.Background())
+	for _, observation := range observations {
+		if observation.AccountID != accounts[0].ID {
+			t.Fatalf("placeholder readings remained: %#v", observations)
+		}
+	}
 }
 
 func TestClaudeTelemetryRejectsInvalidReports(t *testing.T) {

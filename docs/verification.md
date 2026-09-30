@@ -97,8 +97,8 @@ Human acceptance on an installed build:
 1. Update the router and companion. Choose **Connect Claude Code…**; confirm
    the preview lists the settings path and changes, then connect.
 2. Start a new Claude Code session with a Pro or Max login. Within about 30
-   seconds of the first response, the menu shows **Claude Code — Reporting**
-   and a subscription row with weekly and 5-hour bars.
+   seconds of the first response, the menu shows a subscription row with the
+   Claude logo, the masked email, and weekly and 5-hour bars.
 3. On Telemetry, group by provider: **Claude Code** appears. **Show
    allowances** lists `Claude · <masked email>`.
 4. Import history from Settings; repeat the import and confirm it adds nothing.
@@ -149,7 +149,7 @@ This checklist requires credentials and deliberate browser choices, so it must b
 9. Copy the generated TOML manually into the isolated Codex config and restart Codex.
 10. Confirm `/model` contains the complete entitled native union, native auto-review/safety entries, and only compatible namespaced OpenRouter entries.
 11. Run one native model and one OpenRouter model.
-12. Choose **Import Codex History…**, confirm the preview names the default `~/.codex` source and shows routed/native counts, then cancel and verify telemetry is unchanged.
+12. In Settings, choose **Import Codex History…**, confirm the preview names the default `~/.codex` source and shows routed/native counts, then cancel and verify telemetry is unchanged.
 13. Run a dry run against the isolated Codex home with `router-helper reconcile-usage --codex-home /absolute/test/home --dry-run`; confirm it reports the routed requests, then run the same command without `--dry-run` and verify the dashboard preserves their routed classification.
 14. Configure a LAN Ollama `http://` endpoint with **Allow HTTP** off and confirm it is rejected; enable the option and confirm the connection can be tested. Verify HTTPS and loopback HTTP still work with the option off.
 15. Open **Settings → Delete All Server History…**, confirm the warning identifies every machine and Cancel is the default, then confirm the dashboard returns to zero, then verify accounts, providers, devices, and the isolated `~/.codex` rollout files are unchanged. Confirm a new routed request starts telemetry fresh, or reconcile again.
@@ -166,7 +166,7 @@ Record account labels only as masked values. Never paste tokens, OAuth codes, ra
 These checks require the installed app, a real browser, and normal router activity. They must be performed manually by the operator and are not part of the hermetic automated suite:
 
 1. Leave Telemetry visible and make normal routed calls; confirm data updates within the polling interval.
-2. Choose **Import Codex History…** in the macOS app while Telemetry is visible; confirm routed/native results update without reloading.
+2. Choose **Import Codex History…** in the macOS app's Settings while Telemetry is visible; confirm routed/native results update without reloading.
 3. Export CSV immediately afterward; confirm it contains the current reconciled data.
 4. Request enrollment from a client while Devices is visible; confirm it appears within a few seconds.
 5. Approve, reject, remove, and delete devices after dynamic list replacement; confirm every form still works.

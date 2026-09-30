@@ -29,7 +29,6 @@
       hourly_usage: report.hourly_usage?.filter(point => (point.device_id || "") === deviceID),
       allowance_resets: (report.allowance_resets || []).filter((reset) => reset.source === "live" || reset.device_id === deviceID)
         .map((reset) => ({ ...reset, usage: reset.usage.filter((row) => row.device_id === deviceID) })),
-      rolling_usage: report.rolling_usage && Object.fromEntries(Object.entries(report.rolling_usage).map(([hours, points]) => [hours, points.filter((point) => (point.device_id || "") === deviceID)])),
       untimed_usage: report.untimed_usage?.filter((point) => (point.device_id || "") === deviceID),
       activity: Array.from(counts, ([date, requests]) => ({ date, requests })).sort((a, b) => a.date.localeCompare(b.date)),
       total_requests: requests, total_input_tokens: input, total_output_tokens: output,

@@ -73,7 +73,7 @@ The helper checks the router catalog every minute. After a Codex upgrade, that s
 
 ## Import Codex history
 
-**Import Codex History…** in the menu or Settings previews and imports only the
+**Import Codex History…** in Settings previews and imports only the
 default Codex home at `~/.codex`. Claude Code usage has its own
 **Import Claude Code History…** in Settings; see [Claude Code](claude-code.md).
 Before replacement it shows the resolved directory plus scanned-file and
@@ -155,14 +155,14 @@ deduplication; Codex reconciliation never replaces it.
 ### Request timestamps and time ranges
 
 The current helper preserves the original timestamp of each unique usage event.
-The router uses these timestamps for rolling usage windows and applies its
+The router uses these timestamps for hourly chart bars and applies its
 viewer's selected reporting timezone to calendar days. Upgrade the router before importing
 with the updated helper. Reconcile the same original Codex home to add timestamps
 to older daily-only imports that already have machine attribution; do not reset
 telemetry first in that case. For v1.2.0 upgrades with unattributed history, use
 the one-time server reset and per-machine import procedure above. Other machines retain
 their history and must be reconciled separately. See
-[Dashboard timezone and rolling usage](deployment.md#dashboard-timezone-and-rolling-usage).
+[Dashboard timezone and time ranges](deployment.md#dashboard-timezone-and-time-ranges).
 
 The telemetry bar chart includes small `↻` markers for observed weekly Codex
 allowance window transitions. Hover or focus a marker for a preview; activate it
@@ -196,10 +196,11 @@ On Telemetry, select **Show allowances** below the chart. It is off by default; 
 browser remembers the toggle, selected window, and hidden accounts. Choose an
 available window (for example, Weekly or 5 hours) and click account names to
 show or hide their lines. A fixed right axis shows remaining allowance from
-0–100%; the left axis continues to show tokens or requests. The 24-hour view
-uses hourly usage bars; longer ranges use calendar buckets.
+0–100%; the left axis continues to show tokens or requests. Bars are hourly,
+daily, weekly, or monthly depending on the zoom level. Lines are labelled with
+the provider's logo and the masked account email.
 
-The line follows the selected range and timezone. Machine filtering changes
+The line follows the visible window and timezone. Machine filtering changes
 usage, never the account balance. Hover or focus a usage bucket to see usage
 and nearby allowance readings, with the actual observation time. Token counts
 are not allowance billing units, and activity outside this router can also

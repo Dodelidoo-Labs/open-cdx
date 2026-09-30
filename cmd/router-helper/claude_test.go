@@ -34,6 +34,8 @@ func claudeTestConfig(t *testing.T, routerURL string, port int) string {
 		t.Fatal(err)
 	}
 	t.Setenv(helper.SecretFileEnvironment, secrets)
+	// Never read the developer's own Claude Code state in tests.
+	t.Setenv("CLAUDE_CONFIG_DIR", directory)
 	return configPath
 }
 
