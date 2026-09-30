@@ -85,15 +85,21 @@ func normalizeCodexVersion(output string) string {
 }
 
 func codexExecutable() string {
-	if executable, err := exec.LookPath("codex"); err == nil {
+	return findExecutable("codex")
+}
+
+// findExecutable looks in PATH and then in common install locations, because
+// the helper runs with the minimal PATH that macOS gives app processes.
+func findExecutable(name string) string {
+	if executable, err := exec.LookPath(name); err == nil {
 		return executable
 	}
-	candidates := []string{"/opt/homebrew/bin/codex", "/usr/local/bin/codex"}
+	candidates := []string{filepath.Join("/opt/homebrew/bin", name), filepath.Join("/usr/local/bin", name)}
 	if home, err := os.UserHomeDir(); err == nil {
 		candidates = append(candidates,
-			filepath.Join(home, ".local", "bin", "codex"),
-			filepath.Join(home, "bin", "codex"),
-			filepath.Join(home, ".npm-global", "bin", "codex"),
+			filepath.Join(home, ".local", "bin", name),
+			filepath.Join(home, "bin", name),
+			filepath.Join(home, ".npm-global", "bin", name),
 		)
 	}
 	for _, candidate := range candidates {

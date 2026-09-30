@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-09-30
+
+### Fixed
+
+- Keep the Claude allowance current while working in the Claude desktop app,
+  which does not run status line commands. Every five minutes while Claude
+  Code is connected, and on **Refresh Allowances**, the helper reads the
+  allowance from `claude -p /usage`. Claude Code signs in itself; the check
+  makes no model request, loads no settings, and saves no session. It is
+  skipped while the status line reported recently.
+
+Only the macOS companion changes; the router server is unchanged.
+
 ## [1.8.0] - 2026-09-29
 
 ### Added
@@ -272,7 +285,8 @@ rebuilt for this release, but updating the companion alone does not fix HTTP 413
   timezone and daylight-saving changes. Show overlapping daily-only history as
   unavailable for rolling totals instead of presenting incomplete counts.
 
-[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.8.1...HEAD
+[1.8.1]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.6.2...v1.7.0
 [1.6.2]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.6.1...v1.6.2

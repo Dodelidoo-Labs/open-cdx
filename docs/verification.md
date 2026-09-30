@@ -66,7 +66,8 @@ The suite covers OAuth state/PKCE, duplicate detection, encrypted persistence, r
 
 Automated coverage includes the OpenTelemetry parser (only `api_request`
 counters survive; prompt and response text, raw emails, and account UUIDs do
-not), status line window parsing, transcript merging across content blocks
+not), status line and `/usage` window parsing, the connected-only and
+status-line-fresh usage check, transcript merging across content blocks
 and subagents, settings install/update/removal with order preservation and
 conflict refusal, scoped credentials, helper buffering and retry, router
 validation, cross-source request deduplication, Codex reconciliation
@@ -85,7 +86,8 @@ settings file:
    project directory with `OPENCODEX_HELPER_SECRET_FILE` exported, and send
    one short prompt.
 3. Confirm the original status line still renders, `router-helper status`
-   shows `claude_code.last_telemetry_at`, `last_status_line_at`, and a Claude
+   shows `claude_code.last_telemetry_at`, `last_status_line_at`,
+   `last_usage_check_at` without `usage_check_error`, and a Claude
    account with weekly and 5-hour windows, and the router has `claude-code`
    usage rows.
 4. Run `router-helper claude-import` twice: the first run skips the requests

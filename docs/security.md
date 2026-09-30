@@ -35,8 +35,8 @@ Dashboard cost figures are estimates. The router refreshes the unauthenticated p
 
 ### Claude Code observation
 
-The optional [Claude Code integration](claude-code.md) adds two local inputs to
-the helper, both limited to loopback:
+The optional [Claude Code integration](claude-code.md) adds three local inputs
+to the helper, all on this Mac:
 
 - `POST /claude/statusline` accepts the normal five-minute local credential.
   The `claude-statusline` command reads the status line JSON Claude Code
@@ -44,6 +44,12 @@ the helper, both limited to loopback:
   rate-limit windows, plus the signed-in account's UUID digest and masked
   email from Claude Code's `.claude.json` (no other field, no credential). It runs the user's original status line command with
   the same input, as that user, exactly as Claude Code would have.
+- Every five minutes while Claude Code is connected, the helper runs the
+  installed `claude` command line tool's `/usage` command as the same user,
+  without settings files, MCP servers, a model request, or a saved session.
+  Claude Code authenticates itself; the helper reads only the printed session
+  and weekly percentages and reset times. OpenCDX never reads Claude
+  credentials.
 - `POST /claude/otlp/v1/logs` accepts only a separate, telemetry-scoped local
   credential issued by `claude-otel-headers`. That credential lasts one hour
   and is rejected by inference routes; inference credentials are rejected

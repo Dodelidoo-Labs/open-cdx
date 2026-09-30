@@ -46,7 +46,7 @@ OpenCDX has two separately distributed parts:
 - Track changes to Codex catalog instructions with [instruction history](docs/instruction-history.md), unread updates, and per-field diffs.
 - Inspect per-request errors, model settings, token usage, timing, and routing attempts in [Logs](docs/request-logs.md), with portable backup and restore.
 - Reconcile aggregate usage from an existing local Codex history without sending conversation content to the router.
-- See your Claude plan allowance in the menu bar and Claude Code usage on the dashboard, observed through Claude Code's own status line and telemetry hooks. See [Claude Code](docs/claude-code.md).
+- See your Claude plan allowance in the menu bar and Claude Code usage on the dashboard, observed through Claude Code's own status line, `/usage` command, and telemetry hooks. See [Claude Code](docs/claude-code.md).
 
 ## Screenshots
 

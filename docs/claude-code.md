@@ -10,14 +10,18 @@ sign-in, and never reads or stores Claude credentials.
 Claude Code ──► Anthropic (unchanged, direct)
      │
      ├─ status line command ──► local helper ──► router   plan allowance
-     └─ OpenTelemetry logs  ──► local helper ──► router   request token counts
+     ├─ OpenTelemetry logs  ──► local helper ──► router   request token counts
+     └─ claude -p /usage    ◄── local helper ──► router   plan allowance, every 5 minutes
 ```
 
-Both inputs are features Claude Code documents for local tooling: the
+These are features Claude Code offers for local use: the
 [status line](https://code.claude.com/docs/en/statusline) receives the
-current `rate_limits` for Pro and Max subscribers, and
+current `rate_limits` for Pro and Max subscribers,
 [OpenTelemetry export](https://code.claude.com/docs/en/monitoring-usage)
-emits one `api_request` event per model request.
+emits one `api_request` event per model request, and the `/usage` command
+prints the plan allowance. The helper runs `/usage` through the installed
+Claude Code command line tool, which signs in with its own login; the helper
+reads only the printed text.
 
 ## What you get
 
@@ -98,7 +102,9 @@ reset telemetry.
 ## What is sent
 
 From the status line input, the wrapper reads only `session_id` and the
-`five_hour` and `seven_day` rate-limit windows. Paths, workspace, cost, and
+`five_hour` and `seven_day` rate-limit windows. From the `/usage` output, the
+helper reads only the **Current session** and **Current week (all models)**
+lines; per-model weeks and the local usage breakdown are ignored. Paths, workspace, cost, and
 all other fields are ignored. It also reads the signed-in account's UUID and
 email from Claude Code's `.claude.json`; no other field and no credential.
 
@@ -136,8 +142,32 @@ uses the normal five-minute local credential.
 
 ## Allowance readings
 
-Claude Code reports allowance after each response while a session runs. When
-Claude Code is closed, the menu keeps the last reading and shows its age; a
+Allowance comes from two sources:
+
+- **Status line:** Claude Code reports allowance after each response while a
+  terminal session runs.
+- **Usage check:** every five minutes while Claude Code is connected, the
+  helper runs
+
+  ```sh
+  claude -p /usage --output-format json --no-session-persistence --setting-sources "" --strict-mcp-config
+  ```
+
+  This covers the Claude desktop app, which does not run status line
+  commands, and usage in claude.ai and the Claude apps. The command makes no
+  model request and loads no settings file, so your hooks, status line, MCP
+  servers, and telemetry export do not run. It saves no session; Claude Code
+  creates only an empty project folder for the helper's application-support
+  directory. The check is skipped while the status line reported within the
+  last five minutes. **Refresh Allowances** runs it at once.
+
+The helper looks for `claude` in `PATH`, `/opt/homebrew/bin`,
+`/usr/local/bin`, `~/.local/bin`, `~/bin`, and `~/.npm-global/bin`. Without
+the command line tool, or when it is signed out, only the status line
+reports. The usage check reads percentages rounded down to whole numbers and
+reset times to the minute.
+
+When no reading arrives, the menu keeps the last one and shows its age; a
 window whose reset time has passed shows as fully available until the next
 reading. Usage in claude.ai or the Claude apps consumes the same allowance and
 is included in the next reading, but not in token counts.
@@ -146,7 +176,7 @@ Unchanged readings are stored at most every five minutes. The overlay does not
 connect readings more than 15 minutes apart, so idle periods appear as gaps.
 
 Readings are attributed to the signed-in subscription. The status line
-wrapper reads only `oauthAccount.accountUuid` and `emailAddress` from Claude
+wrapper and the usage check read only `oauthAccount.accountUuid` and `emailAddress` from Claude
 Code's own `.claude.json` (in `CLAUDE_CONFIG_DIR` when set), the same values its
 telemetry reports, digests the UUID and masks the email on the Mac. Only when
 neither that file nor telemetry names an account is a reading attributed to the
@@ -174,6 +204,7 @@ attribution. Claude Code deletes transcripts after its `cleanupPeriodDays`
 |---|---|
 | **Settings** shows **Waiting for Usage** | Normal between sessions. Start a new session after connecting. |
 | No allowance rows | Allowance requires a Pro or Max login and appears after the first response. |
+| Allowance stays old while using the desktop app | `router-helper status` shows `claude_code.usage_check_error`. Install the Claude Code command line tool and sign in with `claude`. |
 | **Upload Pending** | The router is unreachable; the helper retries and keeps up to 20,000 requests in memory. |
 | Telemetry missing, allowance present | Run `/status` in Claude Code: it reports `otelHeadersHelper` failures. Confirm the helper is running. |
 | Setup reports conflicts | Your settings already export telemetry. OpenCDX will not replace them. |

@@ -5,9 +5,11 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -222,5 +224,54 @@ func TestStatusLineAccountAttributesReadingImmediately(t *testing.T) {
 	report, _ := collector.take(now)
 	if len(report.Allowances) != 1 || report.Allowances[0].Account != account.Identity || len(report.Accounts) != 1 || report.Accounts[0].MaskedEmail != account.MaskedEmail {
 		t.Fatalf("report = %#v", report)
+	}
+}
+
+func TestClaudeUsageCheckQueuesReadingOnlyWhenConnected(t *testing.T) {
+	directory := t.TempDir()
+	claudeHome := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", claudeHome)
+	if err := os.WriteFile(filepath.Join(claudeHome, ".claude.json"), []byte(`{"oauthAccount":{"accountUuid":"uuid","emailAddress":"someone@example.com"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	reset := now.Add(3 * 24 * time.Hour).In(time.UTC)
+	output, _ := json.Marshal(map[string]any{"is_error": false, "result": "Current week (all models): 69% used · resets " +
+		reset.Format("Jan 2 at 3:04pm") + " (UTC)\n"})
+	calls := 0
+	daemon := &Daemon{configPath: filepath.Join(directory, "helper.json"), claude: newClaudeCollector(""), shutdown: make(chan struct{}),
+		claudeUsage: func(context.Context) ([]byte, error) { calls++; return output, nil }}
+
+	if err := daemon.checkClaudeUsage(context.Background(), true); err != nil || calls != 0 {
+		t.Fatalf("checked while Claude Code is not connected: calls=%d err=%v", calls, err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, ClaudeStateFile), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	daemon.updateStatus(func(status *LocalStatus) { status.ClaudeCode.LastStatusLineAt = timePointer(now) })
+	if err := daemon.checkClaudeUsage(context.Background(), false); err != nil || calls != 0 {
+		t.Fatalf("timer checked while the status line is fresh: calls=%d err=%v", calls, err)
+	}
+	if err := daemon.checkClaudeUsage(context.Background(), true); err != nil || calls != 1 {
+		t.Fatalf("forced check: calls=%d err=%v", calls, err)
+	}
+	report, _ := daemon.claude.take(time.Now().UTC())
+	if len(report.Allowances) != 1 || report.Allowances[0].Account != claudecode.AccountIdentity("uuid") ||
+		len(report.Allowances[0].Windows) != 1 || report.Allowances[0].Windows[0].UsedPercent != 69 {
+		t.Fatalf("report = %#v", report)
+	}
+	if status := daemon.currentStatus().ClaudeCode; status.LastUsageCheckAt == nil || status.UsageCheckError != "" {
+		t.Fatalf("status = %#v", status)
+	}
+
+	daemon.claudeUsage = func(context.Context) ([]byte, error) { return nil, errors.New("claude /usage failed: exit status 1") }
+	if err := daemon.checkClaudeUsage(context.Background(), true); err == nil {
+		t.Fatal("a failed check reported success")
+	}
+	if status := daemon.currentStatus().ClaudeCode; status.UsageCheckError == "" || status.LastStatusLineAt == nil {
+		t.Fatalf("status = %#v", status)
+	}
+	if report, _ = daemon.claude.take(time.Now().UTC()); len(report.Allowances) != 0 {
+		t.Fatalf("a failed check queued a reading: %#v", report)
 	}
 }

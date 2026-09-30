@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Dodelidoo-Labs/open-cdx/internal/claudecode"
@@ -81,6 +82,8 @@ type Daemon struct {
 	catalogMu      sync.Mutex
 	processInfo    func(context.Context, int) (codexProcessInfo, error)
 	claude         *claudeCollector
+	claudeUsage    func(context.Context) ([]byte, error)
+	usageChecking  atomic.Bool
 	shutdownOnce   sync.Once
 	shutdown       chan struct{}
 	server         *http.Server
@@ -103,6 +106,7 @@ func NewDaemon(configPath string, config Config, secrets SecretStore) (*Daemon, 
 		configPath: configPath, catalogPath: config.CatalogPath, config: config, secrets: secrets, localSecret: localSecret,
 		deviceToken: deviceToken, remote: remote, shutdown: make(chan struct{}), claude: newClaudeCollector(filepath.Join(filepath.Dir(configPath), "claude-accounts.json")),
 		processInfo: inspectCodexProcess,
+		claudeUsage: func(ctx context.Context) ([]byte, error) { return runClaudeUsage(ctx, filepath.Dir(configPath)) },
 		status:      LocalStatus{State: "connecting", RouterURL: config.RouterURL, DeviceName: config.DeviceName, CatalogSynced: CatalogExists(config), CatalogUpdated: config.CatalogUpdatedAt},
 	}, nil
 }
@@ -319,6 +323,8 @@ func (daemon *Daemon) acknowledgeCatalogRestart(ctx context.Context, codexStarte
 }
 
 func (daemon *Daemon) controlQuotaRefresh(writer http.ResponseWriter, request *http.Request) {
+	// The Claude reading takes a few seconds and arrives with the next upload.
+	go daemon.checkClaudeUsage(context.WithoutCancel(request.Context()), true)
 	_, err := daemon.remote.JSON(request.Context(), http.MethodPost, "/api/v1/quotas/refresh", nil, nil, true)
 	if err != nil {
 		writeHelperJSON(writer, http.StatusBadGateway, map[string]string{"error": err.Error()})

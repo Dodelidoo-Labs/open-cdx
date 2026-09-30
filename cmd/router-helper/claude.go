@@ -23,7 +23,6 @@ import (
 )
 
 const (
-	claudeStateFile           = "claude-code.json"
 	claudeStatusLineCacheFile = "claude-statusline-cache.json"
 	statusLineRepeatInterval  = time.Minute
 	historyUploadBatch        = 50_000
@@ -37,7 +36,7 @@ type claudeState struct {
 }
 
 func claudeStatePath(configPath string) string {
-	return filepath.Join(filepath.Dir(configPath), claudeStateFile)
+	return filepath.Join(filepath.Dir(configPath), helper.ClaudeStateFile)
 }
 
 func loadClaudeState(configPath string) (claudeState, error) {

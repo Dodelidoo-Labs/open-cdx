@@ -4,10 +4,14 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -16,7 +20,13 @@ import (
 )
 
 const (
+	// ClaudeStateFile exists next to the helper configuration while Claude
+	// Code is connected.
+	ClaudeStateFile          = "claude-code.json"
 	ClaudeOTLPScope          = "claude-otlp"
+	claudeUsageInterval      = 5 * time.Minute
+	claudeUsageTimeout       = time.Minute
+	claudeUsageSession       = "claude-usage-command"
 	claudeUploadInterval     = 5 * time.Second
 	claudeSessionAttribution = 30 * time.Second
 	claudeSessionRetention   = 48 * time.Hour
@@ -31,6 +41,8 @@ type ClaudeCodeStatus struct {
 	LastUploadAt     *time.Time `json:"last_upload_at,omitempty"`
 	PendingRequests  int        `json:"pending_requests"`
 	LastError        string     `json:"last_error,omitempty"`
+	LastUsageCheckAt *time.Time `json:"last_usage_check_at,omitempty"`
+	UsageCheckError  string     `json:"usage_check_error,omitempty"`
 }
 
 // StatusLineUpload is what `router-helper claude-statusline` sends to the
@@ -285,7 +297,10 @@ func (daemon *Daemon) claudeStatusLine(writer http.ResponseWriter, request *http
 
 func (daemon *Daemon) claudeLoop(ctx context.Context) {
 	ticker := time.NewTicker(claudeUploadInterval)
+	usageTicker := time.NewTicker(claudeUsageInterval)
 	defer ticker.Stop()
+	defer usageTicker.Stop()
+	go daemon.checkClaudeUsage(ctx, false)
 	for {
 		select {
 		case <-ctx.Done():
@@ -294,8 +309,69 @@ func (daemon *Daemon) claudeLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			_ = daemon.uploadClaudeTelemetry(ctx)
+		case <-usageTicker.C:
+			go daemon.checkClaudeUsage(ctx, false)
 		}
 	}
+}
+
+// checkClaudeUsage reads plan allowance from Claude Code's /usage command, so
+// the menu stays current while Claude Code runs without a status line, as in
+// the Claude desktop app. It runs only while Claude Code is connected and, on
+// the timer, only when the status line has not reported recently.
+func (daemon *Daemon) checkClaudeUsage(ctx context.Context, force bool) error {
+	if _, err := os.Stat(filepath.Join(filepath.Dir(daemon.configPath), ClaudeStateFile)); err != nil {
+		return nil
+	}
+	if !daemon.usageChecking.CompareAndSwap(false, true) {
+		return nil
+	}
+	defer daemon.usageChecking.Store(false)
+	if last := daemon.currentStatus().ClaudeCode.LastStatusLineAt; !force && last != nil && time.Since(*last) < claudeUsageInterval {
+		return nil
+	}
+	checkContext, cancel := context.WithTimeout(ctx, claudeUsageTimeout)
+	defer cancel()
+	output, err := daemon.claudeUsage(checkContext)
+	now := time.Now().UTC()
+	var windows []claudecode.Window
+	if err == nil {
+		windows, err = claudecode.ParseUsageCommand(output, now)
+	}
+	if err != nil {
+		daemon.updateStatus(func(status *LocalStatus) {
+			status.ClaudeCode.LastUsageCheckAt = timePointer(now)
+			status.ClaudeCode.UsageCheckError = err.Error()
+		})
+		return err
+	}
+	var account *claudecode.Account
+	if local, ok := claudecode.LocalAccount(); ok {
+		account = &local
+	}
+	daemon.claude.addReading(claudeReading{session: claudeUsageSession, observedAt: now, receivedAt: now, windows: windows}, account)
+	daemon.updateStatus(func(status *LocalStatus) {
+		status.ClaudeCode.LastUsageCheckAt = timePointer(now)
+		status.ClaudeCode.UsageCheckError = ""
+	})
+	return nil
+}
+
+// runClaudeUsage runs the signed-in Claude Code CLI's /usage command. Claude
+// Code authenticates with its own login; OpenCDX sees only the printed text.
+func runClaudeUsage(ctx context.Context, directory string) ([]byte, error) {
+	executable := findExecutable("claude")
+	if executable == "" {
+		return nil, errors.New("the Claude Code command line tool was not found")
+	}
+	command := exec.CommandContext(ctx, executable, claudecode.UsageCommandArgs...)
+	command.Dir = directory
+	command.WaitDelay = 5 * time.Second
+	output, err := command.Output()
+	if err != nil {
+		return nil, fmt.Errorf("claude /usage failed: %w", err)
+	}
+	return output, nil
 }
 
 func (daemon *Daemon) uploadClaudeTelemetry(ctx context.Context) error {
