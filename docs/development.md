@@ -64,7 +64,10 @@ SwiftUI selects the menu window's presentation using the executable's linked
 SDK. Builds linked against SDK 15.5 use a square legacy backdrop over the
 native rounded surface. The build script checks the SDK in every architecture
 of the finished menu executable so an older toolchain or cached output cannot
-reintroduce this defect. The deployment target remains macOS 13.0.
+reintroduce this defect. The deployment target remains macOS 13.0. The bundle
+script selects native SwiftPM because Xcode 27's default `swiftbuild` emits
+the deployment target as the linked SDK; native SwiftPM records the actual
+SDK and passes the existing metadata check.
 
 Build and install a local app, reusing its existing location:
 
@@ -89,6 +92,10 @@ Installed local builds require a stable Apple-issued signing identity. Put the c
 Use `OPENCODEX_CODESIGN_IDENTITY=-` only for a non-installed CI validation artifact. The installer rejects ad-hoc builds and unintended signer changes because unstable signing identity can produce duplicate macOS Local Network privacy entries.
 
 [Apple's Local Network privacy guidance](https://developer.apple.com/documentation/Technotes/tn3179-understanding-local-network-privacy) explains that multiple copies of one app can create unexpected privacy entries and that macOS has no supported per-app reset. Keeping one installed copy and a stable signing identity prevents new duplicates but cannot remove historical entries.
+
+The bundle build disables Swift Package Manager Keychain and netrc
+authentication when fetching the public Sparkle dependency. It does not need
+saved GitHub credentials; Apple code-signing credentials are separate.
 
 The built artifact is `dist/OpenCDX Router.app`. The install script atomically moves it to `~/Applications`, leaving only one app copy. The fixed identifiers are:
 

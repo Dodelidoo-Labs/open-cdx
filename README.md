@@ -165,6 +165,12 @@ Each paired Mac has its own revocable device credential. Removing a device in th
 
 The configuration points Codex at the local helper. Codex receives a short-lived local credential; it never receives the router's stored OpenAI refresh tokens or provider API keys.
 
+For the new **ChatGPT desktop app** (Chat, Work, and dots), quit ChatGPT and
+choose **Launch ChatGPT** from the OpenCDX menu each time you start it.
+The app uses its own native configuration and sign-in, while CLI and IDE
+clients keep routing. See [ChatGPT app bypass](docs/helper-and-codex.md#chatgpt-app-bypass)
+for the separate local history and first-use sign-in.
+
 See [Helper and Codex setup](docs/helper-and-codex.md) for advanced pairing, custom Codex homes, usage reconciliation, reset behavior, helper commands, and uninstall steps.
 
 ### 5. Optional: show Claude Code allowance and usage

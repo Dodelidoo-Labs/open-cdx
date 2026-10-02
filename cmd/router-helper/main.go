@@ -83,6 +83,8 @@ func run(args []string) error {
 		return printConfig(configPath, commandArgs)
 	case "open-dashboard":
 		return openDashboard(configPath, commandArgs)
+	case "open-chatgpt":
+		return openChatGPT(configPath, commandArgs, os.Stdout)
 	case "version", "--version", "-version":
 		fmt.Printf("router-helper %s\n", helper.BuildIdentity())
 		return nil
@@ -510,5 +512,5 @@ func defaultDeviceName() string {
 }
 
 func usageError() error {
-	return errors.New("usage: router-helper [--config PATH] <enroll|pair|daemon|token|status|login-openai|sync-catalog|refresh-catalog|acknowledge-restart|refresh-quotas|consume-reset|reconcile-usage|reset-telemetry|claude-setup|claude-import|claude-statusline|claude-otel-headers|reconnect|config|open-dashboard|quit|version>")
+	return errors.New("usage: router-helper [--config PATH] <enroll|pair|daemon|token|status|login-openai|sync-catalog|refresh-catalog|acknowledge-restart|refresh-quotas|consume-reset|reconcile-usage|reset-telemetry|claude-setup|claude-import|claude-statusline|claude-otel-headers|reconnect|config|open-dashboard|open-chatgpt|quit|version>")
 }

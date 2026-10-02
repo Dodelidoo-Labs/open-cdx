@@ -27,6 +27,11 @@ struct RouterMenuView: View {
                 }
                 .disabled(!remoteActionsAvailable || model.accountLoginInProgress)
 
+                MenuActionButton("Launch ChatGPT", systemImage: "bubble.left.and.bubble.right") {
+                    model.openChatGPTWithoutRouting()
+                }
+                .help("Launch ChatGPT without routing. Quit ChatGPT first if it is already running.")
+
                 if let setup = model.claudeSetup, !setup.installed {
                     MenuActionButton("Connect Claude Code…", systemImage: "terminal") {
                         model.connectClaudeCode()

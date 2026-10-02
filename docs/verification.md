@@ -62,6 +62,36 @@ presentation even when running on Tahoe.
 
 The suite covers OAuth state/PKCE, duplicate detection, encrypted persistence, refresh single-flight, native entry preservation, entitlement selection, sticky affinity, quota failover, partial-stream no-retry, headers/auth replacement, capability-driven OpenRouter catalog mapping, account-collapsed token telemetry, Codex-local patch exposure, unsupported/no-op reasoning handling, Ollama hosted-search suppression, atomic catalogs, device lifecycle, error redaction, HTTP policy, and helper local tokens.
 
+## ChatGPT app bypass
+
+Run a configuration/authentication proof using the new app's bundled Codex:
+
+```sh
+OPENCODEX_CHATGPT_CODEX_BINARY="/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex" \
+  go test ./internal/helper -run TestChatGPTHomeWithRealAppServer -v
+```
+
+This starts only the bundled app-server, with two temporary homes and
+file-based authentication. It makes no inference request, reads no existing
+credentials, and does not launch the app. It checks that the routed fixture
+uses `opencdx` without native authentication, while the home created by the
+bypass uses `openai`, requires native authentication, and has no router catalog.
+
+Human acceptance on the installed companion:
+
+1. Confirm **Launch ChatGPT** appears below **Add OpenAI Account…** in the
+   menu and remains enabled even when the router is disconnected.
+2. While ChatGPT is running, choose **Launch ChatGPT**;
+   confirm it asks you to quit ChatGPT and leaves active work alone.
+3. Quit ChatGPT and choose the button again. Sign in on first use; confirm
+   Chat/Work tabs and your dot are available as permitted by your account.
+4. Open a new CLI/IDE session; confirm it still uses OpenCDX and its routed
+   model picker. Confirm the operator's `~/.codex/config.toml` is unchanged.
+5. Quit and reopen ChatGPT through the button; confirm native sign-in and
+   local history persist. Opening from Finder/Dock can load the routed home
+   instead, so always use the bypass launch. Confirm the Settings launch
+   button provides the same behavior.
+
 ## Claude Code observation
 
 Automated coverage includes the OpenTelemetry parser (only `api_request`

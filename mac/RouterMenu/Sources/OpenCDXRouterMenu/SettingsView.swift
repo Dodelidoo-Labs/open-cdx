@@ -23,6 +23,12 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Divider()
+                Text("ChatGPT App").font(.headline)
+                Text("Use ChatGPT’s native connection for dots and other account features while CLI and IDE clients use the router. Quit ChatGPT, then open it here each time. The app uses a separate local history and settings; sign in to ChatGPT on first use. App requests go directly to OpenAI and do not use the routing pool.")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Open ChatGPT Without Routing") { model.openChatGPTWithoutRouting() }
+                Divider()
                 Text("Codex").font(.headline)
                 Text("Replace only this Mac’s history on the connected server using its local Codex history (~/.codex). Other machines’ history is preserved. You can review the import before replacing anything.")
                     .font(.callout).foregroundStyle(.secondary)

@@ -558,6 +558,16 @@ final class HelperModel: ObservableObject {
         }
     }
 
+    func openChatGPTWithoutRouting() {
+        runHelper(["open-chatgpt"]) { [weak self] result in
+            if result.success {
+                self?.setOperation(result.output)
+            } else {
+                self?.setErrorOperation(result.error)
+            }
+        }
+    }
+
     func consumeReset(account: AccountAllowanceStatus, ticket: AccountResetTicket) {
         guard status.connected, resetAccountID == nil, !account.id.isEmpty,
               let current = status.accounts.first(where: { $0.id == account.id }),

@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-10-02
+
+### Added
+
+- **Launch ChatGPT** below **Add OpenAI Account…** in the macOS menu,
+  **Open ChatGPT Without Routing** in Settings, and
+  `router-helper open-chatgpt`: start the installed new ChatGPT app with its
+  own native configuration and sign-in so dots and other account features
+  can use the native connection while CLI and IDE clients keep using the
+  router. The app has separate local history and settings, and must be
+  started through this action each time. No existing Codex configuration or
+  credentials are copied or changed.
+
+### Fixed
+
+- Fetch the public Sparkle build dependency without requesting saved GitHub
+  credentials from Keychain or netrc.
+- Use native SwiftPM for the companion bundle so Xcode 27 records the actual
+  linked SDK, preserving the existing SDK 26+ requirement and macOS 13
+  deployment target.
+
+Only the macOS companion changes; the router server is unchanged. ChatGPT app
+requests bypass routing, so allowance bars still follow OpenAI's readings for
+connected accounts, while app requests do not appear in live router token or
+model statistics. Live acceptance confirmed dots became available; restoring
+the Chat/Work tabs is not established.
+
 ## [1.8.1] - 2026-09-30
 
 ### Fixed
@@ -285,7 +312,8 @@ rebuilt for this release, but updating the companion alone does not fix HTTP 413
   timezone and daylight-saving changes. Show overlapping daily-only history as
   unavailable for rolling totals instead of presenting incomplete counts.
 
-[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.8.1...HEAD
+[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.8.1...v1.9.0
 [1.8.1]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.6.2...v1.7.0

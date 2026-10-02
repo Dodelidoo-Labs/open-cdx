@@ -133,17 +133,20 @@ run_swift_build() {
     reset_swift_scratch "$SWIFT_SCRATCH"
   fi
 
-  if ! (cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH" "$@"); then
+  # Sparkle is public; never request the operator's GitHub credentials.
+  # Xcode 27's swiftbuild default stamps the deployment target as the linked
+  # SDK. Native SwiftPM retains the actual SDK required for the Tahoe HUD.
+  if ! (cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --build-system native --disable-keychain --disable-netrc --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH" "$@"); then
     if ! sparkle_artifact_partial "$SWIFT_SCRATCH" || sparkle_artifact_complete "$SWIFT_SCRATCH"; then
       return 1
     fi
     reset_swift_scratch "$SWIFT_SCRATCH"
-    (cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH" "$@")
+    (cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --build-system native --disable-keychain --disable-netrc --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH" "$@")
   fi
 
   if ! sparkle_artifact_complete "$SWIFT_SCRATCH"; then
     reset_swift_scratch "$SWIFT_SCRATCH"
-    (cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH" "$@")
+    (cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --build-system native --disable-keychain --disable-netrc --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH" "$@")
   fi
 
   if ! sparkle_artifact_complete "$SWIFT_SCRATCH"; then
@@ -156,7 +159,7 @@ swift_bin_path() {
   SWIFT_SCRATCH=$1
   SWIFT_MODULE_CACHE=$2
   shift 2
-  (cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH" "$@" --show-bin-path)
+  (cd "$SWIFT_ROOT" && CLANG_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFT_MODULE_CACHE" swift build --build-system native --disable-keychain --disable-netrc --disable-sandbox -c release --scratch-path "$SWIFT_SCRATCH" "$@" --show-bin-path)
 }
 
 build_menu_app() {

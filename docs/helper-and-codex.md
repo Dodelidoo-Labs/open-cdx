@@ -71,6 +71,69 @@ Codex must restart after a catalog file changes. The menu app and catalog endpoi
 
 The helper checks the router catalog every minute. After a Codex upgrade, that sync refreshes each active account's native catalog using the newer detected version. The router preserves the newest successfully used discovery version per account across restarts; background and dashboard refreshes reuse it, and older devices cannot lower it. Refreshes for the same account run sequentially so an older response cannot overwrite an upgrade. If no real version is known yet, refreshes preserve the cached catalog until a helper reports one. Successful upstream refreshes can still remove models that OpenAI no longer lists.
 
+## ChatGPT app bypass
+
+The new ChatGPT desktop app shares Codex configuration. Selecting the
+`opencdx` provider globally makes the app use custom-provider authentication;
+native Chat, Work, and dots features depend on the app's native provider and
+ChatGPT sign-in. Forwarding more Responses headers cannot restore those
+client-side feature gates.
+
+To use the app's native ChatGPT connection while routing CLI and IDE clients:
+
+1. Quit **ChatGPT**, allowing any active work to finish first.
+2. Choose **Launch ChatGPT** from the OpenCDX menu, below **Add OpenAI Account…**.
+   **Settings → Open ChatGPT Without Routing** provides the same launch.
+3. Sign in to ChatGPT on first use. Your cloud chats and dot belong to that
+   ChatGPT account; the router's account pool is separate.
+4. Use either launch button whenever starting ChatGPT. Opening it from the
+   Dock or Finder does not supply the app-specific environment and can make
+   it read the routed `~/.codex` configuration again. Disable ChatGPT's own
+   launch-at-login option if it starts through that path.
+
+The equivalent helper command is:
+
+```sh
+router-helper open-chatgpt --dry-run # Show paths; no files or app launch.
+router-helper open-chatgpt
+```
+
+For a source checkout, without installing a companion build:
+
+```sh
+go run ./cmd/router-helper open-chatgpt
+```
+
+The command opens the **existing** `ChatGPT.app` in `/Applications` or
+`~/Applications`, checks its new-app bundle identity, and refuses to launch
+while it is running. It does not quit an app or create another instance.
+ChatGPT Classic is not selected.
+
+Only this launch gets `CODEX_HOME` pointing to
+`~/Library/Application Support/com.dodelidoo.opencdx/chatgpt-home` (beside the
+helper configuration when a custom `--config` is used). The initial config
+selects `openai` and file-based native authentication. The app has its own
+SQLite directory and starts its bundled app-server instead of reusing a
+daemon from the routed home. No global environment variables, router settings,
+`~/.codex/config.toml`, or existing credential files are changed or copied.
+Later launches preserve the app's settings and sign-in in this separate home.
+
+On ChatGPT 26.930.21537, live acceptance confirmed the dot became available
+through this bypass; Chat/Work tabs did not return. The bypass restores the
+native connection, but account and app feature availability still apply.
+
+Local Codex histories, plugins, and custom settings in `~/.codex` are not
+copied into the app home. Existing CLI and IDE sessions remain there. The
+default Codex history import continues to scan only `~/.codex`; explicitly
+importing this other home replaces this machine's previous reconciliation
+snapshot, as described below.
+
+App traffic goes directly to OpenAI using its own account, so it does not
+benefit from router failover or the router's Ollama/OpenRouter picker. Work
+and Codex still use the native account's allowance. OpenCDX cannot count
+bypassed app requests as routed telemetry. Provider routing and account
+allowance observation remain available for the clients using the router.
+
 ## Import Codex history
 
 **Import Codex History…** in Settings previews and imports only the
@@ -145,6 +208,7 @@ deduplication; Codex reconciliation never replaces it.
 | `router-helper claude-setup [--remove] [--apply]` | Preview or change the Claude Code settings entries; see [Claude Code](claude-code.md) |
 | `router-helper claude-import [--dry-run]` | Import Claude Code usage from local transcripts; see [Claude Code](claude-code.md) |
 | `router-helper open-dashboard` | Open the configured dashboard |
+| `router-helper open-chatgpt [--dry-run]` | Open the installed new ChatGPT app with a separate native home; keep CLI/IDE routing |
 | `router-helper quit` | Stop the user helper daemon |
 | `router-helper config` | Print, but never install, the Codex TOML snippet |
 
