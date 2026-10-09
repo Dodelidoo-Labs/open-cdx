@@ -44,3 +44,6 @@ node_modules/
 .agents/
 .codex/
 .playwright-mcp/
+
+# Scratch work and evidence
+.work/
