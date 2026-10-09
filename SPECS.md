@@ -273,6 +273,10 @@ Maintain sticky account affinity per Codex thread/session. Do not rotate account
 When an account is exhausted:
 
 - Rebind the next request to another eligible account.
+- Prefer any account with allowance left. An account whose allowance is used up
+  stays eligible while it reports usable Codex credits, and serves only when no
+  account has allowance left.
+- Never redeem a banked reset automatically.
 - Retry automatically only if no streamed output was emitted and replay is demonstrably safe.
 - Never replay a partially emitted response.
 

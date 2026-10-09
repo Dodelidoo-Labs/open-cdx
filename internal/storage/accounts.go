@@ -333,16 +333,53 @@ func (store *Store) SetAccountStatus(ctx context.Context, accountID, status, las
 	return requireChanged(result)
 }
 
+// MarkAccountExhausted records an upstream usage-limit rejection. It also drops
+// the credit status from the stored quota: the rejection proves the account
+// cannot spend credits right now, so routing must not pick it again for credits
+// before the next quota poll reports the balance afresh.
 func (store *Store) MarkAccountExhausted(ctx context.Context, accountID string, resetAt time.Time) error {
-	result, err := store.db.ExecContext(ctx, `
-		UPDATE accounts SET quota_used_percent=100,
-		quota_reset_at=CASE WHEN ? > 0 THEN ? ELSE quota_reset_at END,
-		last_error='quota exhausted', updated_at=? WHERE id=?`,
-		unixTime(resetAt), unixTime(resetAt), time.Now().Unix(), accountID)
+	transaction, err := store.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	return requireChanged(result)
+	defer transaction.Rollback()
+	var sealed []byte
+	if err = transaction.QueryRowContext(ctx, `SELECT raw_quota_blob FROM accounts WHERE id=?`, accountID).Scan(&sealed); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if len(sealed) > 0 {
+		raw, openErr := store.box.Open(sealed, []byte("quota:"+accountID))
+		if openErr != nil {
+			return fmt.Errorf("decrypt account quota: %w", openErr)
+		}
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(raw, &fields) == nil {
+			if _, present := fields["credits"]; present {
+				delete(fields, "credits")
+				if raw, err = json.Marshal(fields); err != nil {
+					return err
+				}
+				if sealed, err = store.box.Seal(raw, []byte("quota:"+accountID)); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	result, err := transaction.ExecContext(ctx, `
+		UPDATE accounts SET quota_used_percent=100,
+		quota_reset_at=CASE WHEN ? > 0 THEN ? ELSE quota_reset_at END,
+		raw_quota_blob=?, last_error='quota exhausted', updated_at=? WHERE id=?`,
+		unixTime(resetAt), unixTime(resetAt), sealed, time.Now().Unix(), accountID)
+	if err != nil {
+		return err
+	}
+	if err = requireChanged(result); err != nil {
+		return err
+	}
+	return transaction.Commit()
 }
 
 func (store *Store) SetAccountPaused(ctx context.Context, accountID string, paused bool) error {

@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accounts without credits show nothing. Update the router and the macOS
   companion to see it in the HUD.
 
+### Fixed
+
+- Keep Codex running on credits once every account's allowance is used up.
+  The router treated an account at 100% as unusable even when OpenAI would
+  have charged its credits, so the request failed with `quota_exhausted`.
+  Allowance on any account is still used first.
+- Fail over through every eligible account after usage-limit rejections. A
+  request stopped after one retry, so a second rejected account ended it even
+  when a third account could serve it.
+
 ## [1.9.1] - 2026-10-09
 
 ### Fixed

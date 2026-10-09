@@ -261,3 +261,22 @@ func TestParseCredits(t *testing.T) {
 		})
 	}
 }
+
+func TestCreditsUsable(t *testing.T) {
+	const credits = `"credits":{"has_credits":true,"unlimited":false,"balance":"50"}`
+	for _, test := range []struct {
+		name, raw string
+		usable    bool
+	}{
+		{"no credits", `{"rate_limit":{"allowed":false}}`, false},
+		{"allowance limit", `{"rate_limit":{"allowed":false,"limit_reached":true},"rate_limit_reached_type":{"type":"rate_limit_reached"},` + credits + `}`, true},
+		{"unlimited", `{"rate_limit":{"allowed":false},"credits":{"has_credits":false,"unlimited":true}}`, true},
+		{"spend control", `{"spend_control":{"reached":true},` + credits + `}`, false},
+		{"credits depleted", `{"rate_limit_reached_type":{"type":"workspace_member_credits_depleted"},` + credits + `}`, false},
+		{"spend cap", `{"rate_limit_reached_type":{"type":"workspace_owner_usage_limit_reached"},` + credits + `}`, false},
+	} {
+		if got := CreditsUsable([]byte(test.raw)); got != test.usable {
+			t.Errorf("%s: usable=%v; want %v", test.name, got, test.usable)
+		}
+	}
+}

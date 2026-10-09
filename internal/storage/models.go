@@ -69,8 +69,14 @@ type AccountDisplayState struct {
 	RawQuota         json.RawMessage
 }
 
+// Ready reports whether the account may serve requests at all, regardless of
+// its allowance.
+func (account Account) Ready() bool {
+	return !account.Paused && account.Status == "ready"
+}
+
 func (account Account) QuotaAvailable(now time.Time) bool {
-	if account.Paused || account.Status != "ready" {
+	if !account.Ready() {
 		return false
 	}
 	return account.QuotaUsedPercent < 100 || (!account.QuotaResetAt.IsZero() && !now.Before(account.QuotaResetAt))

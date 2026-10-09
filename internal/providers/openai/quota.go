@@ -380,3 +380,29 @@ func (credits Credits) Label() string {
 		return "Credits available"
 	}
 }
+
+// CreditsUsable reports whether an account can keep serving requests from
+// credits once its allowance is used up. Spend control and the workspace
+// credit and spend-cap stops block credits; the generic rate_limit_reached
+// type is the ordinary allowance limit that credits exist to cover. A wrong
+// guess costs one rejected request, which marks the account exhausted.
+func CreditsUsable(raw []byte) bool {
+	if ParseCredits(raw) == nil {
+		return false
+	}
+	var payload quotaPayload
+	if json.Unmarshal(raw, &payload) != nil {
+		return false
+	}
+	if payload.SpendControl != nil && payload.SpendControl.Reached {
+		return false
+	}
+	if reached := payload.RateLimitReachedType; reached != nil {
+		switch reached.Type {
+		case "", "unknown", "rate_limit_reached":
+		default:
+			return false
+		}
+	}
+	return true
+}

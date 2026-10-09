@@ -518,3 +518,32 @@ func TestTimestampedUsageSurvivesReopenAndKeepsLegacyTotals(t *testing.T) {
 		}
 	}
 }
+
+func TestMarkAccountExhaustedDropsCreditsUntilNextPoll(t *testing.T) {
+	store := testStore(t, ":memory:")
+	ctx := context.Background()
+	input := accountInput("stable", "access")
+	input.RawQuota = []byte(`{"plan_type":"plus","credits":{"has_credits":true,"balance":"9"},"rate_limit_reset_credits":{"available_count":1}}`)
+	account, _, err := store.PutAccount(ctx, input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resetAt := time.Now().Add(time.Hour).Truncate(time.Second)
+	if err = store.MarkAccountExhausted(ctx, account.ID, resetAt); err != nil {
+		t.Fatal(err)
+	}
+	account, err = store.Account(ctx, account.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var quota map[string]json.RawMessage
+	if err = json.Unmarshal(account.RawQuota, &quota); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := quota["credits"]; present || quota["rate_limit_reset_credits"] == nil || account.QuotaUsedPercent != 100 || !account.QuotaResetAt.Equal(resetAt) {
+		t.Fatalf("exhausted account = %v used, reset %v, quota %s", account.QuotaUsedPercent, account.QuotaResetAt, account.RawQuota)
+	}
+	if err = store.MarkAccountExhausted(ctx, "missing", resetAt); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing account error = %v", err)
+	}
+}

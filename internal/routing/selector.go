@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/Dodelidoo-Labs/open-cdx/internal/providers/openai"
 	"github.com/Dodelidoo-Labs/open-cdx/internal/storage"
 )
 
@@ -34,12 +35,23 @@ func (selector *Selector) SelectNative(ctx context.Context, deviceID, modelID, a
 	if err != nil {
 		return Selection{}, err
 	}
-	eligible := make([]storage.Account, 0, len(accounts))
+	now := selector.now()
+	// Allowance comes first on every account; credits cost money, so they serve
+	// only when no account has allowance left.
+	var withAllowance, withCredits []storage.Account
 	for _, account := range accounts {
-		if account.ID == excludedAccount || !account.QuotaAvailable(selector.now()) || !contains(account.EntitledModels, modelID) || !accountSupportsAccessPrograms(account, modelID, programs) {
+		if account.ID == excludedAccount || !account.Ready() || !contains(account.EntitledModels, modelID) || !accountSupportsAccessPrograms(account, modelID, programs) {
 			continue
 		}
-		eligible = append(eligible, account)
+		if account.QuotaAvailable(now) {
+			withAllowance = append(withAllowance, account)
+		} else if openai.CreditsUsable(account.RawQuota) {
+			withCredits = append(withCredits, account)
+		}
+	}
+	eligible := withAllowance
+	if len(eligible) == 0 {
+		eligible = withCredits
 	}
 	if len(eligible) == 0 {
 		return Selection{}, ErrNoEligibleAccount

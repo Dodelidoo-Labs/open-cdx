@@ -28,6 +28,14 @@ account has credits, a label after its tickets shows the balance, such as
 balance, the label reads **Credits available**. Accounts without credits show
 no label.
 
+Credits also keep Codex running. Routing uses every account's allowance
+first; when none is left, it routes to an account with usable credits instead
+of failing. Credits are not usable when OpenAI reports a spend-control stop,
+an exhausted workspace credit pool, or a workspace spend cap. A usage-limit
+rejection from OpenAI fails over to the next eligible account within the same
+request, and the rejected account is not used for credits again until the next
+quota poll. OpenCDX never redeems a reset ticket on its own.
+
 Update both the server and macOS companion to use redemption from the HUD.
 Account credentials stay on the server. Both administrator sessions (with CSRF)
 and approved paired devices may redeem resets from the shared account pool.

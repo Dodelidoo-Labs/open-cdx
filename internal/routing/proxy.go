@@ -165,9 +165,17 @@ func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Re
 			return
 		}
 	}
-	if target.provider == "openai" && response.StatusCode == http.StatusTooManyRequests {
+	// Fail over through every eligible account on a usage-limit rejection. Each
+	// rejection marks its account exhausted and drops its credits until the next
+	// quota poll, so the selector moves on; the cap bounds an account whose
+	// stored reset time has already passed.
+	for failovers := 0; target.provider == "openai" && response.StatusCode == http.StatusTooManyRequests; failovers++ {
 		response.Body.Close()
 		_ = proxy.store.MarkAccountExhausted(request.Context(), target.account.ID, quotaReset(response.Header))
+		if failovers == maxQuotaFailovers {
+			writeProxyError(writer, http.StatusTooManyRequests, "quota_exhausted", "all eligible OpenAI accounts are currently exhausted")
+			return
+		}
 		nextTarget, selectErr := proxy.resolveTarget(request.Context(), "openai", modelID, upstreamModel, request.URL.Path, device.ID, affinity, target.account.ID, programs)
 		if selectErr == nil {
 			target = nextTarget
@@ -177,12 +185,6 @@ func (proxy *Proxy) ServeDeviceHTTP(writer http.ResponseWriter, request *http.Re
 			if request.Context().Err() != nil {
 				return
 			}
-			writeProxyError(writer, http.StatusTooManyRequests, "quota_exhausted", "all eligible OpenAI accounts are currently exhausted")
-			return
-		}
-		if response.StatusCode == http.StatusTooManyRequests {
-			response.Body.Close()
-			_ = proxy.store.MarkAccountExhausted(request.Context(), target.account.ID, quotaReset(response.Header))
 			writeProxyError(writer, http.StatusTooManyRequests, "quota_exhausted", "all eligible OpenAI accounts are currently exhausted")
 			return
 		}
@@ -371,6 +373,10 @@ func copyResponseHeaders(destination, source http.Header) {
 		}
 	}
 }
+
+// maxQuotaFailovers bounds the accounts one request tries after usage-limit
+// rejections.
+const maxQuotaFailovers = 8
 
 type streamCopyDirection uint8
 
