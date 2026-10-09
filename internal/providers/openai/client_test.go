@@ -237,26 +237,23 @@ func openAITestJWT(accountID string, expires time.Time) string {
 
 func TestParseCredits(t *testing.T) {
 	for _, test := range []struct {
-		name, raw, label string
-		present          bool
+		name, raw string
+		want      *Credits
 	}{
-		{"absent", `{"rate_limit":{"allowed":true}}`, "", false},
-		{"null", `{"credits":null}`, "", false},
-		{"no credits", `{"credits":{"has_credits":false,"unlimited":false,"balance":"0"}}`, "", false},
-		{"unlimited", `{"credits":{"has_credits":false,"unlimited":true}}`, "Unlimited credits", true},
-		{"rounded balance", `{"credits":{"has_credits":true,"unlimited":false,"balance":"42.6"}}`, "43 credits", true},
-		{"one", `{"credits":{"has_credits":true,"unlimited":false,"balance":"1"}}`, "1 credit", true},
-		{"fraction", `{"credits":{"has_credits":true,"unlimited":false,"balance":"0.2"}}`, "<1 credit", true},
-		{"hidden balance", `{"credits":{"has_credits":true,"unlimited":false,"balance":null}}`, "Credits available", true},
-		{"invalid balance", `{"credits":{"has_credits":true,"unlimited":false,"balance":"lots"}}`, "Credits available", true},
+		{"absent", `{"rate_limit":{"allowed":true}}`, nil},
+		{"null", `{"credits":null}`, nil},
+		{"no credits", `{"credits":{"has_credits":false,"unlimited":false,"balance":"0"}}`, nil},
+		{"unlimited", `{"credits":{"has_credits":false,"unlimited":true}}`, &Credits{Unlimited: true}},
+		{"rounded balance", `{"credits":{"has_credits":true,"unlimited":false,"balance":"42.6"}}`, &Credits{Balance: "43"}},
+		{"one", `{"credits":{"has_credits":true,"unlimited":false,"balance":"1"}}`, &Credits{Balance: "1"}},
+		{"fraction", `{"credits":{"has_credits":true,"unlimited":false,"balance":"0.2"}}`, &Credits{Balance: "<1"}},
+		{"hidden balance", `{"credits":{"has_credits":true,"unlimited":false,"balance":null}}`, &Credits{}},
+		{"invalid balance", `{"credits":{"has_credits":true,"unlimited":false,"balance":"lots"}}`, &Credits{}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			credits := ParseCredits([]byte(test.raw))
-			if (credits != nil) != test.present {
-				t.Fatalf("credits=%+v; want present=%v", credits, test.present)
-			}
-			if credits != nil && credits.Label() != test.label {
-				t.Fatalf("label=%q; want %q", credits.Label(), test.label)
+			if (credits == nil) != (test.want == nil) || (credits != nil && *credits != *test.want) {
+				t.Fatalf("credits=%+v; want %+v", credits, test.want)
 			}
 		})
 	}

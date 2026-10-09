@@ -1539,9 +1539,18 @@
     const credits = row.querySelector("[data-account-credits]");
     if (credits) {
       const { unlimited, balance } = account.credits || {};
+      const amount = unlimited ? "∞" : /^\d+$/.test(balance || "") ? formatNumber(balance) : balance || "";
+      const suffix = " · used after the allowance runs out";
+      const title = unlimited ? `Unlimited Codex credits${suffix}`
+        : !amount ? `Codex credits available${suffix}`
+        : amount === "1" || amount === "<1" ? `${amount} Codex credit${suffix}`
+        : `${amount} Codex credits${suffix}`;
       credits.hidden = !account.credits;
-      credits.textContent = unlimited ? "Unlimited credits" : balance === "1" || balance === "<1" ? `${balance} credit` : balance ? `${balance} credits` : "Credits available";
+      credits.title = title;
+      credits.setAttribute("aria-label", title);
+      credits.querySelector("[data-account-credits-amount]").textContent = amount;
     }
+
     const status = row.querySelector("[data-account-status]");
     status.className = `state ${account.paused ? "warn" : account.status === "ready" ? "good" : "bad"}`;
     status.textContent = account.paused ? "Paused" : account.status;

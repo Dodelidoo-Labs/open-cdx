@@ -606,11 +606,13 @@ form { margin: 0; }
 
 .account-name-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .reset-tickets { display: inline-flex; align-items: center; gap: 2px; }
+.reset-tickets:empty { display: none; }
 .reset-ticket { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 28px; padding: 3px; border: 0; border-radius: 5px; background: transparent; color: var(--accent, #5486bd); cursor: pointer; }
 .reset-ticket:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
 .reset-ticket:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 .reset-ticket svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.account-credits { padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent, #5486bd); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.account-credits { display: inline-flex; align-items: center; gap: 3px; color: var(--accent, #5486bd); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; cursor: default; }
+.account-credits .credit-mark { display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; background: var(--accent, #5486bd); color: var(--bg); font-size: 12px; font-weight: 700; line-height: 1; }
 .reset-confirmation { max-width: 360px; padding: 24px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--fg); }
 .reset-confirmation::backdrop { background: rgb(0 0 0 / 25%); }
 .reset-confirmation h2 { margin-top: 0; font-size: 18px; }

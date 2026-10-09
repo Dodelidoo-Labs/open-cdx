@@ -189,7 +189,7 @@ func liveTestServer(t *testing.T) (*Server, *storage.Store) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	templates, err := template.New("site").Funcs(template.FuncMap{"number": formatInteger}).ParseFS(site.Templates, "templates/*.html")
+	templates, err := template.New("site").Funcs(templateFuncs).ParseFS(site.Templates, "templates/*.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +479,7 @@ func TestLiveQuotaWindowsRetainZeroPercentPaceMarker(t *testing.T) {
 }
 
 func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
-	templates, err := template.New("site").Funcs(template.FuncMap{"number": formatInteger}).ParseFS(site.Templates, "templates/*.html")
+	templates, err := template.New("site").Funcs(templateFuncs).ParseFS(site.Templates, "templates/*.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,7 +492,7 @@ func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
 		Accounts: []accountView{
 			{
 				ID: "account", MaskedEmail: "a***@example.com", Plan: "pro", Status: "ready", Primary: true,
-				Credits:    &openai.Credits{Balance: "43"},
+				Credits:    &openai.Credits{Balance: "62500"},
 				CodexReset: "Aug 30 · 02:31", CodexResetAt: "2026-08-30T02:31:00Z",
 				VisibleModels: []string{"gpt-test"}, MoreModels: []string{"gpt-test-2"},
 				Quotas: []quotaView{
@@ -532,7 +532,7 @@ func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
 		`/assets/opencdx-router-logo.png?v=1.0.0-test`, `/assets/favicon-32x32.png?v=1.0.0-test`,
 		`/admin/devices/device/revoke`, `/admin/devices/retired/delete`,
 		`datetime="2026-08-30T02:31:00Z"`, `data-local-datetime`, `data-local-date`, `data-local-clock`,
-		`data-account-credits>43 credits</span>`, `data-account-credits hidden></span>`, "[hidden]{display:none!important}", "Codex Spark", "On pace", "quota-pace-marker", "gpt-test-2", `data-sort="provider"`, `data-sort="model"`, `data-sort="state"`,
+		`title="62&#39;500 Codex credits · used after the allowance runs out"`, `data-account-credits-amount>62&#39;500</span>`, `data-account-credits role="img" hidden>`, "[hidden]{display:none!important}", "Codex Spark", "On pace", "quota-pace-marker", "gpt-test-2", `data-sort="provider"`, `data-sort="model"`, `data-sort="state"`,
 	} {
 		if !strings.Contains(output.String(), marker) {
 			t.Fatalf("dashboard is missing %q", marker)
@@ -1071,5 +1071,22 @@ func TestTelemetryAllowanceHistoryRefreshesWithoutUsageAndExcludesMachineHistory
 	}
 	if len(report.AllowanceHistory) != 1 || report.AllowanceHistory[0].WindowSeconds != 18000 || len(report.AllowanceHistory[0].Points) != 1 || report.AllowanceHistory[0].Points[0].Remaining != 58 {
 		t.Fatalf("incorrect account history: %#v", report.AllowanceHistory)
+	}
+}
+
+func TestCreditTitleAndAmount(t *testing.T) {
+	for _, test := range []struct {
+		credits       openai.Credits
+		amount, title string
+	}{
+		{openai.Credits{Balance: "62500"}, "62'500", "62'500 Codex credits · used after the allowance runs out"},
+		{openai.Credits{Balance: "1"}, "1", "1 Codex credit · used after the allowance runs out"},
+		{openai.Credits{Balance: "<1"}, "<1", "<1 Codex credit · used after the allowance runs out"},
+		{openai.Credits{Unlimited: true}, "∞", "Unlimited Codex credits · used after the allowance runs out"},
+		{openai.Credits{}, "", "Codex credits available · used after the allowance runs out"},
+	} {
+		if amount, title := creditAmount(test.credits), creditTitle(test.credits); amount != test.amount || title != test.title {
+			t.Errorf("%+v: amount %q title %q; want %q %q", test.credits, amount, title, test.amount, test.title)
+		}
 	}
 }

@@ -367,20 +367,6 @@ func ParseCredits(raw []byte) *Credits {
 	return credits
 }
 
-// Label is the short text shown beside an account.
-func (credits Credits) Label() string {
-	switch {
-	case credits.Unlimited:
-		return "Unlimited credits"
-	case credits.Balance == "1" || credits.Balance == "<1":
-		return credits.Balance + " credit"
-	case credits.Balance != "":
-		return credits.Balance + " credits"
-	default:
-		return "Credits available"
-	}
-}
-
 // CreditsUsable reports whether an account can keep serving requests from
 // credits once its allowance is used up. Spend control and the workspace
 // credit and spend-cap stops block credits; the generic rate_limit_reached

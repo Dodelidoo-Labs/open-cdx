@@ -69,7 +69,7 @@ func New(store *storage.Store, accountManager *accounts.Manager, catalogManager 
 	if err != nil {
 		return nil, err
 	}
-	templates, err := template.New("site").Funcs(template.FuncMap{"number": formatInteger}).ParseFS(site.Templates, "templates/*.html")
+	templates, err := template.New("site").Funcs(templateFuncs).ParseFS(site.Templates, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse dashboard templates: %w", err)
 	}
@@ -90,6 +90,8 @@ func New(store *storage.Store, accountManager *accounts.Manager, catalogManager 
 	server.handler = server.routes()
 	return server, nil
 }
+
+var templateFuncs = template.FuncMap{"number": formatInteger, "creditAmount": creditAmount, "creditTitle": creditTitle}
 
 func formatInteger(value int) string {
 	raw := strconv.Itoa(value)
@@ -1534,4 +1536,31 @@ func minFloat(left, right float64) float64 {
 		return left
 	}
 	return right
+}
+
+// creditAmount is the compact balance shown beside the credits icon: grouped
+// digits, "∞" for unlimited, or empty when OpenAI does not disclose it.
+func creditAmount(credits openai.Credits) string {
+	if credits.Unlimited {
+		return "∞"
+	}
+	if value, err := strconv.Atoi(credits.Balance); err == nil {
+		return formatInteger(value)
+	}
+	return credits.Balance
+}
+
+// creditTitle names the credits icon for tooltips and screen readers.
+func creditTitle(credits openai.Credits) string {
+	const suffix = " · used after the allowance runs out"
+	switch amount := creditAmount(credits); {
+	case credits.Unlimited:
+		return "Unlimited Codex credits" + suffix
+	case amount == "":
+		return "Codex credits available" + suffix
+	case amount == "1" || amount == "<1":
+		return amount + " Codex credit" + suffix
+	default:
+		return amount + " Codex credits" + suffix
+	}
 }
