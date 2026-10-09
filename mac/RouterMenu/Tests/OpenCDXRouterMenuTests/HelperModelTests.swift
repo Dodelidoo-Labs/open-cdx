@@ -230,12 +230,16 @@ final class HelperModelTests: XCTestCase {
     func testCreditsDecodeAndLabel() throws {
         let decoder = JSONDecoder()
         let balance = try decoder.decode(AccountAllowanceStatus.self, from: Data(#"{"id":"a","credits":{"balance":"43"}}"#.utf8))
-        XCTAssertEqual(balance.credits?.label, "43 credits")
+        XCTAssertEqual(balance.credits?.label, "43 Codex credits")
         let unlimited = try decoder.decode(AccountAllowanceStatus.self, from: Data(#"{"credits":{"unlimited":true}}"#.utf8))
-        XCTAssertEqual(unlimited.credits?.label, "Unlimited credits")
-        XCTAssertEqual(AccountCredits(balance: "1").label, "1 credit")
-        XCTAssertEqual(AccountCredits(balance: "<1").label, "<1 credit")
-        XCTAssertEqual(AccountCredits().label, "Credits available")
+        XCTAssertEqual(unlimited.credits?.label, "Unlimited Codex credits")
+        XCTAssertEqual(AccountCredits(balance: "1").label, "1 Codex credit")
+        XCTAssertEqual(AccountCredits(balance: "<1").label, "<1 Codex credit")
+        XCTAssertEqual(AccountCredits().label, "Codex credits available")
+        XCTAssertEqual(AccountCredits(balance: "62500").amount, 62_500.formatted(.number))
+        XCTAssertEqual(AccountCredits(balance: "<1").amount, "<1")
+        XCTAssertEqual(AccountCredits(unlimited: true).amount, "∞")
+        XCTAssertNil(AccountCredits().amount)
         let none = try decoder.decode(AccountAllowanceStatus.self, from: Data(#"{"credits":null}"#.utf8))
         XCTAssertNil(none.credits)
     }
@@ -250,6 +254,7 @@ final class HelperModelTests: XCTestCase {
         pro.id = "preview-pro"
         pro.resetCredits = 2
         pro.resetTickets = [AccountResetTicket(id: "one"), AccountResetTicket(id: "two")]
+        pro.credits = AccountCredits(balance: "62500")
         pro.quotaWindows = [
             AccountQuotaWindowStatus(
                 label: "Weekly",
@@ -276,6 +281,8 @@ final class HelperModelTests: XCTestCase {
         plus.maskedEmail = "s***a@g***.com"
         plus.plan = "plus"
         plus.status = "ready"
+        plus.resetCredits = 3
+        plus.resetTickets = [AccountResetTicket(id: "a"), AccountResetTicket(id: "b"), AccountResetTicket(id: "c")]
         plus.quotaWindows = [
             AccountQuotaWindowStatus(
                 label: "Weekly",
@@ -297,9 +304,16 @@ final class HelperModelTests: XCTestCase {
             ),
         ]
 
+        var creditsOnly = plus
+        creditsOnly.id = "preview-credits"
+        creditsOnly.plan = "business"
+        creditsOnly.resetTickets = []
+        creditsOnly.resetCredits = 0
+        creditsOnly.credits = AccountCredits(unlimited: true)
+
         let fixture = VStack(spacing: 0) {
             Divider().padding(.horizontal, 12)
-            AccountAllowanceSection(accounts: [pro, plus], connected: true, onReset: { _, _ in })
+            AccountAllowanceSection(accounts: [pro, plus, creditsOnly], connected: true, onReset: { _, _ in })
             Divider().padding(.horizontal, 12)
             Text("Open Dashboard")
                 .frame(maxWidth: .infinity, alignment: .leading)

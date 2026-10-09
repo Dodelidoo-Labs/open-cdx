@@ -298,31 +298,44 @@ struct AccountAllowanceRow: View {
                 }
                 TimelineView(.periodic(from: .now, by: 1)) { timeline in
                     let tickets = account.availableResetTickets(at: timeline.date)
-                    HStack(spacing: 2) {
-                        ForEach(Array(tickets.enumerated()), id: \.offset) { index, ticket in
-                            Button {
-                                selectedTicket = ticket
-                                showingResetConfirmation = true
-                            } label: {
-                                Image(systemName: "ticket.fill")
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(Color.accentColor)
-                                    .frame(width: 22, height: 24)
+                    HStack(spacing: 8) {
+                        if !tickets.isEmpty {
+                            HStack(spacing: 2) {
+                                ForEach(Array(tickets.enumerated()), id: \.offset) { index, ticket in
+                                    Button {
+                                        selectedTicket = ticket
+                                        showingResetConfirmation = true
+                                    } label: {
+                                        Image(systemName: "ticket.fill")
+                                            .font(.system(size: 13))
+                                            .foregroundStyle(Color.accentColor)
+                                            .frame(width: 22, height: 24)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(!canReset || account.id.isEmpty || onReset == nil)
+                                    .help(ticket.expiresAt.map { "Apply one reset · expires \($0.formatted())" } ?? "Apply one banked reset")
+                                    .accessibilityLabel("Reset ticket \(index + 1) of \(tickets.count) for \(account.maskedEmail)")
+                                }
                             }
-                            .buttonStyle(.plain)
-                            .disabled(!canReset || account.id.isEmpty || onReset == nil)
-                            .help(ticket.expiresAt.map { "Apply one reset · expires \($0.formatted())" } ?? "Apply one banked reset")
-                            .accessibilityLabel("Reset ticket \(index + 1) of \(tickets.count) for \(account.maskedEmail)")
                         }
-                    }
-                    if let credits = account.credits {
-                        Text(credits.label)
-                            .font(.caption2.weight(.semibold))
+                        if let credits = account.credits {
+                            HStack(spacing: 3) {
+                                Image(systemName: "centsign.circle.fill")
+                                    .font(.system(size: 13))
+                                if let amount = credits.amount {
+                                    Text(amount)
+                                        .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                                }
+                            }
                             .foregroundStyle(Color.accentColor)
                             .lineLimit(1)
-                            .help("Codex credits can be used after the allowance runs out")
+                            .help("\(credits.label) · used after the allowance runs out")
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("\(credits.label) for \(account.maskedEmail)")
+                        }
                     }
                 }
+
                 .popover(isPresented: $showingResetConfirmation, arrowEdge: .bottom) {
                     TimelineView(.periodic(from: .now, by: 1)) { timeline in
                         VStack(alignment: .leading, spacing: 12) {
@@ -350,10 +363,19 @@ struct AccountAllowanceRow: View {
                     }
                 }
                 Spacer(minLength: 10)
-                Text(accountTypeDescription)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(accountTypeDescription)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    if account.primary {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Color.accentColor)
+                            .help("Primary account")
+                            .accessibilityLabel("Primary")
+                    }
+                }
             }
 
             if let mainWindow {
@@ -405,7 +427,6 @@ struct AccountAllowanceRow: View {
     private var accountTypeDescription: String {
         var parts: [String] = []
         if !account.plan.isEmpty { parts.append(account.plan.uppercased()) }
-        if account.primary { parts.append("PRIMARY") }
         if account.paused {
             parts.append("PAUSED")
         } else if !account.status.isEmpty && account.status != "ready" {

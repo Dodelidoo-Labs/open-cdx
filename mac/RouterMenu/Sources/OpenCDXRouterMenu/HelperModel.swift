@@ -87,12 +87,20 @@ struct AccountCredits: Codable, Equatable {
         balance = try container.decodeIfPresent(String.self, forKey: .balance)
     }
 
+    /// Compact amount shown beside the credits icon: grouped digits, "∞" for
+    /// unlimited, or nil when OpenAI does not disclose the balance.
+    var amount: String? {
+        if unlimited { return "∞" }
+        guard let balance, !balance.isEmpty else { return nil }
+        return Int(balance).map { $0.formatted(.number) } ?? balance
+    }
+
     var label: String {
-        if unlimited { return "Unlimited credits" }
-        switch balance {
-        case "1", "<1": return "\(balance ?? "") credit"
-        case let balance? where !balance.isEmpty: return "\(balance) credits"
-        default: return "Credits available"
+        if unlimited { return "Unlimited Codex credits" }
+        switch amount {
+        case "1", "<1": return "\(amount ?? "") Codex credit"
+        case let amount?: return "\(amount) Codex credits"
+        default: return "Codex credits available"
         }
     }
 }
