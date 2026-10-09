@@ -89,7 +89,7 @@ following them so selected-account credentials and cookies cannot move to an
 unselected destination. Cookies received on a pre-stream authentication or quota
 failure stay with that account when the router retries or selects a fallback.
 
-For native OpenAI routes, all other Codex feature metadata is preserved, including current `x-codex-*`, `originator`, `version`, `session-id`, `thread-id`, `OpenAI-Beta`, `User-Agent`, subagent/memory/lite flags, Responses API feature headers, and attestation when Codex supplies it. OpenAI-only feature and attestation headers are removed before OpenRouter or Ollama requests; provider-neutral HTTP metadata and each destination's own headers remain intact.
+For native OpenAI routes, all other Codex feature metadata is preserved, including current `x-codex-*`, `originator`, `version`, `session-id`, `thread-id`, `OpenAI-Beta`, `User-Agent`, subagent/memory/lite flags, Responses API feature headers, and attestation when Codex supplies it. OpenAI-only feature and attestation headers are removed before OpenRouter or Ollama requests; provider-neutral HTTP metadata and each destination's own headers remain intact. OpenRouter requests carry Codex's conversation ID (`thread-id`, else `session-id`) as OpenRouter's `X-Session-Id`, so OpenRouter keeps a conversation on one upstream provider and its prompt cache; a client-supplied `X-Session-Id` is kept. The ID is the random identifier Codex gives each conversation and carries no account or device information.
 
 ## Retry policy
 

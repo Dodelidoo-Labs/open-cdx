@@ -103,4 +103,39 @@ func TestPrepareRequestRemovesOpenAIOnlyMetadata(t *testing.T) {
 	if request.Header.Get("X-OpenRouter-Title") != "keep-provider-header" || request.Header.Get("Authorization") != "Bearer test-key" {
 		t.Fatal("OpenRouter metadata or authentication was lost")
 	}
+	if request.Header.Get("X-Session-Id") != "native-thread" {
+		t.Fatalf("Codex thread was not kept as OpenRouter session affinity: %q", request.Header.Get("X-Session-Id"))
+	}
+}
+
+func TestPrepareRequestSessionAffinity(t *testing.T) {
+	client, err := New(nil, "https://openrouter.ai/api/v1", "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name    string
+		headers map[string]string
+		want    string
+	}{
+		{"thread wins over session", map[string]string{"Thread-Id": "thread", "Session-Id": "session"}, "thread"},
+		{"session without thread", map[string]string{"Session-Id": "session"}, "session"},
+		{"explicit session kept", map[string]string{"Thread-Id": "thread", "X-Session-Id": "client"}, "client"},
+		{"no conversation", map[string]string{}, ""},
+	}
+	for _, testCase := range cases {
+		request, _ := http.NewRequest(http.MethodPost, "https://openrouter.ai/api/v1/responses", nil)
+		for name, value := range testCase.headers {
+			request.Header.Set(name, value)
+		}
+		if err = client.PrepareRequest(request, providers.Credential{}, "vendor/model"); err != nil {
+			t.Fatal(err)
+		}
+		if got := request.Header.Get("X-Session-Id"); got != testCase.want {
+			t.Fatalf("%s: X-Session-Id = %q, want %q", testCase.name, got, testCase.want)
+		}
+		if request.Header.Get("Session-Id") != "" || request.Header.Get("Thread-Id") != "" {
+			t.Fatalf("%s: Codex conversation headers were forwarded", testCase.name)
+		}
+	}
 }

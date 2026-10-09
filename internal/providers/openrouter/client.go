@@ -110,9 +110,27 @@ func (client *Client) ResponsesURL(path string) (string, error) {
 }
 
 func (client *Client) PrepareRequest(request *http.Request, _ providers.Credential, _ string) error {
+	addSessionAffinity(request.Header)
 	stripCodexOnlyHeaders(request.Header)
 	client.addAuth(request.Header)
 	return nil
+}
+
+// addSessionAffinity names Codex's conversation in OpenRouter's session header
+// before the Codex headers are stripped. OpenRouter then keeps the conversation
+// on one upstream provider from its first request, so automatic prompt caches
+// on multi-provider models are reused instead of missed on another host.
+func addSessionAffinity(headers http.Header) {
+	if headers.Get("X-Session-Id") != "" {
+		return
+	}
+	conversation := headers.Get("Thread-Id")
+	if conversation == "" {
+		conversation = headers.Get("Session-Id")
+	}
+	if conversation != "" {
+		headers.Set("X-Session-Id", conversation)
+	}
 }
 
 func stripCodexOnlyHeaders(headers http.Header) {

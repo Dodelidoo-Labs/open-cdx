@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep each Codex conversation on one OpenRouter upstream provider by sending
+  its conversation ID as OpenRouter's `X-Session-Id`. Models that several
+  providers serve, such as DeepSeek, missed their automatic prompt cache when a
+  request landed on another host; Codex history showed DeepSeek V4.1 Flash
+  missing on 48% of large requests sent one to five minutes after the previous
+  one.
+
 ## [1.9.0] - 2026-10-02
 
 ### Added
