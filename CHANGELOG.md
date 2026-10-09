@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-10-09
+
 ### Added
 
 - Show an OpenAI account's Codex credits beside its reset tickets on the
@@ -24,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fail over through every eligible account after usage-limit rejections. A
   request stopped after one retry, so a second rejected account ended it even
   when a third account could serve it.
+
+Redeploy the router image for the routing fixes. Update the macOS companion as
+well to see credits in the HUD.
 
 ## [1.9.1] - 2026-10-09
 
@@ -349,7 +354,8 @@ rebuilt for this release, but updating the companion alone does not fix HTTP 413
   timezone and daylight-saving changes. Show overlapping daily-only history as
   unavailable for rolling totals instead of presenting incomplete counts.
 
-[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.9.1...HEAD
+[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.9.1...v1.10.0
 [1.9.1]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.8.1...v1.9.0
 [1.8.1]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.8.0...v1.8.1
