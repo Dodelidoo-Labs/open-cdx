@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-10-09
+
 ### Fixed
 
 - Turn on Anthropic's prompt cache for Claude models routed through
@@ -14,13 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Codex never asks, so every Claude request was billed at the full input price;
   a 21-turn Orchestra task read none of its 1.94 million input tokens from
   cache. A request that already sets `cache_control` is left as sent.
-
 - Keep each Codex conversation on one OpenRouter upstream provider by sending
   its conversation ID as OpenRouter's `X-Session-Id`. Models that several
   providers serve, such as DeepSeek, missed their automatic prompt cache when a
   request landed on another host; Codex history showed DeepSeek V4.1 Flash
   missing on 48% of large requests sent one to five minutes after the previous
   one.
+
+Only the router changes; the macOS companion is unchanged. Redeploy the router
+image to apply both fixes.
 
 ## [1.9.0] - 2026-10-02
 
@@ -327,7 +331,8 @@ rebuilt for this release, but updating the companion alone does not fix HTTP 413
   timezone and daylight-saving changes. Show overlapping daily-only history as
   unavailable for rolling totals instead of presenting incomplete counts.
 
-[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.9.1...HEAD
+[1.9.1]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.8.1...v1.9.0
 [1.8.1]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.7.0...v1.8.0
