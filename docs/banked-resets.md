@@ -23,10 +23,10 @@ dashboard retain its idempotency key so the retry cannot consume another reset.
 
 OpenAI accounts can also hold Codex credits, which keep the account usable
 after its allowance runs out. They are separate from reset tickets. When an
-account has credits, a label after its tickets shows the balance, such as
-**43 credits**, or **Unlimited credits**. If OpenAI reports credits without a
-balance, the label reads **Credits available**. Accounts without credits show
-no label.
+account has credits, a cent-sign mark after its tickets shows the balance,
+such as **¢ 62'500**, or **¢ ∞** for unlimited credits. Hovering the mark names
+it, for example *62'500 Codex credits*. If OpenAI reports credits without a
+balance, only the mark appears. Accounts without credits show nothing.
 
 Credits also keep Codex running. Routing uses every account's allowance
 first; when none is left, it routes to an account with usable credits instead

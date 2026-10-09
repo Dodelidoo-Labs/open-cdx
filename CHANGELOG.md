@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-10-09
+
+### Changed
+
+- Show Codex credits as a cent-sign mark with the balance, on the same row as
+  the reset tickets, in the macOS HUD and on the dashboard. Hovering names
+  them, for example "62'500 Codex credits"; unlimited credits show as ∞.
+- Mark the primary account with a star in the HUD instead of the word
+  "Primary".
+
+### Fixed
+
+- Keep reset tickets at the same distance after the email on every account.
+  Credits were stacked under the tickets and centred, which shifted the
+  tickets on accounts with credits.
+
+Update the router image and the macOS companion to get both views.
+
 ## [1.10.0] - 2026-10-09
 
 ### Added
@@ -354,7 +372,8 @@ rebuilt for this release, but updating the companion alone does not fix HTTP 413
   timezone and daylight-saving changes. Show overlapping daily-only history as
   unavailable for rolling totals instead of presenting incomplete counts.
 
-[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.10.1...HEAD
+[1.10.1]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.9.1...v1.10.0
 [1.9.1]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.8.1...v1.9.0
