@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Turn on Anthropic's prompt cache for Claude models routed through
+  OpenRouter, with a one-hour lifetime. Anthropic caches only on request, and
+  Codex never asks, so every Claude request was billed at the full input price;
+  a 21-turn Orchestra task read none of its 1.94 million input tokens from
+  cache. A request that already sets `cache_control` is left as sent.
+
 - Keep each Codex conversation on one OpenRouter upstream provider by sending
   its conversation ID as OpenRouter's `X-Session-Id`. Models that several
   providers serve, such as DeepSeek, missed their automatic prompt cache when a

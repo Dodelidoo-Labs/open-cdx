@@ -70,6 +70,44 @@ func TestCapabilityMappingAndReasoningControls(t *testing.T) {
 	}
 }
 
+func TestValidateRequestOptsClaudeIntoPromptCache(t *testing.T) {
+	cases := []struct {
+		id      string
+		body    map[string]any
+		want    any
+		present bool
+	}{
+		{"anthropic/claude-opus-5.5", map[string]any{}, map[string]any{"type": "ephemeral", "ttl": "1h"}, true},
+		{"~anthropic/claude-opus-latest", map[string]any{}, map[string]any{"type": "ephemeral", "ttl": "1h"}, true},
+		{"anthropic/claude-opus-5.5", map[string]any{"cache_control": map[string]any{"type": "ephemeral"}}, map[string]any{"type": "ephemeral"}, true},
+		{"z-ai/glm-5.3-flash", map[string]any{}, nil, false},
+		{"deepseek/anthropic-lookalike", map[string]any{}, nil, false},
+	}
+	for _, testCase := range cases {
+		if err := ValidateRequest(testCase.body, providers.DiscoveredModel{ID: testCase.id}); err != nil {
+			t.Fatalf("%s: %v", testCase.id, err)
+		}
+		got, present := testCase.body["cache_control"]
+		if present != testCase.present {
+			t.Fatalf("%s: cache_control present = %v, want %v", testCase.id, present, testCase.present)
+		}
+		if present {
+			gotJSON, _ := json.Marshal(got)
+			wantJSON, _ := json.Marshal(testCase.want)
+			if string(gotJSON) != string(wantJSON) {
+				t.Fatalf("%s: cache_control = %s, want %s", testCase.id, gotJSON, wantJSON)
+			}
+		}
+	}
+	rejected := map[string]any{"service_tier": "flex"}
+	if err := ValidateRequest(rejected, providers.DiscoveredModel{ID: "anthropic/claude-opus-5.5"}); err == nil {
+		t.Fatal("an unsupported Claude request was accepted")
+	}
+	if _, present := rejected["cache_control"]; present {
+		t.Fatal("a rejected request was changed")
+	}
+}
+
 func TestParseDiscoveryPreservesModelSpecificReasoningMetadata(t *testing.T) {
 	raw := []byte(`{"data":[{"id":"z-ai/glm-5.3-flash","name":"GLM","context_length":1310720,"supported_parameters":["tools","tool_choice","reasoning","reasoning_effort"],"architecture":{"input_modalities":["text"],"output_modalities":["text"]},"reasoning":{"mandatory":true,"default_enabled":true,"supported_efforts":["max","high","low"],"default_effort":"max"}},{"id":"vendor/high-only","name":"High only","context_length":32000,"supported_parameters":["tools","tool_choice","reasoning","reasoning_effort"],"architecture":{"input_modalities":["text"],"output_modalities":["text"]},"reasoning":{"mandatory":false,"default_enabled":true,"supported_efforts":["high"],"default_effort":"high"}}]}`)
 	discovery, err := ParseDiscovery(raw)

@@ -258,7 +258,23 @@ func ValidateRequest(body map[string]any, model providers.DiscoveredModel) error
 	if tier, ok := body["service_tier"].(string); ok && tier != "" && tier != "auto" && tier != "default" {
 		return errors.New("OpenAI service tiers are not mapped to OpenRouter")
 	}
+	addAnthropicCaching(body, model)
 	return nil
+}
+
+// addAnthropicCaching opts Claude requests into Anthropic's prompt cache, which
+// unlike other providers' caches stays off without an explicit request. Codex
+// resends the whole conversation on every request, and an agent often waits
+// longer than the default five minutes between turns, so the one-hour lifetime
+// is requested. A cache_control the client sends itself is kept.
+func addAnthropicCaching(body map[string]any, model providers.DiscoveredModel) {
+	if !strings.HasPrefix(model.ID, "anthropic/") && !strings.HasPrefix(model.ID, "~anthropic/") {
+		return
+	}
+	if _, present := body["cache_control"]; present {
+		return
+	}
+	body["cache_control"] = map[string]any{"type": "ephemeral", "ttl": "1h"}
 }
 
 func reasoningLevels(model providers.DiscoveredModel) []providers.ReasoningLevel {
