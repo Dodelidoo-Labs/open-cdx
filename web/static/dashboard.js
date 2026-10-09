@@ -1536,6 +1536,12 @@
     row.querySelector("[data-account-name]").textContent = account.masked_email;
     const summary = `${account.primary ? "Primary" : "Fallback"} · ${account.plan} plan`;
     row.querySelector("[data-account-summary]").textContent = summary;
+    const credits = row.querySelector("[data-account-credits]");
+    if (credits) {
+      const { unlimited, balance } = account.credits || {};
+      credits.hidden = !account.credits;
+      credits.textContent = unlimited ? "Unlimited credits" : balance === "1" || balance === "<1" ? `${balance} credit` : balance ? `${balance} credits` : "Credits available";
+    }
     const status = row.querySelector("[data-account-status]");
     status.className = `state ${account.paused ? "warn" : account.status === "ready" ? "good" : "bad"}`;
     status.textContent = account.paused ? "Paused" : account.status;

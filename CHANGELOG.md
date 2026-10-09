@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Show an OpenAI account's Codex credits beside its reset tickets on the
+  dashboard and in the macOS HUD, for example "43 credits" or "Unlimited
+  credits". The balance comes from the usage response OpenCDX already polls;
+  accounts without credits show nothing. Update the router and the macOS
+  companion to see it in the HUD.
+
 ## [1.9.1] - 2026-10-09
 
 ### Fixed

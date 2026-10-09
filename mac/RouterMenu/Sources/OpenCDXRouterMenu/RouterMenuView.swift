@@ -315,6 +315,13 @@ struct AccountAllowanceRow: View {
                             .accessibilityLabel("Reset ticket \(index + 1) of \(tickets.count) for \(account.maskedEmail)")
                         }
                     }
+                    if let credits = account.credits {
+                        Text(credits.label)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .lineLimit(1)
+                            .help("Codex credits can be used after the allowance runs out")
+                    }
                 }
                 .popover(isPresented: $showingResetConfirmation, arrowEdge: .bottom) {
                     TimelineView(.periodic(from: .now, by: 1)) { timeline in

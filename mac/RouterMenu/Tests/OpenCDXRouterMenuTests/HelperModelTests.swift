@@ -227,6 +227,19 @@ final class HelperModelTests: XCTestCase {
         XCTAssertTrue(emptyDetails.availableResetTickets(at: boundary).isEmpty)
     }
 
+    func testCreditsDecodeAndLabel() throws {
+        let decoder = JSONDecoder()
+        let balance = try decoder.decode(AccountAllowanceStatus.self, from: Data(#"{"id":"a","credits":{"balance":"43"}}"#.utf8))
+        XCTAssertEqual(balance.credits?.label, "43 credits")
+        let unlimited = try decoder.decode(AccountAllowanceStatus.self, from: Data(#"{"credits":{"unlimited":true}}"#.utf8))
+        XCTAssertEqual(unlimited.credits?.label, "Unlimited credits")
+        XCTAssertEqual(AccountCredits(balance: "1").label, "1 credit")
+        XCTAssertEqual(AccountCredits(balance: "<1").label, "<1 credit")
+        XCTAssertEqual(AccountCredits().label, "Credits available")
+        let none = try decoder.decode(AccountAllowanceStatus.self, from: Data(#"{"credits":null}"#.utf8))
+        XCTAssertNil(none.credits)
+    }
+
     @MainActor
     func testAllowanceFixtureRenders() throws {
         var pro = AccountAllowanceStatus()

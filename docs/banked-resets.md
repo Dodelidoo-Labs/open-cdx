@@ -18,6 +18,16 @@ refresh fails, it hides stale reset metadata until a later successful refresh.
 An uncertain redemption can be retried with the same ticket; the HUD and
 dashboard retain its idempotency key so the retry cannot consume another reset.
 
+
+## Codex credits
+
+OpenAI accounts can also hold Codex credits, which keep the account usable
+after its allowance runs out. They are separate from reset tickets. When an
+account has credits, a label after its tickets shows the balance, such as
+**43 credits**, or **Unlimited credits**. If OpenAI reports credits without a
+balance, the label reads **Credits available**. Accounts without credits show
+no label.
+
 Update both the server and macOS companion to use redemption from the HUD.
 Account credentials stay on the server. Both administrator sessions (with CSRF)
 and approved paired devices may redeem resets from the shared account pool.
@@ -27,6 +37,8 @@ and approved paired devices may redeem resets from the shared account pool.
 `GET /api/v1/device/status` includes each account's opaque OpenCDX `id`,
 `reset_credits`, and `reset_tickets`. A ticket can contain its opaque `id` and an
 RFC 3339 `expires_at`; either field can be absent. These IDs are not credentials.
+An account with Codex credits also has `credits`, with `unlimited: true` or a
+whole-number `balance` string; both are absent when the balance is hidden.
 
 With paired-device bearer authentication, send:
 
@@ -63,7 +75,9 @@ describes availability and redemption semantics. OpenCDX uses the underlying
 account-authenticated HTTP endpoints, consistent with its existing quota
 integration, without requiring a Codex process on the server:
 
-- `GET /wham/usage` supplies `rate_limit_reset_credits.available_count`.
+- `GET /wham/usage` supplies `rate_limit_reset_credits.available_count`. Its
+  `credits` object (`has_credits`, `unlimited`, `balance`) is the same one Codex
+  reads for its `/status` credits row.
 - `GET /wham/rate-limit-reset-credits` supplies individual credit details.
 - `POST /wham/rate-limit-reset-credits/consume` accepts `redeem_request_id` and
   optional `credit_id`; the response's `code` maps to the outcomes above.

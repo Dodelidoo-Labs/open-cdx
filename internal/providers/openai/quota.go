@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -319,4 +320,63 @@ func quotaResetTime(unix int64) time.Time {
 		return time.Time{}
 	}
 	return time.Unix(unix, 0).UTC()
+}
+
+// Credits is the Codex credit balance that keeps an account usable after its
+// allowance is exhausted. Balance is a whole number of credits, or empty when
+// the service reports credits without disclosing the balance.
+type Credits struct {
+	Unlimited bool   `json:"unlimited,omitempty"`
+	Balance   string `json:"balance,omitempty"`
+}
+
+// ParseCredits reads the optional credits block of a usage response. It
+// returns nil unless the account has credits or unlimited credits, matching
+// how Codex itself decides whether to show them.
+func ParseCredits(raw []byte) *Credits {
+	if len(raw) == 0 {
+		return nil
+	}
+	var payload struct {
+		Credits *struct {
+			HasCredits bool    `json:"has_credits"`
+			Unlimited  bool    `json:"unlimited"`
+			Balance    *string `json:"balance"`
+		} `json:"credits"`
+	}
+	if json.Unmarshal(raw, &payload) != nil || payload.Credits == nil {
+		return nil
+	}
+	details := payload.Credits
+	if details.Unlimited {
+		return &Credits{Unlimited: true}
+	}
+	if !details.HasCredits {
+		return nil
+	}
+	credits := &Credits{}
+	if details.Balance != nil {
+		if value, err := strconv.ParseFloat(strings.TrimSpace(*details.Balance), 64); err == nil && value > 0 && !math.IsInf(value, 0) {
+			if rounded := math.Round(value); rounded >= 1 {
+				credits.Balance = strconv.FormatFloat(rounded, 'f', 0, 64)
+			} else {
+				credits.Balance = "<1"
+			}
+		}
+	}
+	return credits
+}
+
+// Label is the short text shown beside an account.
+func (credits Credits) Label() string {
+	switch {
+	case credits.Unlimited:
+		return "Unlimited credits"
+	case credits.Balance == "1" || credits.Balance == "<1":
+		return credits.Balance + " credit"
+	case credits.Balance != "":
+		return credits.Balance + " credits"
+	default:
+		return "Credits available"
+	}
 }

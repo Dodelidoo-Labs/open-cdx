@@ -67,11 +67,42 @@ struct AccountResetTicket: Codable {
     }
 }
 
+/// Codex credits that keep an account usable after its allowance runs out.
+struct AccountCredits: Codable, Equatable {
+    var unlimited = false
+    var balance: String?
+
+    enum CodingKeys: String, CodingKey {
+        case unlimited, balance
+    }
+
+    init(unlimited: Bool = false, balance: String? = nil) {
+        self.unlimited = unlimited
+        self.balance = balance
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        unlimited = try container.decodeIfPresent(Bool.self, forKey: .unlimited) ?? false
+        balance = try container.decodeIfPresent(String.self, forKey: .balance)
+    }
+
+    var label: String {
+        if unlimited { return "Unlimited credits" }
+        switch balance {
+        case "1", "<1": return "\(balance ?? "") credit"
+        case let balance? where !balance.isEmpty: return "\(balance) credits"
+        default: return "Credits available"
+        }
+    }
+}
+
 struct AccountAllowanceStatus: Codable {
     var id = ""
     var provider = AccountProvider.openAI.rawValue
     var accountProvider: AccountProvider { AccountProvider(rawValue: provider) ?? .openAI }
     var resetTickets: [AccountResetTicket]?
+    var credits: AccountCredits?
     var displayID: String { id.isEmpty ? maskedEmail : id }
 
     func availableResetTickets(at date: Date) -> [AccountResetTicket] {
@@ -94,6 +125,7 @@ struct AccountAllowanceStatus: Codable {
     enum CodingKeys: String, CodingKey {
         case id, provider, plan, status, paused, primary
         case resetTickets = "reset_tickets"
+        case credits
         case maskedEmail = "masked_email"
         case quotaRemaining = "quota_remaining"
         case quotaResetAt = "quota_reset_at"
@@ -109,6 +141,7 @@ struct AccountAllowanceStatus: Codable {
         id = try container.decodeIfPresent(String.self, forKey: .id) ?? ""
         provider = try container.decodeIfPresent(String.self, forKey: .provider) ?? AccountProvider.openAI.rawValue
         resetTickets = try container.decodeIfPresent([AccountResetTicket].self, forKey: .resetTickets)
+        credits = try container.decodeIfPresent(AccountCredits.self, forKey: .credits)
         maskedEmail = try container.decodeIfPresent(String.self, forKey: .maskedEmail) ?? ""
         plan = try container.decodeIfPresent(String.self, forKey: .plan) ?? ""
         status = try container.decodeIfPresent(String.self, forKey: .status) ?? ""

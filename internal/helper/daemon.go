@@ -46,6 +46,7 @@ type AccountAllowance struct {
 	ID             string               `json:"id"`
 	Provider       string               `json:"provider,omitempty"`
 	ResetTickets   []openai.ResetTicket `json:"reset_tickets,omitempty"`
+	Credits        *openai.Credits      `json:"credits,omitempty"`
 	MaskedEmail    string               `json:"masked_email"`
 	Plan           string               `json:"plan,omitempty"`
 	Status         string               `json:"status"`
@@ -419,6 +420,7 @@ func (daemon *Daemon) refreshStatus(ctx context.Context) error {
 		Accounts []struct {
 			ID             string               `json:"id"`
 			ResetTickets   []openai.ResetTicket `json:"reset_tickets"`
+			Credits        *openai.Credits      `json:"credits"`
 			MaskedEmail    string               `json:"masked_email"`
 			Plan           string               `json:"plan"`
 			Status         string               `json:"status"`
@@ -490,7 +492,7 @@ func (daemon *Daemon) refreshStatus(ctx context.Context) error {
 		status.Accounts = make([]AccountAllowance, 0, len(remoteStatus.Accounts))
 		for _, account := range remoteStatus.Accounts {
 			allowance := AccountAllowance{
-				ID: account.ID, Provider: "openai", ResetTickets: account.ResetTickets,
+				ID: account.ID, Provider: "openai", ResetTickets: account.ResetTickets, Credits: account.Credits,
 				MaskedEmail: account.MaskedEmail, Plan: account.Plan, Status: account.Status,
 				Paused: account.Paused, Primary: account.Primary, QuotaRemaining: account.QuotaRemaining,
 				QuotaResetAt: nonZeroTimePointer(account.QuotaResetAt), ResetCredits: account.ResetCredits,

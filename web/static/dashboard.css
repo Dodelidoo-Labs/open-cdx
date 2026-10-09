@@ -610,6 +610,7 @@ form { margin: 0; }
 .reset-ticket:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
 .reset-ticket:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 .reset-ticket svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.account-credits { padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent, #5486bd); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .reset-confirmation { max-width: 360px; padding: 24px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--fg); }
 .reset-confirmation::backdrop { background: rgb(0 0 0 / 25%); }
 .reset-confirmation h2 { margin-top: 0; font-size: 18px; }

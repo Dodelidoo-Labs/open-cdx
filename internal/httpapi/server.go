@@ -795,6 +795,7 @@ type accountLiveView struct {
 	Primary      bool                 `json:"primary"`
 	ResetCredits int                  `json:"reset_credits"`
 	ResetTickets []openai.ResetTicket `json:"reset_tickets"`
+	Credits      *openai.Credits      `json:"credits,omitempty"`
 	Quotas       []accountLiveQuota   `json:"quotas"`
 }
 
@@ -886,6 +887,7 @@ func (server *Server) adminAccountsLive(writer http.ResponseWriter, request *htt
 			ID: state.ID, MaskedEmail: state.MaskedEmail, Plan: state.Plan, Status: state.Status,
 			LastError: state.LastError, Paused: state.Paused, Primary: state.Primary, ResetCredits: len(openai.ResetTickets(state.RawQuota, now)),
 			ResetTickets: openai.ResetTickets(state.RawQuota, now),
+			Credits:      openai.ParseCredits(state.RawQuota),
 			Quotas:       make([]accountLiveQuota, 0),
 		}
 		codexWindows := accountQuotaWindowStates(state.RawQuota, state.QuotaUsedPercent, state.QuotaResetAt, now)
@@ -1098,6 +1100,7 @@ type accountView struct {
 	Paused, Primary                          bool
 	ResetCredits                             int
 	ResetTickets                             []openai.ResetTicket
+	Credits                                  *openai.Credits
 	CodexReset, CodexResetAt                 string
 	VisibleModels, MoreModels                []string
 	Quotas                                   []quotaView
@@ -1149,7 +1152,7 @@ func (server *Server) dashboardData(ctx context.Context, csrf string) (dashboard
 	for _, account := range accounts {
 		view := accountView{
 			ID: account.ID, MaskedEmail: account.MaskedEmail, Plan: account.Plan, Status: account.Status,
-			Paused: account.Paused, Primary: account.Primary, ResetCredits: len(openai.ResetTickets(account.RawQuota, now)), ResetTickets: openai.ResetTickets(account.RawQuota, now), LastError: account.LastError,
+			Paused: account.Paused, Primary: account.Primary, ResetCredits: len(openai.ResetTickets(account.RawQuota, now)), ResetTickets: openai.ResetTickets(account.RawQuota, now), Credits: openai.ParseCredits(account.RawQuota), LastError: account.LastError,
 		}
 		codexWindows := accountQuotaWindowStates(account.RawQuota, account.QuotaUsedPercent, account.QuotaResetAt, now)
 		if len(codexWindows) > 0 {
@@ -1373,7 +1376,7 @@ func (server *Server) safeAccounts(ctx context.Context) ([]map[string]any, error
 			"id": account.ID, "masked_email": account.MaskedEmail, "plan": account.Plan, "status": account.Status,
 			"paused": account.Paused, "primary": account.Primary,
 			"quota_remaining": maxFloat(0, 100-account.QuotaUsedPercent), "quota_reset_at": account.QuotaResetAt,
-			"quota_windows": liveQuotaWindows(windows), "reset_credits": len(openai.ResetTickets(account.RawQuota, now)), "reset_tickets": openai.ResetTickets(account.RawQuota, now), "models": len(account.EntitledModels),
+			"quota_windows": liveQuotaWindows(windows), "reset_credits": len(openai.ResetTickets(account.RawQuota, now)), "reset_tickets": openai.ResetTickets(account.RawQuota, now), "credits": openai.ParseCredits(account.RawQuota), "models": len(account.EntitledModels),
 		})
 	}
 	return result, nil

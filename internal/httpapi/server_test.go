@@ -15,6 +15,7 @@ import (
 	"time"
 
 	secure "github.com/Dodelidoo-Labs/open-cdx/internal/crypto"
+	"github.com/Dodelidoo-Labs/open-cdx/internal/providers/openai"
 	"github.com/Dodelidoo-Labs/open-cdx/internal/routing"
 	"github.com/Dodelidoo-Labs/open-cdx/internal/storage"
 	"github.com/Dodelidoo-Labs/open-cdx/internal/telemetry"
@@ -353,7 +354,7 @@ func TestAdminDevicesLiveConditionalResponsesTrackLifecycle(t *testing.T) {
 func TestAdminAccountsLiveIsConditionalLightweightAndPrivacyMinimal(t *testing.T) {
 	server, store := liveTestServer(t)
 	resetAt := time.Now().UTC().Add(5 * 24 * time.Hour).Truncate(time.Second)
-	rawQuota := json.RawMessage(fmt.Sprintf(`{"secret_quota_marker":"RAW_QUOTA_SECRET","rate_limit":{"allowed":true,"primary_window":{"used_percent":20,"limit_window_seconds":604800,"reset_at":%d}},"additional_rate_limits":[{"limit_name":"Codex Spark","rate_limit":{"allowed":true,"primary_window":{"used_percent":25,"reset_at":1788220800}}}]}`, resetAt.Unix()))
+	rawQuota := json.RawMessage(fmt.Sprintf(`{"secret_quota_marker":"RAW_QUOTA_SECRET","credits":{"has_credits":true,"unlimited":false,"balance":"42.6","approx_local_messages":[1,2]},"rate_limit":{"allowed":true,"primary_window":{"used_percent":20,"limit_window_seconds":604800,"reset_at":%d}},"additional_rate_limits":[{"limit_name":"Codex Spark","rate_limit":{"allowed":true,"primary_window":{"used_percent":25,"reset_at":1788220800}}}]}`, resetAt.Unix()))
 	account, _, err := store.PutAccount(context.Background(), storage.AccountInput{
 		Credential: storage.OpenAICredential{
 			AccountID: "RAW_ACCOUNT_ID", AccessToken: "RAW_ACCESS_TOKEN", RefreshToken: "RAW_REFRESH_TOKEN", IDToken: "RAW_ID_TOKEN", ExpiresAt: time.Now().Add(time.Hour),
@@ -377,7 +378,7 @@ func TestAdminAccountsLiveIsConditionalLightweightAndPrivacyMinimal(t *testing.T
 	}
 	initial := request("")
 	initialETag := initial.Header().Get("ETag")
-	if initial.Code != http.StatusOK || !isQuotedETag(initialETag) || !strings.Contains(initial.Header().Get("Content-Type"), "application/json") || !strings.Contains(initial.Body.String(), `"remaining":80`) || !strings.Contains(initial.Body.String(), `"label":"Weekly"`) || !strings.Contains(initial.Body.String(), `"pace_status":"on_pace"`) || !strings.Contains(initial.Body.String(), "Codex Spark") {
+	if initial.Code != http.StatusOK || !isQuotedETag(initialETag) || !strings.Contains(initial.Header().Get("Content-Type"), "application/json") || !strings.Contains(initial.Body.String(), `"remaining":80`) || !strings.Contains(initial.Body.String(), `"label":"Weekly"`) || !strings.Contains(initial.Body.String(), `"pace_status":"on_pace"`) || !strings.Contains(initial.Body.String(), "Codex Spark") || !strings.Contains(initial.Body.String(), `"credits":{"balance":"43"}`) {
 		t.Fatalf("initial account response = %d, etag=%q, body=%q", initial.Code, initialETag, initial.Body.String())
 	}
 	for _, secret := range []string{"RAW_ACCOUNT_ID", "RAW_ACCESS_TOKEN", "RAW_REFRESH_TOKEN", "RAW_ID_TOKEN", "RAW_QUOTA_SECRET", "RAW_CATALOG_SECRET", "SECRET_MODEL", "credential", "access_token", "refresh_token", "id_token", "raw_quota", "raw_catalog"} {
@@ -413,6 +414,7 @@ func TestSafeAccountsExposeOnlyReportedQuotaWindows(t *testing.T) {
 	resetAt := time.Now().UTC().Add(6 * 24 * time.Hour)
 	rawQuota := json.RawMessage(fmt.Sprintf(`{
 		"private_marker":"HIDDEN_RAW_QUOTA",
+		"credits":{"has_credits":false,"unlimited":true},
 		"rate_limit":{"allowed":true,"primary_window":null,"secondary_window":{"used_percent":7,"limit_window_seconds":604800,"reset_at":%d}},
         "additional_rate_limits":[
             {"limit_name":"Codex Spark","rate_limit":{"primary_window":{"used_percent":25,"limit_window_seconds":604800,"reset_at":%d},"secondary_window":{"used_percent":10}}},
@@ -440,6 +442,9 @@ func TestSafeAccountsExposeOnlyReportedQuotaWindows(t *testing.T) {
 	body := string(encoded)
 	if !strings.Contains(body, `"quota_windows":[{"label":"Weekly","remaining":93`) {
 		t.Fatalf("reported weekly window was not exposed: %s", body)
+	}
+	if !strings.Contains(body, `"credits":{"unlimited":true}`) {
+		t.Fatalf("unlimited credits were not exposed: %s", body)
 	}
 	var payload []struct {
 		Windows []accountLiveQuotaWindow `json:"quota_windows"`
@@ -487,6 +492,7 @@ func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
 		Accounts: []accountView{
 			{
 				ID: "account", MaskedEmail: "a***@example.com", Plan: "pro", Status: "ready", Primary: true,
+				Credits:    &openai.Credits{Balance: "43"},
 				CodexReset: "Aug 30 · 02:31", CodexResetAt: "2026-08-30T02:31:00Z",
 				VisibleModels: []string{"gpt-test"}, MoreModels: []string{"gpt-test-2"},
 				Quotas: []quotaView{
@@ -526,7 +532,7 @@ func TestDashboardTemplateRendersRedesignedSections(t *testing.T) {
 		`/assets/opencdx-router-logo.png?v=1.0.0-test`, `/assets/favicon-32x32.png?v=1.0.0-test`,
 		`/admin/devices/device/revoke`, `/admin/devices/retired/delete`,
 		`datetime="2026-08-30T02:31:00Z"`, `data-local-datetime`, `data-local-date`, `data-local-clock`,
-		"[hidden]{display:none!important}", "Codex Spark", "On pace", "quota-pace-marker", "gpt-test-2", `data-sort="provider"`, `data-sort="model"`, `data-sort="state"`,
+		`data-account-credits>43 credits</span>`, `data-account-credits hidden></span>`, "[hidden]{display:none!important}", "Codex Spark", "On pace", "quota-pace-marker", "gpt-test-2", `data-sort="provider"`, `data-sort="model"`, `data-sort="state"`,
 	} {
 		if !strings.Contains(output.String(), marker) {
 			t.Fatalf("dashboard is missing %q", marker)
