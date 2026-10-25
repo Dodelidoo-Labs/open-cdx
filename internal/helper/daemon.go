@@ -84,6 +84,7 @@ type Daemon struct {
 	processInfo    func(context.Context, int) (codexProcessInfo, error)
 	claude         *claudeCollector
 	claudeUsage    func(context.Context) ([]byte, error)
+	claudeAuth     func(context.Context) ([]byte, error)
 	usageChecking  atomic.Bool
 	shutdownOnce   sync.Once
 	shutdown       chan struct{}
@@ -108,6 +109,7 @@ func NewDaemon(configPath string, config Config, secrets SecretStore) (*Daemon, 
 		deviceToken: deviceToken, remote: remote, shutdown: make(chan struct{}), claude: newClaudeCollector(filepath.Join(filepath.Dir(configPath), "claude-accounts.json")),
 		processInfo: inspectCodexProcess,
 		claudeUsage: func(ctx context.Context) ([]byte, error) { return runClaudeUsage(ctx, filepath.Dir(configPath)) },
+		claudeAuth:  func(ctx context.Context) ([]byte, error) { return runClaudeAuthStatus(ctx, filepath.Dir(configPath)) },
 		status:      LocalStatus{State: "connecting", RouterURL: config.RouterURL, DeviceName: config.DeviceName, CatalogSynced: CatalogExists(config), CatalogUpdated: config.CatalogUpdatedAt},
 	}, nil
 }

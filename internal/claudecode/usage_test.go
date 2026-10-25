@@ -77,3 +77,21 @@ func TestParseUsageCommandRejectsErrorsAndOtherOutput(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNoUsageWindows", err)
 	}
 }
+
+func TestUsageIssueReadsLoginState(t *testing.T) {
+	for _, test := range []struct {
+		output string
+		want   string
+	}{
+		{`{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}`, UsageIssueSignedOut},
+		{`{"loggedIn":true,"authMethod":"none"}`, UsageIssueSignedOut},
+		{`{"loggedIn":true,"authMethod":"api_key"}`, UsageIssueNoPlan},
+		{`{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"max"}`, UsageIssueUnrecognized},
+		{`{"authMethod":"claude.ai"}`, UsageIssueFailed},
+		{`Not logged in`, UsageIssueFailed},
+	} {
+		if got := UsageIssue([]byte(test.output)); got != test.want {
+			t.Errorf("UsageIssue(%s) = %q, want %q", test.output, got, test.want)
+		}
+	}
+}

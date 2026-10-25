@@ -274,4 +274,50 @@ func TestClaudeUsageCheckQueuesReadingOnlyWhenConnected(t *testing.T) {
 	if report, _ = daemon.claude.take(time.Now().UTC()); len(report.Allowances) != 0 {
 		t.Fatalf("a failed check queued a reading: %#v", report)
 	}
+	if issue := daemon.currentStatus().ClaudeCode.UsageCheckIssue; issue != claudecode.UsageIssueFailed {
+		t.Fatalf("issue = %q", issue)
+	}
+}
+
+func TestClaudeUsageCheckExplainsMissingAllowance(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, ClaudeStateFile), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A signed-out CLI prints its local cost summary instead of the allowance.
+	costOnly, _ := json.Marshal(map[string]any{"is_error": false, "result": "Total cost:            $0.0000\nUsage:                 0 input, 0 output"})
+	authCalls := 0
+	daemon := &Daemon{configPath: filepath.Join(directory, "helper.json"), claude: newClaudeCollector(""), shutdown: make(chan struct{}),
+		claudeUsage: func(context.Context) ([]byte, error) { return costOnly, nil },
+		claudeAuth: func(context.Context) ([]byte, error) {
+			authCalls++
+			return []byte(`{"loggedIn":false,"authMethod":"none"}`), nil
+		}}
+
+	if err := daemon.checkClaudeUsage(context.Background(), true); err == nil || authCalls != 1 {
+		t.Fatalf("err=%v authCalls=%d", err, authCalls)
+	}
+	status := daemon.currentStatus().ClaudeCode
+	if status.UsageCheckIssue != claudecode.UsageIssueSignedOut || !strings.Contains(status.UsageCheckError, "claude auth login") {
+		t.Fatalf("status = %#v", status)
+	}
+
+	daemon.claudeUsage = func(context.Context) ([]byte, error) { return nil, errClaudeNotFound }
+	if err := daemon.checkClaudeUsage(context.Background(), true); err == nil || authCalls != 1 {
+		t.Fatalf("err=%v authCalls=%d", err, authCalls)
+	}
+	if issue := daemon.currentStatus().ClaudeCode.UsageCheckIssue; issue != claudecode.UsageIssueNotInstalled {
+		t.Fatalf("issue = %q", issue)
+	}
+
+	now := time.Now().UTC()
+	output, _ := json.Marshal(map[string]any{"is_error": false, "result": "Current session: 3% used · resets " +
+		now.Add(2*time.Hour).Format("Jan 2 at 3:04pm") + " (UTC)\n"})
+	daemon.claudeUsage = func(context.Context) ([]byte, error) { return output, nil }
+	if err := daemon.checkClaudeUsage(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	if status := daemon.currentStatus().ClaudeCode; status.UsageCheckError != "" || status.UsageCheckIssue != "" {
+		t.Fatalf("a successful check kept the issue: %#v", status)
+	}
 }

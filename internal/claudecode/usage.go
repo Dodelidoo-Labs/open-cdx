@@ -21,6 +21,39 @@ var UsageCommandArgs = []string{"-p", "/usage", "--output-format", "json", "--no
 // logins, or printed it in a form this parser does not recognise.
 var ErrNoUsageWindows = errors.New("claude /usage reported no plan allowance")
 
+// AuthStatusArgs asks Claude Code whether its command line tool is signed in.
+// It reads the local login only and makes no network request.
+var AuthStatusArgs = []string{"auth", "status", "--json"}
+
+// Usage check issues tell the menu why the allowance stopped updating.
+const (
+	UsageIssueNotInstalled = "not_installed"
+	UsageIssueSignedOut    = "signed_out"
+	UsageIssueNoPlan       = "no_plan"
+	UsageIssueUnrecognized = "unrecognized"
+	UsageIssueFailed       = "failed"
+)
+
+// UsageIssue explains why /usage printed no allowance, from the output of
+// `claude auth status --json`. Only loggedIn and authMethod are read.
+func UsageIssue(authStatus []byte) string {
+	var status struct {
+		LoggedIn   *bool  `json:"loggedIn"`
+		AuthMethod string `json:"authMethod"`
+	}
+	if json.Unmarshal(authStatus, &status) != nil || status.LoggedIn == nil {
+		return UsageIssueFailed
+	}
+	switch {
+	case !*status.LoggedIn || status.AuthMethod == "none":
+		return UsageIssueSignedOut
+	case status.AuthMethod != "claude.ai":
+		return UsageIssueNoPlan
+	default:
+		return UsageIssueUnrecognized
+	}
+}
+
 var (
 	usageWindows = map[string]int64{
 		"Current session":           5 * 60 * 60,

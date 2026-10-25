@@ -43,7 +43,10 @@ type ClaudeCodeStatus struct {
 	LastError        string     `json:"last_error,omitempty"`
 	LastUsageCheckAt *time.Time `json:"last_usage_check_at,omitempty"`
 	UsageCheckError  string     `json:"usage_check_error,omitempty"`
+	UsageCheckIssue  string     `json:"usage_check_issue,omitempty"`
 }
+
+var errClaudeNotFound = errors.New("the Claude Code command line tool was not found")
 
 // StatusLineUpload is what `router-helper claude-statusline` sends to the
 // daemon: the session and its plan windows, nothing else from the status line.
@@ -339,9 +342,25 @@ func (daemon *Daemon) checkClaudeUsage(ctx context.Context, force bool) error {
 		windows, err = claudecode.ParseUsageCommand(output, now)
 	}
 	if err != nil {
+		issue := claudecode.UsageIssueFailed
+		switch {
+		case errors.Is(err, errClaudeNotFound):
+			issue = claudecode.UsageIssueNotInstalled
+		case errors.Is(err, claudecode.ErrNoUsageWindows) && daemon.claudeAuth != nil:
+			if authStatus, authErr := daemon.claudeAuth(checkContext); authErr == nil {
+				issue = claudecode.UsageIssue(authStatus)
+			}
+		}
+		switch issue {
+		case claudecode.UsageIssueSignedOut:
+			err = errors.New("the Claude Code command line tool is signed out; run claude auth login")
+		case claudecode.UsageIssueNoPlan:
+			err = errors.New("Claude Code is not signed in with a Claude plan, so /usage shows no allowance")
+		}
 		daemon.updateStatus(func(status *LocalStatus) {
 			status.ClaudeCode.LastUsageCheckAt = timePointer(now)
 			status.ClaudeCode.UsageCheckError = err.Error()
+			status.ClaudeCode.UsageCheckIssue = issue
 		})
 		return err
 	}
@@ -353,6 +372,7 @@ func (daemon *Daemon) checkClaudeUsage(ctx context.Context, force bool) error {
 	daemon.updateStatus(func(status *LocalStatus) {
 		status.ClaudeCode.LastUsageCheckAt = timePointer(now)
 		status.ClaudeCode.UsageCheckError = ""
+		status.ClaudeCode.UsageCheckIssue = ""
 	})
 	return nil
 }
@@ -362,7 +382,7 @@ func (daemon *Daemon) checkClaudeUsage(ctx context.Context, force bool) error {
 func runClaudeUsage(ctx context.Context, directory string) ([]byte, error) {
 	executable := findExecutable("claude")
 	if executable == "" {
-		return nil, errors.New("the Claude Code command line tool was not found")
+		return nil, errClaudeNotFound
 	}
 	command := exec.CommandContext(ctx, executable, claudecode.UsageCommandArgs...)
 	command.Dir = directory
@@ -372,6 +392,24 @@ func runClaudeUsage(ctx context.Context, directory string) ([]byte, error) {
 		return nil, fmt.Errorf("claude /usage failed: %w", err)
 	}
 	return output, nil
+}
+
+// runClaudeAuthStatus reads whether the Claude Code CLI is signed in, after
+// /usage printed no allowance. It may exit non-zero while signed out, so any
+// printed status is used.
+func runClaudeAuthStatus(ctx context.Context, directory string) ([]byte, error) {
+	executable := findExecutable("claude")
+	if executable == "" {
+		return nil, errClaudeNotFound
+	}
+	command := exec.CommandContext(ctx, executable, claudecode.AuthStatusArgs...)
+	command.Dir = directory
+	command.WaitDelay = 5 * time.Second
+	output, err := command.Output()
+	if len(output) > 0 {
+		return output, nil
+	}
+	return nil, err
 }
 
 func (daemon *Daemon) uploadClaudeTelemetry(ctx context.Context) error {
