@@ -158,7 +158,7 @@ struct RouterMenuView: View {
     }
 
     private var accountsSection: some View {
-        AccountAllowanceSection(accounts: model.status.accounts, claudeAccounts: model.status.claudeAccounts, connected: model.status.connected, resetInProgress: model.resetAccountID != nil, onReset: model.consumeReset)
+        AccountAllowanceSection(accounts: model.status.accounts, claudeAccounts: model.status.claudeAccounts, claudeCode: model.status.claudeCode, connected: model.status.connected, resetInProgress: model.resetAccountID != nil, onReset: model.consumeReset)
     }
 
     private var routerStatusIcon: String {
@@ -194,6 +194,7 @@ struct RouterMenuView: View {
 struct AccountAllowanceSection: View {
     let accounts: [AccountAllowanceStatus]
     var claudeAccounts: [AccountAllowanceStatus] = []
+    var claudeCode = ClaudeCodeReportingStatus()
     let connected: Bool
     var resetInProgress = false
     var onReset: ((AccountAllowanceStatus, AccountResetTicket) -> Void)?
@@ -210,7 +211,9 @@ struct AccountAllowanceSection: View {
                 AccountAllowanceList(accounts: accounts, canReset: connected && !resetInProgress, onReset: onReset)
             }
             if !claudeAccounts.isEmpty {
-                AccountAllowanceList(accounts: claudeAccounts)
+                AccountAllowanceList(accounts: claudeAccounts) {
+                    claudeAllowanceProblem(claudeCode: claudeCode, observedAt: $0.observedAt)
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -268,11 +271,12 @@ struct AccountAllowanceList: View {
     let accounts: [AccountAllowanceStatus]
     var canReset = false
     var onReset: ((AccountAllowanceStatus, AccountResetTicket) -> Void)?
+    var problem: ((AccountAllowanceStatus) -> ClaudeAllowanceProblem?)?
 
     var body: some View {
         VStack(spacing: 12) {
             ForEach(accounts, id: \.displayID) { account in
-                AccountAllowanceRow(account: account, canReset: canReset, onReset: onReset)
+                AccountAllowanceRow(account: account, canReset: canReset, onReset: onReset, problem: problem?(account))
             }
         }
     }
@@ -282,6 +286,7 @@ struct AccountAllowanceRow: View {
     let account: AccountAllowanceStatus
     var canReset = false
     var onReset: ((AccountAllowanceStatus, AccountResetTicket) -> Void)?
+    var problem: ClaudeAllowanceProblem?
     @State private var selectedTicket: AccountResetTicket?
     @State private var showingResetConfirmation = false
 
@@ -364,9 +369,8 @@ struct AccountAllowanceRow: View {
                 }
                 Spacer(minLength: 10)
                 HStack(spacing: 4) {
-                    Text(accountTypeDescription)
+                    accountTypeText
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                     if account.primary {
                         Image(systemName: "star.fill")
@@ -376,6 +380,18 @@ struct AccountAllowanceRow: View {
                             .accessibilityLabel("Primary")
                     }
                 }
+            }
+
+            if let problem {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(LocalizedStringKey(problem.menuText))
+                        .foregroundStyle(.secondary)
+                }
+                .font(.caption)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             if let mainWindow {
@@ -405,9 +421,15 @@ struct AccountAllowanceRow: View {
     }
 
     private var displayedWindows: [AccountQuotaWindowStatus] {
-        if !account.quotaWindows.isEmpty { return account.quotaWindows }
-        guard let resetAt = account.quotaResetAt else { return [] }
-        return [AccountQuotaWindowStatus(label: "Allowance", remaining: account.quotaRemaining, resetAt: resetAt)]
+        var windows = account.quotaWindows
+        if windows.isEmpty, let resetAt = account.quotaResetAt {
+            windows = [AccountQuotaWindowStatus(label: "Allowance", remaining: account.quotaRemaining, resetAt: resetAt)]
+        }
+        // A stale reading has no meaningful pace.
+        if problem != nil {
+            for index in windows.indices { windows[index].paceStatus = "" }
+        }
+        return windows
     }
 
     private var mainWindow: AccountQuotaWindowStatus? { displayedWindows.first }
@@ -418,7 +440,7 @@ struct AccountAllowanceRow: View {
     }
 
     private func allowanceColor(for remaining: Double) -> Color {
-        if account.paused { return .secondary }
+        if account.paused || problem != nil { return .secondary }
         if remaining <= 10 { return .red }
         if remaining <= 25 { return .orange }
         return .accentColor
@@ -432,10 +454,16 @@ struct AccountAllowanceRow: View {
         } else if !account.status.isEmpty && account.status != "ready" {
             parts.append(account.status.uppercased())
         }
-        if let observedAt = account.observedAt {
-            parts.append(observationAge(since: observedAt))
-        }
         return parts.joined(separator: " · ")
+    }
+
+    /// The reading's age turns orange while the allowance is not updating.
+    private var accountTypeText: Text {
+        let description = Text(accountTypeDescription).foregroundColor(.secondary)
+        guard let observedAt = account.observedAt else { return description }
+        var age = Text(observationAge(since: observedAt))
+        age = problem == nil ? age.foregroundColor(.secondary) : age.foregroundColor(.orange).fontWeight(.semibold)
+        return accountTypeDescription.isEmpty ? age : description + Text(" · ").foregroundColor(.secondary) + age
     }
 
     private func resetDescription(for resetAt: Date?) -> String? {
@@ -741,6 +769,19 @@ private struct RouterMenuViewPreviews: PreviewProvider {
             ),
             previewAccount(email: "no-windows@example.com", plan: "pro", windows: [])
         ]
+        var claude = previewAccount(
+            email: "s***a@g***.com",
+            plan: "",
+            windows: [
+                AccountQuotaWindowStatus(label: "Weekly", remaining: 100, durationMinutes: 10_080),
+                AccountQuotaWindowStatus(label: "5 hours", remaining: 100, durationMinutes: 300)
+            ]
+        )
+        claude.observedAt = now.addingTimeInterval(-3 * 24 * 60 * 60)
+        claude.provider = AccountProvider.claude.rawValue
+        status.claudeAccounts = [claude]
+        status.claudeCode.usageCheckError = "the Claude Code command line tool is signed out; run claude auth login"
+        status.claudeCode.usageCheckIssue = "signed_out"
         model.applyPreviewStatus(status)
         return model
     }

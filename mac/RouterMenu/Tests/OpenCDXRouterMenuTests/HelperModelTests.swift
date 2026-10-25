@@ -378,6 +378,29 @@ final class HelperModelTests: XCTestCase {
         XCTAssertEqual(ClaudeCodeReporting.uploadPending.label, "Upload Pending")
     }
 
+    func testClaudeAllowanceProblemOnlyWhileTheReadingIsStale() throws {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        var claudeCode = ClaudeCodeReportingStatus()
+        XCTAssertNil(claudeAllowanceProblem(claudeCode: claudeCode, observedAt: now.addingTimeInterval(-3 * 86400), now: now))
+
+        claudeCode.usageCheckError = "the Claude Code command line tool is signed out; run claude auth login"
+        claudeCode.usageCheckIssue = "signed_out"
+        XCTAssertNil(claudeAllowanceProblem(claudeCode: claudeCode, observedAt: now.addingTimeInterval(-60), now: now))
+        let problem = try XCTUnwrap(claudeAllowanceProblem(claudeCode: claudeCode, observedAt: now.addingTimeInterval(-16 * 60), now: now))
+        XCTAssertTrue(problem.menuText.contains("`claude auth login`"))
+        XCTAssertNotNil(claudeAllowanceProblem(claudeCode: claudeCode, observedAt: nil, now: now))
+
+        claudeCode.usageCheckIssue = ""
+        claudeCode.usageCheckError = "claude /usage failed: exit status 1"
+        let failed = try XCTUnwrap(claudeAllowanceProblem(claudeCode: claudeCode, observedAt: nil, now: now))
+        XCTAssertEqual(failed.menuText, "Not updating: the Claude usage check failed.")
+        XCTAssertTrue(failed.settingsText.hasSuffix("exit status 1"))
+
+        let decoded = try claudeStatusDecoder().decode(HelperStatus.self, from: Data(#"{"claude_code":{"usage_check_error":"x","usage_check_issue":"no_plan","last_usage_check_at":"2026-10-25T17:40:16Z"}}"#.utf8))
+        XCTAssertEqual(decoded.claudeCode.usageCheckIssue, "no_plan")
+        XCTAssertNotNil(decoded.claudeCode.lastUsageCheckAt)
+    }
+
     func testObservationAgeLabels() {
         let now = Date(timeIntervalSince1970: 2_000_000_000)
         XCTAssertEqual(observationAge(since: now.addingTimeInterval(-10), now: now), "NOW")

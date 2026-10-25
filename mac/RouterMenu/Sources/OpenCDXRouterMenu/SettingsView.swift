@@ -43,6 +43,9 @@ struct SettingsView: View {
                 if let setup = model.claudeSetup {
                     Text(setup.installed ? "Status: \(model.claudeReporting.label)" : "Status: Not connected")
                         .font(.callout)
+                    if setup.installed {
+                        ClaudeAllowanceStatusView(claudeCode: model.status.claudeCode, claudeAccounts: model.status.claudeAccounts)
+                    }
                 }
                 HStack {
                     if model.claudeSetup?.installed == true {
@@ -54,6 +57,11 @@ struct SettingsView: View {
                     }
                     Button("Import Claude Code History…") { model.importClaudeHistory() }
                         .disabled(!model.status.connected || model.claudeOperationInProgress)
+                    if model.claudeSetup?.installed == true {
+                        Button("Check Now") { model.refreshQuotas() }
+                            .disabled(!model.status.connected)
+                            .help("Read the Claude allowance now instead of at the next 5-minute check.")
+                    }
                 }
                 Divider()
                 Label("Delete Server History", systemImage: "exclamationmark.triangle.fill")
@@ -77,5 +85,40 @@ struct SettingsView: View {
         .frame(width: 500)
         .frame(minHeight: 460)
         .onAppear { model.refreshClaudeSetup() }
+    }
+}
+
+/// The Claude allowance line in Settings: when the last reading arrived, or
+/// why it stopped updating and how to fix it.
+struct ClaudeAllowanceStatusView: View {
+    let claudeCode: ClaudeCodeReportingStatus
+    let claudeAccounts: [AccountAllowanceStatus]
+
+    var body: some View {
+        let observedAt = claudeAccounts.compactMap(\.observedAt).max()
+        if let problem = claudeAllowanceProblem(claudeCode: claudeCode, observedAt: observedAt) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(observedAt.map { "Allowance: Not updating since \($0.formatted(date: .abbreviated, time: .shortened))" } ?? "Allowance: No reading yet")
+                    Text(LocalizedStringKey(problem.settingsText))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    if let lastCheck = claudeCode.lastUsageCheckAt {
+                        Text("Last check: \(lastCheck.formatted(date: .omitted, time: .shortened))")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.callout)
+        } else if let observedAt {
+            Text("Allowance: Updated \(observedAt.formatted(date: .omitted, time: .shortened))")
+                .font(.callout)
+        } else {
+            Text("Allowance: Waiting for the first reading")
+                .font(.callout)
+        }
     }
 }

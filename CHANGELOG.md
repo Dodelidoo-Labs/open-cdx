@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Explain a stale Claude allowance. When the usage check fails and the
+  reading is more than 15 minutes old, the Claude row in the menu says why,
+  for example that the Claude command line tool is signed out, and how to fix
+  it. Its age turns orange and its bars turn grey. **Settings → Claude Code**
+  shows the time of the last reading, the cause, and a **Check Now** button.
+- `router-helper status` reports the cause as `claude_code.usage_check_issue`.
+  To find it, the helper runs `claude auth status` only after `/usage`
+  printed no allowance.
+
 ## [1.10.1] - 2026-10-09
 
 ### Changed

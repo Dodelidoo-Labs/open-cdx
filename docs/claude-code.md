@@ -28,6 +28,8 @@ reads only the printed text.
 - **macOS menu:** one row per Claude subscription, next to the OpenAI
   accounts and marked with the Claude logo, with weekly and 5-hour bars, reset
   times, and the same pace marker. The row shows how old the reading is.
+  When the usage check fails and the reading is more than 15 minutes old, the
+  row says why and how to fix it, and its bars turn grey.
 - **Dashboard telemetry:** Claude Code requests and tokens by model, machine,
   and provider (**Claude Code**), in the same charts, totals, breakdown, and
   CSV export as Codex usage.
@@ -159,13 +161,21 @@ Allowance comes from two sources:
   servers, and telemetry export do not run. It saves no session; Claude Code
   creates only an empty project folder for the helper's application-support
   directory. The check is skipped while the status line reported within the
-  last five minutes. **Refresh Allowances** runs it at once.
+  last five minutes. **Refresh Allowances**, or **Check Now** in
+  **Settings → Claude Code**, runs it at once.
 
 The helper looks for `claude` in `PATH`, `/opt/homebrew/bin`,
 `/usr/local/bin`, `~/.local/bin`, `~/bin`, and `~/.npm-global/bin`. Without
 the command line tool, or when it is signed out, only the status line
 reports. The usage check reads percentages rounded down to whole numbers and
 reset times to the minute.
+
+When `/usage` prints no allowance, the helper runs `claude auth status --json`
+to find out why. That command reads the local login without a network
+request; the helper keeps only `loggedIn` and `authMethod`. The menu and
+**Settings → Claude Code** then name the cause: the command line tool is
+missing or signed out, it is signed in without a Pro or Max plan, or this
+Claude Code version prints the allowance in a form OpenCDX cannot read.
 
 When no reading arrives, the menu keeps the last one and shows its age; a
 window whose reset time has passed shows as fully available until the next
@@ -204,7 +214,7 @@ attribution. Claude Code deletes transcripts after its `cleanupPeriodDays`
 |---|---|
 | **Settings** shows **Waiting for Usage** | Normal between sessions. Start a new session after connecting. |
 | No allowance rows | Allowance requires a Pro or Max login and appears after the first response. |
-| Allowance stays old while using the desktop app | `router-helper status` shows `claude_code.usage_check_error`. Install the Claude Code command line tool and sign in with `claude`. |
+| Allowance stays old while using the desktop app | The Claude row and **Settings → Claude Code** name the cause; `router-helper status` shows it as `claude_code.usage_check_issue` and `usage_check_error`. The usual fix is `claude auth login`, then **Check Now**. |
 | **Upload Pending** | The router is unreachable; the helper retries and keeps up to 20,000 requests in memory. |
 | Telemetry missing, allowance present | Run `/status` in Claude Code: it reports `otelHeadersHelper` failures. Confirm the helper is running. |
 | Setup reports conflicts | Your settings already export telemetry. OpenCDX will not replace them. |

@@ -169,6 +169,9 @@ struct ClaudeCodeReportingStatus: Codable {
     var lastUploadAt: Date?
     var pendingRequests = 0
     var lastError = ""
+    var lastUsageCheckAt: Date?
+    var usageCheckError = ""
+    var usageCheckIssue = ""
 
     enum CodingKeys: String, CodingKey {
         case lastTelemetryAt = "last_telemetry_at"
@@ -176,6 +179,9 @@ struct ClaudeCodeReportingStatus: Codable {
         case lastUploadAt = "last_upload_at"
         case pendingRequests = "pending_requests"
         case lastError = "last_error"
+        case lastUsageCheckAt = "last_usage_check_at"
+        case usageCheckError = "usage_check_error"
+        case usageCheckIssue = "usage_check_issue"
     }
 
     init() {}
@@ -187,6 +193,9 @@ struct ClaudeCodeReportingStatus: Codable {
         lastUploadAt = try container.decodeIfPresent(Date.self, forKey: .lastUploadAt)
         pendingRequests = try container.decodeIfPresent(Int.self, forKey: .pendingRequests) ?? 0
         lastError = try container.decodeIfPresent(String.self, forKey: .lastError) ?? ""
+        lastUsageCheckAt = try container.decodeIfPresent(Date.self, forKey: .lastUsageCheckAt)
+        usageCheckError = try container.decodeIfPresent(String.self, forKey: .usageCheckError) ?? ""
+        usageCheckIssue = try container.decodeIfPresent(String.self, forKey: .usageCheckIssue) ?? ""
     }
 
     var lastActivityAt: Date? {
@@ -420,6 +429,41 @@ func claudeCodeReporting(installed: Bool, status: HelperStatus, now: Date = Date
     if !status.claudeCode.lastError.isEmpty && status.claudeCode.pendingRequests > 0 { return .uploadPending }
     if let last = status.claudeCode.lastActivityAt, now.timeIntervalSince(last) < 15 * 60 { return .reporting }
     return .waiting
+}
+
+/// Why the Claude allowance stopped updating. The helper's usage check failed
+/// and no other source, such as a terminal session's status line, has kept
+/// the reading fresh.
+struct ClaudeAllowanceProblem: Equatable {
+    let issue: String
+    let error: String
+
+    var menuText: String {
+        switch issue {
+        case "signed_out": return "Not updating: the Claude command line tool is signed out. Run `claude auth login` in Terminal."
+        case "no_plan": return "Not updating: Claude Code is signed in without a Pro or Max plan."
+        case "not_installed": return "Not updating: the Claude command line tool is not installed."
+        case "unrecognized": return "Not updating: this Claude Code version prints the allowance in a form OpenCDX cannot read yet."
+        default: return "Not updating: the Claude usage check failed."
+        }
+    }
+
+    var settingsText: String {
+        switch issue {
+        case "signed_out": return "The Claude command line tool is signed out. Run `claude auth login` in Terminal, then choose Check Now."
+        case "no_plan": return "Claude Code is signed in without a Pro or Max plan. Run `claude auth login` with your plan account, then choose Check Now."
+        case "not_installed": return "The Claude command line tool is not installed. Install Claude Code, sign in with `claude`, then choose Check Now."
+        case "unrecognized": return "This Claude Code version prints the allowance in a form OpenCDX cannot read yet. Check for an OpenCDX update."
+        default: return "The usage check failed: \(error)"
+        }
+    }
+}
+
+/// A failed check matters only once the reading is older than 15 minutes.
+func claudeAllowanceProblem(claudeCode: ClaudeCodeReportingStatus, observedAt: Date?, now: Date = Date()) -> ClaudeAllowanceProblem? {
+    guard !claudeCode.usageCheckError.isEmpty else { return nil }
+    if let observedAt, now.timeIntervalSince(observedAt) < 15 * 60 { return nil }
+    return ClaudeAllowanceProblem(issue: claudeCode.usageCheckIssue, error: claudeCode.usageCheckError)
 }
 
 func claudeSetupConfirmationMessage(_ preview: ClaudeSetupPreview) -> String {
