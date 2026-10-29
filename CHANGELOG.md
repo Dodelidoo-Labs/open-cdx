@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one, and the router used to drop the new token with the cancelled request.
   The next refresh was then rejected and the account needed a new login.
 
+### Changed
+
+- When OpenAI rejects an account's refresh token, the account error now
+  includes OpenAI's reason, for example
+  `OpenAI rejected the refresh token (refresh_token_reused)`.
+
 ## [1.11.0] - 2026-10-25
 
 ### Added

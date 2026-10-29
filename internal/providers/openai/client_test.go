@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -275,5 +276,33 @@ func TestCreditsUsable(t *testing.T) {
 		if got := CreditsUsable([]byte(test.raw)); got != test.usable {
 			t.Errorf("%s: usable=%v; want %v", test.name, got, test.usable)
 		}
+	}
+}
+
+func TestRefreshRejectionKeepsOpenAIErrorCode(t *testing.T) {
+	cases := map[string]struct {
+		body string
+		code string
+	}{
+		"nested":     {`{"error":{"message":"already used","type":"invalid_request_error","code":"refresh_token_reused"}}`, "refresh_token_reused"},
+		"flat OAuth": {`{"error":"invalid_grant","error_description":"expired"}`, "invalid_grant"},
+		"type only":  {`{"error":{"message":"no code","type":"invalid_request_error","code":null}}`, "invalid_request_error"},
+		"markup":     {`{"error":{"code":"<b>bad</b>"}}`, ""},
+		"not JSON":   {`<html>Bad Request</html>`, ""},
+	}
+	for name, test := range cases {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				writer.WriteHeader(http.StatusUnauthorized)
+				_, _ = writer.Write([]byte(test.body))
+			}))
+			defer server.Close()
+			client := New(server.Client(), server.URL, "client", server.URL, server.URL)
+			_, err := client.Refresh(context.Background(), providers.Credential{RefreshToken: "old-refresh", AccountID: "account-a"})
+			var refreshError *RefreshError
+			if !errors.As(err, &refreshError) || !refreshError.Permanent() || refreshError.Code != test.code {
+				t.Fatalf("refresh error = %#v, want permanent with code %q", err, test.code)
+			}
+		})
 	}
 }

@@ -113,7 +113,7 @@ func (client *Client) Refresh(ctx context.Context, credential providers.Credenti
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return providers.Credential{}, &RefreshError{StatusCode: response.StatusCode}
+		return providers.Credential{}, &RefreshError{StatusCode: response.StatusCode, Code: refreshErrorCode(response.Body)}
 	}
 	var refreshed tokenResponse
 	if err = decodeLimitedJSON(response.Body, &refreshed); err != nil {
@@ -290,14 +290,55 @@ func (client *Client) addAccountAuth(headers http.Header, credential providers.C
 
 type RefreshError struct {
 	StatusCode int
+	// Code is OpenAI's machine-readable reason, such as refresh_token_reused,
+	// or empty when the response carried none.
+	Code string
 }
 
 func (err *RefreshError) Error() string {
+	if err.Code != "" {
+		return "refresh token was rejected (" + err.Code + ")"
+	}
 	return "refresh token was rejected"
 }
 
 func (err *RefreshError) Permanent() bool {
 	return err.StatusCode == http.StatusBadRequest || err.StatusCode == http.StatusUnauthorized
+}
+
+// refreshErrorCode accepts OpenAI's nested error object and the flat OAuth
+// form ({"error": "invalid_grant"}). Anything that is not a short identifier
+// is dropped, because the code is shown to the operator.
+func refreshErrorCode(body io.Reader) string {
+	var payload struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if decodeLimitedJSON(body, &payload) != nil || len(payload.Error) == 0 {
+		return ""
+	}
+	var code string
+	if json.Unmarshal(payload.Error, &code) != nil {
+		var nested struct {
+			Code string `json:"code"`
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(payload.Error, &nested) != nil {
+			return ""
+		}
+		code = nested.Code
+		if code == "" {
+			code = nested.Type
+		}
+	}
+	if len(code) > 64 {
+		return ""
+	}
+	for _, character := range code {
+		if !(character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '_' || character == '-' || character == '.') {
+			return ""
+		}
+	}
+	return code
 }
 
 type tokenResponse struct {

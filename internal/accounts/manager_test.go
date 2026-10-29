@@ -231,3 +231,30 @@ func TestRefreshSurvivesCallerCancellation(t *testing.T) {
 		t.Fatalf("cancelled caller discarded the rotated token: refresh=%q access=%q", stored.Credential.RefreshToken, stored.Credential.AccessToken)
 	}
 }
+
+func TestRejectedRefreshRecordsOpenAIErrorCode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusUnauthorized)
+		_, _ = writer.Write([]byte(`{"error":{"message":"already used","type":"invalid_request_error","code":"refresh_token_reused"}}`))
+	}))
+	defer server.Close()
+	store := accountTestStore(t)
+	created, _, err := store.PutAccount(context.Background(), storage.AccountInput{
+		Credential:  storage.OpenAICredential{AccessToken: "old-access", RefreshToken: "old-refresh", IDToken: testJWT("stable-account", time.Now().Add(time.Hour)), AccountID: "stable-account", ExpiresAt: time.Now().Add(time.Minute)},
+		MaskedEmail: "a***t@e***.com", Plan: "plus", Status: "ready",
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(store, openai.New(server.Client(), server.URL, "client", server.URL, server.URL))
+	if _, err = manager.FreshCredential(context.Background(), created.ID); err == nil {
+		t.Fatal("rejected refresh returned a credential")
+	}
+	stored, err := store.Account(context.Background(), created.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != "reauthentication_required" || stored.LastError != "OpenAI rejected the refresh token (refresh_token_reused)" {
+		t.Fatalf("status=%q last_error=%q", stored.Status, stored.LastError)
+	}
+}

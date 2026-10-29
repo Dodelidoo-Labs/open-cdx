@@ -203,7 +203,11 @@ func (manager *Manager) refreshAndStore(ctx context.Context, accountID string, c
 	if err != nil {
 		var refreshError *openai.RefreshError
 		if errors.As(err, &refreshError) && refreshError.Permanent() {
-			_ = manager.store.SetAccountStatus(ctx, accountID, "reauthentication_required", "OpenAI rejected the refresh token")
+			message := "OpenAI rejected the refresh token"
+			if refreshError.Code != "" {
+				message += " (" + refreshError.Code + ")"
+			}
+			_ = manager.store.SetAccountStatus(ctx, accountID, "reauthentication_required", message)
 		}
 		return providers.Credential{}, err
 	}
