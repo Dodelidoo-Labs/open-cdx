@@ -197,3 +197,37 @@ func testJWT(accountID string, expires time.Time) string {
 	payload, _ := json.Marshal(map[string]any{"exp": expires.Unix(), "https://api.openai.com/auth": map[string]any{"chatgpt_account_id": accountID, "chatgpt_user_id": "user"}})
 	return header + "." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
 }
+
+// OpenAI invalidates the old refresh token once it issues a new one, so a
+// caller that disconnects mid-refresh must still leave the new token stored.
+func TestRefreshSurvivesCallerCancellation(t *testing.T) {
+	accountID := "stable-account"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		cancel()
+		time.Sleep(50 * time.Millisecond)
+		writer.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(writer).Encode(map[string]any{
+			"access_token": "new-access", "refresh_token": "new-refresh", "id_token": testJWT(accountID, time.Now().Add(time.Hour)), "expires_in": 3600,
+		})
+	}))
+	defer server.Close()
+	store := accountTestStore(t)
+	created, _, err := store.PutAccount(context.Background(), storage.AccountInput{
+		Credential:  storage.OpenAICredential{AccessToken: "old-access", RefreshToken: "old-refresh", IDToken: testJWT(accountID, time.Now().Add(time.Hour)), AccountID: accountID, ExpiresAt: time.Now().Add(time.Minute)},
+		MaskedEmail: "a***t@e***.com", Plan: "plus", Status: "ready",
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(store, openai.New(server.Client(), server.URL, "client", server.URL, server.URL))
+	_, _ = manager.FreshCredential(ctx, created.ID)
+	stored, err := store.Account(context.Background(), created.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Credential.RefreshToken != "new-refresh" || stored.Credential.AccessToken != "new-access" {
+		t.Fatalf("cancelled caller discarded the rotated token: refresh=%q access=%q", stored.Credential.RefreshToken, stored.Credential.AccessToken)
+	}
+}

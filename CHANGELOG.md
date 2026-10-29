@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep an OpenAI account signed in when Codex disconnects during a token
+  refresh. OpenAI retires the old refresh token as soon as it issues a new
+  one, and the router used to drop the new token with the cancelled request.
+  The next refresh was then rejected and the account needed a new login.
+
 ## [1.11.0] - 2026-10-25
 
 ### Added

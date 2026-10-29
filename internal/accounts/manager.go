@@ -15,7 +15,10 @@ import (
 	"github.com/Dodelidoo-Labs/open-cdx/internal/storage"
 )
 
-const oauthLifetime = 5 * time.Minute
+const (
+	oauthLifetime  = 5 * time.Minute
+	refreshTimeout = 30 * time.Second
+)
 
 type Manager struct {
 	store         *storage.Store
@@ -171,18 +174,7 @@ func (manager *Manager) FreshCredential(ctx context.Context, accountID string) (
 	if time.Until(credential.ExpiresAt) > manager.refreshWindow {
 		return credential, nil
 	}
-	refreshed, err := manager.client.Refresh(ctx, credential)
-	if err != nil {
-		var refreshError *openai.RefreshError
-		if errors.As(err, &refreshError) && refreshError.Permanent() {
-			_ = manager.store.SetAccountStatus(ctx, accountID, "reauthentication_required", "OpenAI rejected the refresh token")
-		}
-		return providers.Credential{}, err
-	}
-	if err = manager.store.UpdateAccountCredential(ctx, accountID, storageCredential(refreshed)); err != nil {
-		return providers.Credential{}, err
-	}
-	return refreshed, nil
+	return manager.refreshAndStore(ctx, accountID, credential)
 }
 
 func (manager *Manager) ForceRefreshCredential(ctx context.Context, accountID, rejectedAccessToken string) (providers.Credential, error) {
@@ -197,7 +189,17 @@ func (manager *Manager) ForceRefreshCredential(ctx context.Context, accountID, r
 	if rejectedAccessToken != "" && current.AccessToken != rejectedAccessToken {
 		return current, nil
 	}
-	refreshed, err := manager.client.Refresh(ctx, current)
+	return manager.refreshAndStore(ctx, accountID, current)
+}
+
+// refreshAndStore rotates the refresh token outside the caller's lifetime.
+// OpenAI invalidates the old token as soon as it issues the new one, so a
+// Codex request that disconnects mid-refresh must not drop the replacement
+// before it is stored; the next refresh would then be rejected as reused.
+func (manager *Manager) refreshAndStore(ctx context.Context, accountID string, credential providers.Credential) (providers.Credential, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), refreshTimeout)
+	defer cancel()
+	refreshed, err := manager.client.Refresh(ctx, credential)
 	if err != nil {
 		var refreshError *openai.RefreshError
 		if errors.As(err, &refreshError) && refreshError.Permanent() {
