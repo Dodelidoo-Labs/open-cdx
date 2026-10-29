@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-10-29
+
 ### Fixed
 
 - Keep an OpenAI account signed in when Codex disconnects during a token
@@ -19,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When OpenAI rejects an account's refresh token, the account error now
   includes OpenAI's reason, for example
   `OpenAI rejected the refresh token (refresh_token_reused)`.
+
+Update the router image to get both changes. The macOS companion is now signed
+with a new Developer ID, so macOS may ask once more for Local Network access
+after the update. 1.11.0 was never published because its notarization did not
+finish in time; its changes below ship for the first time in this release.
 
 ## [1.11.0] - 2026-10-25
 
@@ -401,7 +408,8 @@ rebuilt for this release, but updating the companion alone does not fix HTTP 413
   timezone and daylight-saving changes. Show overlapping daily-only history as
   unavailable for rolling totals instead of presenting incomplete counts.
 
-[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.10.1...v1.11.0
 [1.10.1]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.9.1...v1.10.0
