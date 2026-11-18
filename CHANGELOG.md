@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.1] - 2026-11-18
+
 ### Fixed
 
 - Deliver new OpenAI models to Codex again. OpenAI's catalog now includes
@@ -22,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `502 Bad Gateway`.
 - Log device catalog build failures on the router, once per distinct error
   and once on recovery.
+
+Update the router image to get new OpenAI models such as `gpt-6.2-astra`, then
+restart Codex. Update the macOS companion to see catalog failures in the menu.
 
 ## [1.12.0] - 2026-10-29
 
@@ -424,7 +429,8 @@ rebuilt for this release, but updating the companion alone does not fix HTTP 413
   timezone and daylight-saving changes. Show overlapping daily-only history as
   unavailable for rolling totals instead of presenting incomplete counts.
 
-[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.12.0...HEAD
+[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.12.1...HEAD
+[1.12.1]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.12.0...v1.12.1
 [1.12.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.10.1...v1.11.0
 [1.10.1]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.10.0...v1.10.1
