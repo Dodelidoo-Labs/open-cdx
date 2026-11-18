@@ -83,7 +83,7 @@ jobs:
   macos:
     name: Sign and notarize macOS application
     needs: validate
-    runs-on: macos-26
+    runs-on: macos-26-intel
     permissions:
       contents: read
     env:
