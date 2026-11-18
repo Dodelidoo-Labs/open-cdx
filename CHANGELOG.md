@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from that, so helpers kept their old model list. These values now pass
   through unchanged, and access-program routing no longer ignores accounts
   whose catalog contains them.
+- Log device catalog build failures on the router, once per distinct error
+  and once on recovery.
 
 ## [1.12.0] - 2026-10-29
 

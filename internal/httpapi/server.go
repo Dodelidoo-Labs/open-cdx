@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -55,6 +56,9 @@ type Server struct {
 	sessionsMu        sync.Mutex
 	sessions          map[string]adminSession
 	handler           http.Handler
+	catalogLogMu      sync.Mutex
+	catalogLogError   string
+	logf              func(format string, args ...any)
 }
 
 type adminSession struct {
@@ -368,6 +372,30 @@ func (server *Server) refreshCatalog(writer http.ResponseWriter, request *http.R
 	server.catalogResponse(writer, request, true)
 }
 
+// logCatalogBuild records device catalog failures once per distinct error and
+// once on recovery. Helpers poll every minute, so logging every failure would
+// flood the log without adding information.
+func (server *Server) logCatalogBuild(err error) {
+	message := ""
+	if err != nil {
+		message = safeError(err)
+	}
+	server.catalogLogMu.Lock()
+	previous := server.catalogLogError
+	server.catalogLogError = message
+	server.catalogLogMu.Unlock()
+	logf := server.logf
+	if logf == nil {
+		logf = log.Printf
+	}
+	switch {
+	case message != "" && message != previous:
+		logf("device catalog build failed: %s", message)
+	case message == "" && previous != "":
+		logf("device catalog build recovered")
+	}
+}
+
 func (server *Server) acknowledgeCatalogRestart(writer http.ResponseWriter, request *http.Request) {
 	device := currentDevice(request.Context())
 	server.status.Update(device.ID, func(status *routing.RouteStatus) {
@@ -386,6 +414,7 @@ func (server *Server) catalogResponse(writer http.ResponseWriter, request *http.
 		_ = server.accounts.EnsureCatalogVersion(request.Context(), version)
 	}
 	result, err := server.catalog.BuildForDevice(request.Context(), device.ID, version)
+	server.logCatalogBuild(err)
 	if err != nil {
 		writeAPIError(writer, http.StatusServiceUnavailable, "catalog_unavailable", safeError(err))
 		return
