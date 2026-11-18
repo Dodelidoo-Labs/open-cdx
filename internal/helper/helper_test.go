@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -539,5 +540,66 @@ func TestEnrollmentRequiredOnlyAfterCredentialRejection(t *testing.T) {
 		if got := daemon.currentStatus().EnrollmentRequired; got != sample.required {
 			t.Fatalf("HTTP %d: enrollment required = %v, want %v", sample.code, got, sample.required)
 		}
+	}
+}
+
+func TestCatalogSyncFailureStaysVisibleUntilNextSync(t *testing.T) {
+	var failing atomic.Bool
+	failing.Store(true)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/catalog":
+			if failing.Load() {
+				writer.Header().Set("Content-Type", "application/json")
+				writer.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = writer.Write([]byte(`{"error":{"type":"catalog_unavailable","message":"decode native model access programs: bad\nshape"}}`))
+				return
+			}
+			writer.WriteHeader(http.StatusNotModified)
+		case "/api/v1/device/status":
+			_, _ = writer.Write([]byte(`{"route":{"connected":true,"state":"connected"}}`))
+		default:
+			t.Fatalf("unexpected helper request path: %s", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+	directory := t.TempDir()
+	config := Config{
+		RouterURL: server.URL, DeviceID: "device", DeviceName: "Mac", ListenPort: DefaultPort,
+		CatalogPath: filepath.Join(directory, "catalog.json"), CatalogETag: `"old-catalog"`,
+	}
+	daemon := &Daemon{
+		configPath: filepath.Join(directory, "helper.json"), catalogPath: config.CatalogPath, config: config,
+		remote: &RemoteClient{BaseURL: server.URL, DeviceToken: "device-token", HTTP: server.Client()},
+	}
+	want := "router model catalog is unavailable: decode native model access programs: bad shape"
+	if _, err := daemon.syncCatalog(context.Background(), false); err == nil || err.Error() != want {
+		t.Fatalf("error=%v, expected the router's reason", err)
+	}
+	if err := daemon.refreshStatus(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	status := daemon.currentStatus()
+	if status.CatalogError != want || status.CatalogErrorAt == nil {
+		t.Fatalf("status poll hid the catalog failure: %+v", status)
+	}
+	firstAt := *status.CatalogErrorAt
+	_, _ = daemon.syncCatalog(context.Background(), false)
+	if !daemon.currentStatus().CatalogErrorAt.Equal(firstAt) {
+		t.Fatal("a repeated failure moved the time the failure started")
+	}
+	failing.Store(false)
+	if _, err := daemon.syncCatalog(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	if status := daemon.currentStatus(); status.CatalogError != "" || status.CatalogErrorAt != nil {
+		t.Fatalf("an unchanged sync left the old failure: %+v", status)
+	}
+}
+
+func TestCatalogFailureWithoutRouterReasonNamesHTTPStatus(t *testing.T) {
+	err := catalogResponseError(&http.Response{Status: "502 Bad Gateway", Body: io.NopCloser(strings.NewReader("<html>proxy</html>"))})
+	if err.Error() != "router model catalog is unavailable: 502 Bad Gateway" {
+		t.Fatal(err)
 	}
 }

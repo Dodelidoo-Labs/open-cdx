@@ -35,11 +35,15 @@ type LocalStatus struct {
 	QuotaResetAt       *time.Time         `json:"quota_reset_at,omitempty"`
 	CatalogSynced      bool               `json:"catalog_synced"`
 	CatalogUpdated     *time.Time         `json:"catalog_updated_at,omitempty"`
-	RestartRequired    bool               `json:"codex_restart_required,omitempty"`
-	LastRequestAt      *time.Time         `json:"last_request_at,omitempty"`
-	LastError          string             `json:"last_error,omitempty"`
-	ClaudeAccounts     []AccountAllowance `json:"claude_accounts,omitempty"`
-	ClaudeCode         ClaudeCodeStatus   `json:"claude_code"`
+	// CatalogError is the latest failed catalog sync. It survives status
+	// polls and clears on the next successful or unchanged sync.
+	CatalogError    string             `json:"catalog_error,omitempty"`
+	CatalogErrorAt  *time.Time         `json:"catalog_error_at,omitempty"`
+	RestartRequired bool               `json:"codex_restart_required,omitempty"`
+	LastRequestAt   *time.Time         `json:"last_request_at,omitempty"`
+	LastError       string             `json:"last_error,omitempty"`
+	ClaudeAccounts  []AccountAllowance `json:"claude_accounts,omitempty"`
+	ClaudeCode      ClaudeCodeStatus   `json:"claude_code"`
 }
 
 type AccountAllowance struct {
@@ -366,6 +370,7 @@ func (daemon *Daemon) syncLoop(ctx context.Context) {
 func (daemon *Daemon) recordCatalogResult(result CatalogResult) {
 	daemon.updateStatus(func(status *LocalStatus) {
 		status.CatalogSynced = true
+		status.CatalogError, status.CatalogErrorAt = "", nil
 		if result.Changed {
 			updatedAt := result.UpdatedAt
 			if updatedAt.IsZero() {
@@ -411,8 +416,19 @@ func (daemon *Daemon) syncCatalog(ctx context.Context, force bool) (CatalogResul
 	result, err := SyncCatalog(ctx, daemon.remote, daemon.configPath, &daemon.config, DetectCodexVersion(ctx), force)
 	if err == nil {
 		daemon.recordCatalogResult(result)
+	} else {
+		daemon.recordCatalogError(err)
 	}
 	return result, err
+}
+
+func (daemon *Daemon) recordCatalogError(err error) {
+	daemon.updateStatus(func(status *LocalStatus) {
+		if status.CatalogError != err.Error() || status.CatalogErrorAt == nil {
+			status.CatalogErrorAt = timePointer(time.Now().UTC())
+		}
+		status.CatalogError = err.Error()
+	})
 }
 
 func (daemon *Daemon) refreshStatus(ctx context.Context) error {

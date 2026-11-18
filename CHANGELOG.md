@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from that, so helpers kept their old model list. These values now pass
   through unchanged, and access-program routing no longer ignores accounts
   whose catalog contains them.
+- Show when the model catalog stops updating. The menu used to say
+  Synchronized while every sync failed. The Catalog row now reads Not
+  updating and shows the router's reason until a sync succeeds, and
+  `router-helper refresh-catalog` prints that reason instead of a bare
+  `502 Bad Gateway`.
 - Log device catalog build failures on the router, once per distinct error
   and once on recovery.
 

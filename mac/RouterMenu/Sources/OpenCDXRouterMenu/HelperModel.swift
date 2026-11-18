@@ -218,6 +218,8 @@ struct HelperStatus: Codable {
     var quotaResetAt: Date?
     var catalogSynced = false
     var catalogUpdated: Date?
+    var catalogError = ""
+    var catalogErrorAt: Date?
     var restartRequired = false
     var catalogChanged: Bool?
     var lastRequestAt: Date?
@@ -237,6 +239,8 @@ struct HelperStatus: Codable {
         case quotaResetAt = "quota_reset_at"
         case catalogSynced = "catalog_synced"
         case catalogUpdated = "catalog_updated_at"
+        case catalogError = "catalog_error"
+        case catalogErrorAt = "catalog_error_at"
         case restartRequired = "codex_restart_required"
         case catalogChanged = "catalog_changed"
         case lastRequestAt = "last_request_at"
@@ -261,6 +265,8 @@ struct HelperStatus: Codable {
         quotaResetAt = try container.decodeIfPresent(Date.self, forKey: .quotaResetAt)
         catalogSynced = try container.decodeIfPresent(Bool.self, forKey: .catalogSynced) ?? false
         catalogUpdated = try container.decodeIfPresent(Date.self, forKey: .catalogUpdated)
+        catalogError = try container.decodeIfPresent(String.self, forKey: .catalogError) ?? ""
+        catalogErrorAt = try container.decodeIfPresent(Date.self, forKey: .catalogErrorAt)
         restartRequired = try container.decodeIfPresent(Bool.self, forKey: .restartRequired) ?? false
         catalogChanged = try container.decodeIfPresent(Bool.self, forKey: .catalogChanged)
         lastRequestAt = try container.decodeIfPresent(Date.self, forKey: .lastRequestAt)
@@ -309,6 +315,44 @@ func catalogRefreshMessage(changed: Bool?, restartRequired: Bool) -> String {
     return restartRequired
         ? "Catalog refreshed; no new changes found. Restart Codex to load pending changes."
         : "Catalog refreshed; no changes found."
+}
+
+enum CatalogSyncTone: Equatable {
+    case pending, synchronized, attention
+}
+
+struct CatalogSyncDisplay: Equatable {
+    let label: String
+    let systemImage: String
+    let tone: CatalogSyncTone
+}
+
+/// A failed sync outranks the restart reminder: Codex keeps the last good
+/// catalog, so restarting would not bring in anything new.
+func catalogSyncDisplay(_ status: HelperStatus) -> CatalogSyncDisplay {
+    if !status.catalogError.isEmpty {
+        return CatalogSyncDisplay(label: "Not updating", systemImage: "exclamationmark.triangle.fill", tone: .attention)
+    }
+    if !status.catalogSynced {
+        return CatalogSyncDisplay(label: "Pending", systemImage: "clock", tone: .pending)
+    }
+    if status.restartRequired {
+        return CatalogSyncDisplay(label: "Restart Codex", systemImage: "exclamationmark.triangle.fill", tone: .attention)
+    }
+    return CatalogSyncDisplay(label: "Synchronized", systemImage: "checkmark.circle.fill", tone: .synchronized)
+}
+
+/// Problems shown under the status rows, each once. A forced refresh reports
+/// its catalog failure in both fields.
+func statusProblemMessages(_ status: HelperStatus) -> [String] {
+    var messages: [String] = []
+    for message in [status.lastError, status.catalogError] {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty && !messages.contains(trimmed) {
+            messages.append(trimmed)
+        }
+    }
+    return messages
 }
 
 func routerOperationsAvailable(configured: Bool, connected: Bool) -> Bool {
@@ -720,7 +764,9 @@ final class HelperModel: ObservableObject {
                     restartRequired: self.status.restartRequired
                 ))
             } else {
-                self.setErrorOperation(result.error)
+                // The reason stays visible from the helper status (catalog_error
+                // or last_error); repeating it here would show it twice.
+                self.setErrorOperation("Catalog refresh failed.")
             }
             self.refreshStatus()
         }

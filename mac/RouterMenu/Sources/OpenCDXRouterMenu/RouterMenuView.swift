@@ -125,19 +125,19 @@ struct RouterMenuView: View {
             if model.configured {
                 StatusSummaryRow(
                     title: "Catalog",
-                    value: catalogStatusLabel,
-                    systemImage: catalogStatusIcon,
+                    value: catalogDisplay.label,
+                    systemImage: catalogDisplay.systemImage,
                     color: catalogStatusColor,
-                    actionTitle: model.status.restartRequired ? "Done" : nil,
-                    action: model.status.restartRequired ? { model.acknowledgeCodexRestart() } : nil
+                    actionTitle: restartAcknowledgeable ? "Done" : nil,
+                    action: restartAcknowledgeable ? { model.acknowledgeCodexRestart() } : nil
                 )
             }
 
-            if !model.status.lastError.isEmpty {
+            ForEach(statusProblems, id: \.self) { problem in
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
-                    Text(model.status.lastError)
+                    Text(problem)
                         .foregroundStyle(.secondary)
                 }
                 .font(.caption)
@@ -174,19 +174,24 @@ struct RouterMenuView: View {
         return model.status.connected ? .accentColor : .red
     }
 
-    private var catalogStatusLabel: String {
-        if !model.status.catalogSynced { return "Pending" }
-        return model.status.restartRequired ? "Restart Codex" : "Synchronized"
-    }
-
-    private var catalogStatusIcon: String {
-        if !model.status.catalogSynced { return "clock" }
-        return model.status.restartRequired ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"
+    private var catalogDisplay: CatalogSyncDisplay {
+        catalogSyncDisplay(model.status)
     }
 
     private var catalogStatusColor: Color {
-        if !model.status.catalogSynced { return .secondary }
-        return model.status.restartRequired ? .orange : .accentColor
+        switch catalogDisplay.tone {
+        case .pending: return .secondary
+        case .synchronized: return .accentColor
+        case .attention: return .orange
+        }
+    }
+
+    private var restartAcknowledgeable: Bool {
+        model.status.restartRequired && model.status.catalogError.isEmpty
+    }
+
+    private var statusProblems: [String] {
+        statusProblemMessages(model.status)
     }
 
 }

@@ -43,7 +43,7 @@ func SyncCatalog(ctx context.Context, client *RemoteClient, configPath string, c
 		return CatalogResult{Changed: false, ETag: config.CatalogETag}, nil
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return CatalogResult{}, errors.New("router model catalog is unavailable")
+		return CatalogResult{}, catalogResponseError(response)
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, (32<<20)+1))
 	if err != nil || len(raw) > 32<<20 {
@@ -69,6 +69,29 @@ func SyncCatalog(ctx context.Context, client *RemoteClient, configPath string, c
 	restart := response.Header.Get("X-OpenCDX-Codex-Restart-Required") == "true" ||
 		(previousETag != "" && etag != "" && previousETag != etag)
 	return CatalogResult{Changed: true, ETag: etag, RestartRequired: restart, UpdatedAt: updatedAt}, nil
+}
+
+// catalogResponseError keeps the router's own reason. The router already
+// sanitizes it, and without it a failed build is indistinguishable from an
+// outage.
+func catalogResponseError(response *http.Response) error {
+	var payload struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	raw, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+	message := ""
+	if json.Unmarshal(raw, &payload) == nil {
+		message = strings.Join(strings.Fields(payload.Error.Message), " ")
+	}
+	if runes := []rune(message); len(runes) > 300 {
+		message = string(runes[:300]) + "..."
+	}
+	if message == "" {
+		message = response.Status
+	}
+	return errors.New("router model catalog is unavailable: " + message)
 }
 
 func CatalogExists(config Config) bool {

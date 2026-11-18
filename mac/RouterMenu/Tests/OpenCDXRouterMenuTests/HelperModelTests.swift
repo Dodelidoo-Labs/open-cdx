@@ -103,6 +103,33 @@ final class HelperModelTests: XCTestCase {
         XCTAssertEqual(model.operation, "Second")
     }
 
+    func testCatalogFailureOutranksSynchronizedAndRestartStates() throws {
+        let failed = try JSONDecoder().decode(HelperStatus.self, from: Data(#"""
+        {"catalog_synced":true,"codex_restart_required":true,
+         "catalog_error":"router model catalog is unavailable: bad shape"}
+        """#.utf8))
+        XCTAssertEqual(failed.catalogError, "router model catalog is unavailable: bad shape")
+        XCTAssertEqual(catalogSyncDisplay(failed),
+                       CatalogSyncDisplay(label: "Not updating", systemImage: "exclamationmark.triangle.fill", tone: .attention))
+
+        var status = HelperStatus()
+        XCTAssertEqual(catalogSyncDisplay(status).label, "Pending")
+        status.catalogSynced = true
+        XCTAssertEqual(catalogSyncDisplay(status).tone, .synchronized)
+        status.restartRequired = true
+        XCTAssertEqual(catalogSyncDisplay(status).label, "Restart Codex")
+    }
+
+    func testStatusProblemsShowEachMessageOnce() {
+        var status = HelperStatus()
+        XCTAssertEqual(statusProblemMessages(status), [])
+        status.lastError = "router model catalog is unavailable: bad shape"
+        status.catalogError = "router model catalog is unavailable: bad shape"
+        XCTAssertEqual(statusProblemMessages(status), ["router model catalog is unavailable: bad shape"])
+        status.lastError = "route failed"
+        XCTAssertEqual(statusProblemMessages(status), ["route failed", "router model catalog is unavailable: bad shape"])
+    }
+
     func testRouterOperationsRequireConfigurationAndConnection() {
         XCTAssertTrue(routerOperationsAvailable(configured: true, connected: true))
         XCTAssertFalse(routerOperationsAvailable(configured: true, connected: false))

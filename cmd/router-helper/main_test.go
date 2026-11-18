@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -144,4 +145,17 @@ func (store memorySecretStore) Set(account, value string) error {
 func (store memorySecretStore) Delete(account string) error {
 	delete(store, account)
 	return nil
+}
+
+func TestControlErrorsPreferTheDaemonsReason(t *testing.T) {
+	for body, want := range map[string]string{
+		`{"catalog_error":"router model catalog is unavailable: bad shape","last_error":"other"}`: "router model catalog is unavailable: bad shape",
+		`{"last_error":"remote router is unreachable"}`:                                           "remote router is unreachable",
+		`not json`: "helper control request returned 502 Bad Gateway",
+	} {
+		response := &http.Response{Status: "502 Bad Gateway", StatusCode: http.StatusBadGateway, Body: io.NopCloser(strings.NewReader(body))}
+		if err := controlResponseError(response); err.Error() != want {
+			t.Fatalf("body %s: error=%q, expected %q", body, err, want)
+		}
+	}
 }
