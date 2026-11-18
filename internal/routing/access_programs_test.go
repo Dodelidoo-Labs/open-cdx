@@ -212,3 +212,17 @@ func TestNativeProxyRejectsMalformedAccessPrograms(t *testing.T) {
 		}
 	}
 }
+
+// Non-list access metadata on any model in the snapshot must not hide the
+// account, and is never treated as a grantable program.
+func TestNativeAccessProgramsIgnoreNonListMetadata(t *testing.T) {
+	account := storage.Account{RawCatalogSnapshot: []byte(`{"models":[` +
+		`{"slug":"other","available_access_programs":{"daybreak_availability":"waitlist"}},` +
+		`{"slug":"model","available_access_programs":{"cyber":["standard","daybreak_blue"],"daybreak_availability":"available"}}]}`)}
+	if !accountSupportsAccessPrograms(account, "model", accessPrograms{"cyber": "daybreak_blue"}) {
+		t.Fatal("non-list metadata hid a supported program")
+	}
+	if accountSupportsAccessPrograms(account, "model", accessPrograms{"daybreak_availability": "available"}) {
+		t.Fatal("non-list metadata treated as a program list")
+	}
+}

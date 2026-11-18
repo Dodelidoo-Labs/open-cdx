@@ -33,8 +33,11 @@ func accountSupportsAccessPrograms(account storage.Account, modelID string, requ
 	}
 	var snapshot struct {
 		Models []struct {
-			Slug      string              `json:"slug"`
-			Available map[string][]string `json:"available_access_programs"`
+			Slug string `json:"slug"`
+			// Categories other than program lists exist (for example
+			// "daybreak_availability":"..."). Decode each one on its own so
+			// such metadata never hides the account.
+			Available map[string]json.RawMessage `json:"available_access_programs"`
 		} `json:"models"`
 	}
 	if json.Unmarshal(account.RawCatalogSnapshot, &snapshot) != nil {
@@ -45,7 +48,8 @@ func accountSupportsAccessPrograms(account storage.Account, modelID string, requ
 			continue
 		}
 		for category, program := range requested {
-			if !contains(model.Available[category], program) {
+			var available []string
+			if json.Unmarshal(model.Available[category], &available) != nil || !contains(available, program) {
 				return false
 			}
 		}

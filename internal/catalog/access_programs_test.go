@@ -88,3 +88,41 @@ func TestOnlyModelDefinitionDifferencesRemainConflicts(t *testing.T) {
 		t.Fatalf("access differences treated as model conflicts: %#v, %v", conflicts, err)
 	}
 }
+
+// OpenAI added non-list access metadata such as "daybreak_availability":"..."
+// next to the cyber program list. It must neither break the device catalog
+// nor be rewritten; only list-valued categories are account unions.
+func TestPickerKeepsNonListAccessMetadata(t *testing.T) {
+	accounts := []storage.Account{
+		conflictAccount("standard", "plus", true,
+			`{"slug":"model","available_access_programs":{"cyber":["standard"],"daybreak_availability":"waitlist"}}`,
+			`{"slug":"plain","available_access_programs":{"daybreak_availability":"waitlist"}}`),
+		conflictAccount("blue", "pro", false,
+			`{"slug":"model","available_access_programs":{"cyber":["standard","daybreak_blue"],"daybreak_availability":"available"}}`),
+	}
+	entries, conflicts, err := mergeNativeAccounts(accounts)
+	if err != nil || len(conflicts) != 0 || len(entries) != 2 {
+		t.Fatalf("entries=%s conflicts=%v error=%v", entries, conflicts, err)
+	}
+	for _, entry := range entries {
+		var model struct {
+			Slug      string                     `json:"slug"`
+			Available map[string]json.RawMessage `json:"available_access_programs"`
+		}
+		if err := json.Unmarshal(entry, &model); err != nil {
+			t.Fatal(err)
+		}
+		if string(model.Available["daybreak_availability"]) != `"waitlist"` {
+			t.Fatalf("primary non-list metadata not kept: %s", entry)
+		}
+		if model.Slug == "model" && string(model.Available["cyber"]) != `["standard","daybreak_blue"]` {
+			t.Fatalf("cyber union lost: %s", entry)
+		}
+		if model.Slug == "plain" && model.Available["cyber"] != nil {
+			t.Fatalf("cyber invented: %s", entry)
+		}
+	}
+	if _, err := NativeConflicts(accounts); err != nil {
+		t.Fatalf("comparison failed: %v", err)
+	}
+}

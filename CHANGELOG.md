@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Deliver new OpenAI models to Codex again. OpenAI's catalog now includes
+  `available_access_programs` entries that are not program lists, such as
+  `daybreak_availability`. The router failed to build any device catalog
+  from that, so helpers kept their old model list. These values now pass
+  through unchanged, and access-program routing no longer ignores accounts
+  whose catalog contains them.
+
 ## [1.12.0] - 2026-10-29
 
 ### Fixed
