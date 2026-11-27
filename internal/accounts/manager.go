@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -225,11 +227,11 @@ func (manager *Manager) RefreshQuota(ctx context.Context, accountID string) erro
 }
 
 func (manager *Manager) refreshQuota(ctx context.Context, accountID string) error {
-	credential, err := manager.FreshCredential(ctx, accountID)
-	if err != nil {
-		return err
-	}
-	quota, err := manager.client.CollectQuota(ctx, credential)
+	var quota providers.Quota
+	err := manager.withCredential(ctx, accountID, func(credential providers.Credential) (callErr error) {
+		quota, callErr = manager.client.CollectQuota(ctx, credential)
+		return callErr
+	})
 	if err != nil {
 		return err
 	}
@@ -270,11 +272,11 @@ func (manager *Manager) refreshCatalog(ctx context.Context, accountID, clientVer
 	if onlyIfNewer && version == storedVersion {
 		return nil
 	}
-	credential, err := manager.FreshCredential(ctx, accountID)
-	if err != nil {
-		return err
-	}
-	discovery, err := manager.client.DiscoverModels(ctx, credential, version)
+	var discovery providers.Discovery
+	err = manager.withCredential(ctx, accountID, func(credential providers.Credential) (callErr error) {
+		discovery, callErr = manager.client.DiscoverModels(ctx, credential, version)
+		return callErr
+	})
 	if err != nil {
 		return err
 	}
@@ -286,23 +288,58 @@ func (manager *Manager) RefreshQuotas(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var failures int
+	var failures []string
 	for _, account := range accounts {
 		if account.Paused {
 			continue
 		}
 		if refreshErr := manager.RefreshQuota(ctx, account.ID); refreshErr != nil {
-			failures++
-			latest, latestErr := manager.store.Account(ctx, account.ID, false)
-			if latestErr != nil || latest.Status != "reauthentication_required" {
-				_ = manager.store.SetAccountStatus(ctx, account.ID, "degraded", "quota refresh failed")
-			}
+			failures = append(failures, manager.markDegraded(ctx, account, "quota refresh", refreshErr))
 		}
 	}
-	if failures > 0 {
-		return fmt.Errorf("%d account quota refresh operations failed", failures)
+	if len(failures) > 0 {
+		return fmt.Errorf("%d account quota refresh operations failed: %s", len(failures), strings.Join(failures, "; "))
 	}
 	return nil
+}
+
+// markDegraded keeps the upstream reason on the account and in the log.
+// A bare "refresh failed" left an account out of routing for hours with no
+// way to tell an expired token from an auth outage. A permanent token
+// rejection already set reauthentication_required with its own message,
+// which must not be overwritten.
+func (manager *Manager) markDegraded(ctx context.Context, account storage.Account, operation string, cause error) string {
+	reason := operation + " failed: " + cause.Error()
+	if len(reason) > 300 {
+		reason = reason[:300]
+	}
+	slog.Warn("account "+operation+" failed", "account_id", account.ID, "error", cause.Error())
+	latest, err := manager.store.Account(ctx, account.ID, false)
+	if err != nil || latest.Status != "reauthentication_required" {
+		_ = manager.store.SetAccountStatus(ctx, account.ID, "degraded", reason)
+	}
+	return account.MaskedEmail + ": " + reason
+}
+
+// withCredential runs an upstream read and, when OpenAI answers 401, repeats
+// it once with a force-refreshed token. Only routed requests forced a refresh
+// before, and a degraded account is never routed, so a token OpenAI revoked
+// before its stored expiry kept the account degraded until someone logged in
+// again.
+func (manager *Manager) withCredential(ctx context.Context, accountID string, call func(providers.Credential) error) error {
+	credential, err := manager.FreshCredential(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	err = call(credential)
+	if !openai.IsUnauthorized(err) {
+		return err
+	}
+	credential, err = manager.ForceRefreshCredential(ctx, accountID, credential.AccessToken)
+	if err != nil {
+		return err
+	}
+	return call(credential)
 }
 
 func (manager *Manager) RefreshCatalogs(ctx context.Context, clientVersion string) error {
@@ -320,7 +357,7 @@ func (manager *Manager) refreshCatalogs(ctx context.Context, clientVersion strin
 	if err != nil {
 		return err
 	}
-	var failures int
+	var failures []string
 	for _, account := range accounts {
 		if account.Paused {
 			continue
@@ -331,21 +368,18 @@ func (manager *Manager) refreshCatalogs(ctx context.Context, clientVersion strin
 			if errors.Is(refreshErr, errCatalogVersionUnknown) {
 				continue
 			}
-			failures++
 			// An upgrade check during a normal catalog read must not hide
 			// the last working catalog on a transient discovery failure.
 			// FreshCredential already persists permanent auth failures.
 			if onlyIfNewer {
+				failures = append(failures, account.MaskedEmail+": catalog refresh failed: "+refreshErr.Error())
 				continue
 			}
-			latest, latestErr := manager.store.Account(ctx, account.ID, false)
-			if latestErr != nil || latest.Status != "reauthentication_required" {
-				_ = manager.store.SetAccountStatus(ctx, account.ID, "degraded", "catalog refresh failed")
-			}
+			failures = append(failures, manager.markDegraded(ctx, account, "catalog refresh", refreshErr))
 		}
 	}
-	if failures > 0 {
-		return fmt.Errorf("%d account catalog refresh operations failed", failures)
+	if len(failures) > 0 {
+		return fmt.Errorf("%d account catalog refresh operations failed: %s", len(failures), strings.Join(failures, "; "))
 	}
 	return nil
 }

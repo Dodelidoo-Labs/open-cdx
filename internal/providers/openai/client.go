@@ -203,7 +203,7 @@ func (client *Client) DiscoverModels(ctx context.Context, credential providers.C
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return providers.Discovery{}, fmt.Errorf("OpenAI model discovery returned %s", response.Status)
+		return providers.Discovery{}, &StatusError{Operation: "OpenAI model discovery", StatusCode: response.StatusCode, Status: response.Status}
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, 32<<20))
 	if err != nil {
@@ -228,7 +228,7 @@ func (client *Client) CollectQuota(ctx context.Context, credential providers.Cre
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return providers.Quota{}, fmt.Errorf("quota collection returned %s", response.Status)
+		return providers.Quota{}, &StatusError{Operation: "quota collection", StatusCode: response.StatusCode, Status: response.Status}
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
 	if err != nil {
@@ -296,6 +296,15 @@ type RefreshError struct {
 }
 
 func (err *RefreshError) Error() string {
+	// Only 400 and 401 reject the token. Anything else (403, 429, 5xx) is the
+	// auth service failing, and the status is what the operator needs to see.
+	if !err.Permanent() {
+		message := fmt.Sprintf("token refresh returned HTTP %d", err.StatusCode)
+		if err.Code != "" {
+			message += " (" + err.Code + ")"
+		}
+		return message
+	}
 	if err.Code != "" {
 		return "refresh token was rejected (" + err.Code + ")"
 	}
@@ -304,6 +313,25 @@ func (err *RefreshError) Error() string {
 
 func (err *RefreshError) Permanent() bool {
 	return err.StatusCode == http.StatusBadRequest || err.StatusCode == http.StatusUnauthorized
+}
+
+// StatusError is a non-2xx answer from an OpenAI endpoint. Callers use the
+// status to retry a 401 with a fresh token; the text stays free of secrets
+// because it is shown to the operator.
+type StatusError struct {
+	Operation  string
+	StatusCode int
+	Status     string
+}
+
+func (err *StatusError) Error() string {
+	return err.Operation + " returned " + err.Status
+}
+
+// IsUnauthorized reports whether OpenAI refused the access token itself.
+func IsUnauthorized(err error) bool {
+	var statusError *StatusError
+	return errors.As(err, &statusError) && statusError.StatusCode == http.StatusUnauthorized
 }
 
 // refreshErrorCode accepts OpenAI's nested error object and the flat OAuth

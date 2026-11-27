@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -255,6 +256,81 @@ func TestRejectedRefreshRecordsOpenAIErrorCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	if stored.Status != "reauthentication_required" || stored.LastError != "OpenAI rejected the refresh token (refresh_token_reused)" {
+		t.Fatalf("status=%q last_error=%q", stored.Status, stored.LastError)
+	}
+}
+
+// A token OpenAI revoked before its stored expiry must heal on the next quota
+// poll. Before, only routed requests forced a refresh, and a degraded account
+// is never routed, so the account stayed degraded until a new login.
+func TestQuotaRefreshRetriesARejectedAccessTokenOnce(t *testing.T) {
+	accountID := "stable-account"
+	var refreshCalls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/oauth/token":
+			refreshCalls.Add(1)
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"access_token": "new-access", "refresh_token": "new-refresh", "id_token": testJWT(accountID, time.Now().Add(time.Hour)), "expires_in": 3600,
+			})
+		case "/wham/usage":
+			if request.Header.Get("Authorization") != "Bearer new-access" {
+				writer.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_, _ = fmt.Fprintf(writer, `{"plan_type":"pro","rate_limit":{"allowed":true,"primary_window":{"used_percent":11,"limit_window_seconds":604800,"reset_at":%d}}}`, time.Now().Add(5*24*time.Hour).Unix())
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	store := accountTestStore(t)
+	created, _, err := store.PutAccount(context.Background(), storage.AccountInput{
+		Credential:  storage.OpenAICredential{AccessToken: "revoked-access", RefreshToken: "old-refresh", IDToken: testJWT(accountID, time.Now().Add(time.Hour)), AccountID: accountID, ExpiresAt: time.Now().Add(24 * time.Hour)},
+		MaskedEmail: "a***t@e***.com", Plan: "pro", Status: "degraded",
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(store, openai.New(server.Client(), server.URL, "client", server.URL, server.URL))
+	if err = manager.RefreshQuotas(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.Account(context.Background(), created.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != "ready" || stored.QuotaUsedPercent != 11 || stored.Credential.RefreshToken != "new-refresh" || refreshCalls.Load() != 1 {
+		t.Fatalf("status=%q used=%v refresh=%q refreshCalls=%d", stored.Status, stored.QuotaUsedPercent, stored.Credential.RefreshToken, refreshCalls.Load())
+	}
+}
+
+// A failed background refresh takes the account out of routing, so the
+// operator must see why: an auth outage reads differently from a bad token.
+func TestFailedQuotaRefreshKeepsTheUpstreamReason(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	store := accountTestStore(t)
+	created, _, err := store.PutAccount(context.Background(), storage.AccountInput{
+		Credential:  storage.OpenAICredential{AccessToken: "old-access", RefreshToken: "old-refresh", IDToken: testJWT("stable-account", time.Now().Add(time.Hour)), AccountID: "stable-account", ExpiresAt: time.Now().Add(time.Minute)},
+		MaskedEmail: "a***t@e***.com", Plan: "pro", Status: "ready",
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(store, openai.New(server.Client(), server.URL, "client", server.URL, server.URL))
+	err = manager.RefreshQuotas(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "a***t@e***.com: quota refresh failed: token refresh returned HTTP 503") {
+		t.Fatalf("refresh error=%v", err)
+	}
+	stored, err := store.Account(context.Background(), created.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != "degraded" || stored.LastError != "quota refresh failed: token refresh returned HTTP 503" {
 		t.Fatalf("status=%q last_error=%q", stored.Status, stored.LastError)
 	}
 }

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Stop a failed background refresh from silently taking an account out of
+  routing. A primary account went degraded overnight with only "quota
+  refresh failed", so all traffic went to the fallback account until its
+  allowance ran out, and requests then failed with 429. A quota or catalog
+  read that OpenAI answers with 401 now retries once with a refreshed token,
+  so a token revoked before its expiry heals on the next poll.
+- Keep the real reason when an account refresh fails. The account card shows
+  it (for example `quota refresh failed: token refresh returned HTTP 503`),
+  the router logs it, and the refresh endpoints return it. Token refresh
+  failures other than 400 and 401 now name their HTTP status instead of
+  reading "refresh token was rejected".
+
 ## [1.12.1] - 2026-11-18
 
 ### Fixed
