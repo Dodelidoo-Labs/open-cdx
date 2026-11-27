@@ -490,12 +490,13 @@ func controlRequest(configPath, method, path string, body []byte, output io.Writ
 // body over the bare HTTP status, so the menu can show why a refresh failed.
 func controlResponseError(response *http.Response) error {
 	var status struct {
+		Error        string `json:"error"`
 		CatalogError string `json:"catalog_error"`
 		LastError    string `json:"last_error"`
 	}
 	raw, _ := io.ReadAll(io.LimitReader(response.Body, 2<<20))
 	if json.Unmarshal(raw, &status) == nil {
-		for _, message := range []string{status.CatalogError, status.LastError} {
+		for _, message := range []string{status.Error, status.CatalogError, status.LastError} {
 			if message = strings.TrimSpace(message); message != "" {
 				return errors.New(message)
 			}

@@ -151,6 +151,7 @@ func TestControlErrorsPreferTheDaemonsReason(t *testing.T) {
 	for body, want := range map[string]string{
 		`{"catalog_error":"router model catalog is unavailable: bad shape","last_error":"other"}`: "router model catalog is unavailable: bad shape",
 		`{"last_error":"remote router is unreachable"}`:                                           "remote router is unreachable",
+		`{"error":"router request failed: 1 account quota refresh operations failed"}`:            "router request failed: 1 account quota refresh operations failed",
 		`not json`: "helper control request returned 502 Bad Gateway",
 	} {
 		response := &http.Response{Status: "502 Bad Gateway", StatusCode: http.StatusBadGateway, Body: io.NopCloser(strings.NewReader(body))}

@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the router logs it, and the refresh endpoints return it. Token refresh
   failures other than 400 and 401 now name their HTTP status instead of
   reading "refresh token was rejected".
+- Show the router's reason when `router-helper refresh-quotas` or the menu's
+  quota refresh fails, instead of `helper control request returned 502 Bad
+  Gateway`.
 
 ## [1.12.1] - 2026-11-18
 
