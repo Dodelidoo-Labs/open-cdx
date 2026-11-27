@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-11-27
+
+### Changed
+
+- Route to a degraded account as a last resort instead of answering 429.
+  A failed background refresh no longer takes an account's allowance out of
+  use: it now serves after every ready account's allowance and before paid
+  credits. If its token cannot be refreshed, the request moves on to the
+  next account. Accounts that need a new login are still never used.
+
 ### Fixed
 
 - Stop a failed background refresh from silently taking an account out of
@@ -15,11 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   allowance ran out, and requests then failed with 429. A quota or catalog
   read that OpenAI answers with 401 now retries once with a refreshed token,
   so a token revoked before its expiry heals on the next poll.
-- Route to a degraded account as a last resort instead of answering 429.
-  A failed background refresh no longer takes an account's allowance out of
-  use: it now serves after every ready account's allowance and before paid
-  credits. If its token cannot be refreshed, the request moves on to the
-  next account. Accounts that need a new login are still never used.
 - Keep the real reason when an account refresh fails. The account card shows
   it (for example `quota refresh failed: token refresh returned HTTP 503`),
   the router logs it, and the refresh endpoints return it. Token refresh
@@ -28,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Show the router's reason when `router-helper refresh-quotas` or the menu's
   quota refresh fails, instead of `helper control request returned 502 Bad
   Gateway`.
+
+Update the router image to get these changes. Update the macOS companion to
+see the router's reason in the menu when a quota refresh fails.
 
 ## [1.12.1] - 2026-11-18
 
@@ -451,7 +459,8 @@ rebuilt for this release, but updating the companion alone does not fix HTTP 413
   timezone and daylight-saving changes. Show overlapping daily-only history as
   unavailable for rolling totals instead of presenting incomplete counts.
 
-[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.12.1...HEAD
+[Unreleased]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.13.0...HEAD
+[1.13.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.12.1...v1.13.0
 [1.12.1]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.12.0...v1.12.1
 [1.12.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/Dodelidoo-Labs/open-cdx/compare/v1.10.1...v1.11.0
