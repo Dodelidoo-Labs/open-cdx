@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   allowance ran out, and requests then failed with 429. A quota or catalog
   read that OpenAI answers with 401 now retries once with a refreshed token,
   so a token revoked before its expiry heals on the next poll.
+- Route to a degraded account as a last resort instead of answering 429.
+  A failed background refresh no longer takes an account's allowance out of
+  use: it now serves after every ready account's allowance and before paid
+  credits. If its token cannot be refreshed, the request moves on to the
+  next account. Accounts that need a new login are still never used.
 - Keep the real reason when an account refresh fails. The account card shows
   it (for example `quota refresh failed: token refresh returned HTTP 503`),
   the router logs it, and the refresh endpoints return it. Token refresh

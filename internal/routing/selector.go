@@ -37,21 +37,29 @@ func (selector *Selector) SelectNative(ctx context.Context, deviceID, modelID, a
 	}
 	now := selector.now()
 	// Allowance comes first on every account; credits cost money, so they serve
-	// only when no account has allowance left.
-	var withAllowance, withCredits []storage.Account
+	// only when no account has allowance left. A degraded account only failed
+	// a background refresh, so its free allowance still beats credits and a
+	// 429. It stays behind every ready account because its reading may be
+	// stale and its token may be the broken part.
+	var withAllowance, degraded, withCredits []storage.Account
 	for _, account := range accounts {
-		if account.ID == excludedAccount || !account.Ready() || !contains(account.EntitledModels, modelID) || !accountSupportsAccessPrograms(account, modelID, programs) {
+		if account.ID == excludedAccount || account.Paused || !contains(account.EntitledModels, modelID) || !accountSupportsAccessPrograms(account, modelID, programs) {
 			continue
 		}
-		if account.QuotaAvailable(now) {
+		switch {
+		case account.QuotaAvailable(now):
 			withAllowance = append(withAllowance, account)
-		} else if openai.CreditsUsable(account.RawQuota) {
+		case account.Status == "degraded" && account.HasAllowance(now):
+			degraded = append(degraded, account)
+		case account.Ready() && openai.CreditsUsable(account.RawQuota):
 			withCredits = append(withCredits, account)
 		}
 	}
 	eligible := withAllowance
-	if len(eligible) == 0 {
-		eligible = withCredits
+	for _, tier := range [][]storage.Account{degraded, withCredits} {
+		if len(eligible) == 0 {
+			eligible = tier
+		}
 	}
 	if len(eligible) == 0 {
 		return Selection{}, ErrNoEligibleAccount

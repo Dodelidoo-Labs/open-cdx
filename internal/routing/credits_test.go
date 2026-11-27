@@ -10,6 +10,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/Dodelidoo-Labs/open-cdx/internal/storage"
 )
 
 // fakeCodexAccount is one account as the fake OpenAI backend sees it.
@@ -153,5 +156,67 @@ func TestQuotaFailoverTriesEveryAccount(t *testing.T) {
 	proxy.ServeDeviceHTTP(writer, request, DeviceContext{ID: "device"})
 	if writer.Code != http.StatusOK || backend.lastServed() != "four" {
 		t.Fatalf("status %d, served by %q: %s", writer.Code, backend.lastServed(), writer.Body.String())
+	}
+}
+
+// A primary account that only failed a background refresh must still serve
+// before Codex gets a 429, as the last resort behind every ready allowance.
+func TestDegradedAccountServesAsLastResort(t *testing.T) {
+	backend := &fakeCodexBackend{accounts: map[string]*fakeCodexAccount{}}
+	backend.set("primary", true, false)
+	backend.set("fallback", false, false)
+	backend.set("paid", false, true)
+	proxy, store, created := proxyFixture(t, &http.Client{Transport: backend}, "https://upstream.invalid", []routeFixture{
+		{stable: "primary", quota: 20, models: []string{"gpt-shared"}},
+		{stable: "fallback", quota: 0, models: []string{"gpt-shared"}},
+	})
+	ctx := context.Background()
+	send := func(stage, want string) {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-shared","input":[]}`))
+		writer := httptest.NewRecorder()
+		proxy.ServeDeviceHTTP(writer, request, DeviceContext{ID: "device"})
+		if writer.Code != http.StatusOK || backend.lastServed() != want {
+			t.Fatalf("%s: status %d, served by %q, want %q: %s", stage, writer.Code, backend.lastServed(), want, writer.Body.String())
+		}
+	}
+	if err := store.SetAccountStatus(ctx, created[0].ID, "degraded", "quota refresh failed: test"); err != nil {
+		t.Fatal(err)
+	}
+	// The fallback's stored quota still shows allowance, so it goes first; its
+	// 429 fails over to the degraded primary within the same request.
+	send("ready fallback rejected", "primary")
+
+	// A ready account with credits does not beat the degraded free allowance.
+	paid, _, err := store.PutAccount(ctx, storage.AccountInput{
+		Credential:  storage.OpenAICredential{AccountID: "paid", AccessToken: "access-paid", RefreshToken: "refresh-paid", IDToken: "id-paid", ExpiresAt: time.Now().Add(time.Hour)},
+		MaskedEmail: "paid@masked", Plan: "plus", Status: "ready", QuotaUsedPercent: 100, QuotaResetAt: time.Now().Add(time.Hour),
+		EntitledModels: []string{"gpt-shared"}, RawCatalogSnapshot: []byte(`{"models":[]}`),
+		RawQuota: []byte(`{"credits":{"has_credits":true,"unlimited":false,"balance":"120"}}`),
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	send("degraded allowance before credits", "primary")
+
+	// If the degraded account's token cannot be refreshed, credits serve
+	// instead of the request failing.
+	if err = store.UpdateAccountCredential(ctx, created[0].ID, storage.OpenAICredential{AccountID: "primary", AccessToken: "access-primary", RefreshToken: "refresh-primary", IDToken: "id-primary", ExpiresAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	send("degraded token broken", "paid")
+
+	// Accounts that need a new login are never tried.
+	if err = store.SetAccountStatus(ctx, created[0].ID, "reauthentication_required", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.SetAccountStatus(ctx, paid.ID, "reauthentication_required", "test"); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-shared","input":[]}`))
+	writer := httptest.NewRecorder()
+	proxy.ServeDeviceHTTP(writer, request, DeviceContext{ID: "device"})
+	if writer.Code == http.StatusOK {
+		t.Fatalf("an account requiring reauthentication served: %s", backend.lastServed())
 	}
 }

@@ -76,9 +76,12 @@ func (account Account) Ready() bool {
 }
 
 func (account Account) QuotaAvailable(now time.Time) bool {
-	if !account.Ready() {
-		return false
-	}
+	return account.Ready() && account.HasAllowance(now)
+}
+
+// HasAllowance reads the last stored quota regardless of status. For a
+// degraded account that reading may be stale; an upstream 429 corrects it.
+func (account Account) HasAllowance(now time.Time) bool {
 	return account.QuotaUsedPercent < 100 || (!account.QuotaResetAt.IsZero() && !now.Before(account.QuotaResetAt))
 }
 

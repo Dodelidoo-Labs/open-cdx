@@ -255,6 +255,14 @@ func (proxy *Proxy) resolveTarget(ctx context.Context, providerName, modelID, up
 			return routeTarget{}, err
 		}
 		credential, err := proxy.accounts.FreshCredential(ctx, selection.Account.ID)
+		if err != nil && !selection.Account.Ready() {
+			// A degraded last resort whose token cannot be refreshed must not
+			// fail a request that another account's credits could serve.
+			selection, err = proxy.selector.SelectNative(ctx, deviceID, modelID, affinity, selection.Account.ID, programs)
+			if err == nil {
+				credential, err = proxy.accounts.FreshCredential(ctx, selection.Account.ID)
+			}
+		}
 		if err != nil {
 			return routeTarget{}, err
 		}
